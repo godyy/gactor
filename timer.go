@@ -133,7 +133,8 @@ func (tm *timerManager) createTimer(repeat bool, expiretAt int64, d time.Duratio
 		callback: callback,
 	}
 	tm.addTimer(t)
-	if t == tm.timerHeap.Top() {
+	head := tm.timerHeap.Top()
+	if head == nil || t == head {
 		tm.resetSysTimer(t.expireAt)
 	}
 	return t.id
