@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/godyy/gactor/core/timewheel"
 	"github.com/godyy/gutils/log"
 
 	pkgerrors "github.com/pkg/errors"
@@ -43,13 +44,13 @@ func TestService(t *testing.T) {
 	actorDefines := []ActorDefineImpl{
 		&ActorDefine{
 			ActorDefineCommon: &ActorDefineCommon{
-				Name:                  "test",
-				Category:              1,
-				Priority:              1,
-				MessageBoxSize:        1000,
-				AsyncRPCCallQueueSize: 1,
-				RecycleTime:           0,
-				Handler:               testHandlerChain.Handle,
+				Name:                       "test",
+				Category:                   1,
+				Priority:                   1,
+				MessageBoxSize:             1000,
+				MaxCompletedAsyncRPCAmount: 1,
+				RecycleTime:                0,
+				Handler:                    testHandlerChain.Handle,
 			},
 			BehaviorCreator: func(a Actor) ActorBehavior {
 				return &testActor{Actor: a}
@@ -84,7 +85,13 @@ func TestService(t *testing.T) {
 	}
 
 	svcConfig := &ServiceConfig{
-		ActorDefines:  actorDefines,
+		ActorDefines: actorDefines,
+		TimeWheelLevels: []timewheel.LevelConfig{
+			{Name: "100 ms", Span: 100 * time.Millisecond, Slots: 10},
+			{Name: "s", Span: 1 * time.Second, Slots: 60},
+			{Name: "min", Span: 1 * time.Minute, Slots: 60},
+			{Name: "h", Span: 1 * time.Hour, Slots: 24},
+		},
 		DefRPCTimeout: 100 * time.Millisecond,
 		MaxRTT:        200,
 		Handler:       svcHandler,
@@ -266,7 +273,7 @@ func (a *testActor) GetActor() Actor {
 
 func (a *testActor) OnStart() error {
 	a.name = "test:" + a.ActorUID().String()
-	a.StartTimerRepeat(100*time.Millisecond, nil, func(args *TimerCallbackArgs) error {
+	a.StartTimer(100*time.Millisecond, true, nil, func(args *ActorTimerArgs) {
 		ta := args.Actor.Behavior().(*testActor)
 		ta.tCount++
 		logger.Debugf("actor %s tick", a.ActorUID())
@@ -288,9 +295,9 @@ func (a *testActor) OnStart() error {
 				msgId:   msgIdPing,
 				payload: &testMessagePing{Time: time.Now()},
 			}
-			if err := ta.AsyncRPC(context.Background(), targetUID, &params, func(_ Actor, call RPCCall) {
+			if err := ta.AsyncRPC(context.Background(), targetUID, &params, func(_ Actor, resp *RPCResp) {
 				reply := testS2SMessage{}
-				if err := call.DecodePayload(&reply); err != nil {
+				if err := resp.DecodeReply(&reply); err != nil {
 					logger.Errorf("actor %s decode rpc async payload, %v", a.ActorUID(), err)
 				}
 			}); err != nil {
@@ -298,10 +305,6 @@ func (a *testActor) OnStart() error {
 			}
 		}
 
-		//if ta.tCount > 5 {
-		//	return ErrStopTimer
-		//}
-		return nil
 	})
 	return nil
 }

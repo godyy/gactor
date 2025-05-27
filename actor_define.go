@@ -9,6 +9,9 @@ import (
 	pkgerrors "github.com/pkg/errors"
 )
 
+// ErrActorDefineNotExists Actor 定义不存在.
+var ErrActorDefineNotExists = errors.New("gactor: actor define not exists")
+
 // ActorDefineImpl Actor 定义实现接口封装.
 type ActorDefineImpl interface {
 	// init 初始化配置, 验证数据是否有效.
@@ -90,9 +93,15 @@ type ActorDefineCommon struct {
 	// MessageBoxSize 表示 Actor 的信箱大小.
 	MessageBoxSize int
 
-	// AsyncRPCCallQueueSize 适配异步 RPC 调用, 设置用于接收已完成 RPC 调用对象
-	// 的队列大小. 值大于 0 时, 才可通过 Actor 发起异步 RPC 调用.
-	AsyncRPCCallQueueSize int
+	// MaxTriggeredTimerAmount 表示 Actor 能够容纳的已触发的待执行定时器的最
+	// 大数量. 当容量达到上限时, 新触发的定时器将等待先前的定时器执行后才能继续排
+	// 队. 默认值 10.
+	MaxTriggeredTimerAmount int
+
+	// MaxCompletedAsyncRPCAmount 表示能够容纳的已完成异步 RPC 调用的最大数
+	// 量. 当容量达到上限时, 新完成的异步 RPC 调用将等待先前的异步 RPC 调用执行
+	// 后才能继续排队. 默认值 1.
+	MaxCompletedAsyncRPCAmount int
 
 	// RecycleTime 表示 Actor 的回收时间. Actor 空闲超过该时间后会被系统回收.
 	RecycleTime time.Duration
@@ -107,7 +116,15 @@ func (ad *ActorDefineCommon) init() error {
 	}
 
 	if ad.MessageBoxSize <= 0 {
-		return errors.New("messageBoxSize <= 0")
+		return errors.New("messageBoxSize must be greater than 0")
+	}
+
+	if ad.MaxTriggeredTimerAmount <= 0 {
+		ad.MaxTriggeredTimerAmount = 10
+	}
+
+	if ad.MaxCompletedAsyncRPCAmount <= 0 {
+		ad.MaxCompletedAsyncRPCAmount = 1
 	}
 
 	if ad.Handler == nil {

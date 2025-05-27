@@ -14,7 +14,7 @@ func (a *actor) RPC(ctx context.Context, to gactor.ActorUID, params any, reply a
 	return RPC(a.Actor, ctx, to, params, reply)
 }
 
-func (a *actor) AsyncRPC(ctx context.Context, to gactor.ActorUID, params any, callback gactor.ActorRPCCallback) error {
+func (a *actor) AsyncRPC(ctx context.Context, to gactor.ActorUID, params any, callback gactor.ActorRPCFunc) error {
 	return RPCAsync(a.Actor, ctx, to, params, callback)
 }
 
@@ -26,6 +26,6 @@ func (a *cActor) RPC(ctx context.Context, to gactor.ActorUID, params any, reply 
 	return RPC(a.CActor, ctx, to, params, reply)
 }
 
-func (a *cActor) AsyncRPC(ctx context.Context, to gactor.ActorUID, params any, callback gactor.ActorRPCCallback) error {
+func (a *cActor) AsyncRPC(ctx context.Context, to gactor.ActorUID, params any, callback gactor.ActorRPCFunc) error {
 	return RPCAsync(a.CActor, ctx, to, params, callback)
 }

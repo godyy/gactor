@@ -15,7 +15,7 @@ import (
 type handler struct {
 	*handlers.RpcHandler
 
-	rpcGetUserNameCallback gactor.ContextRPCCallback
+	rpcGetUserNameCallback gactor.ContextRPCFunc
 }
 
 func (h *handler) server(ctx *gactor.Context) *actors.Server {

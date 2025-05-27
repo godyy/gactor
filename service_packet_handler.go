@@ -162,6 +162,12 @@ func (s *Service) onLocalPacket(p Packet) error {
 		return fmt.Errorf("local packet type %d not support", pt)
 	}
 
+	s.mtxState.RLock()
+	defer s.mtxState.RUnlock()
+	if s.state != serviceStateStarted && s.state != serviceStateStopping {
+		return serviceStateErr(s.state)
+	}
+
 	return handler(s, s.nodeId(), p)
 }
 

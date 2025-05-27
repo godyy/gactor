@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
 	"sync"
 	"time"
 
+	"github.com/godyy/gactor/core/timewheel"
 	"github.com/godyy/gactor/internal/utils"
 
 	"github.com/godyy/gutils/log"
@@ -36,17 +38,28 @@ type ServiceConfig struct {
 	// required.
 	ActorDefines []ActorDefineImpl
 
+	// TimeWheelLevels 时间轮配置.
+	TimeWheelLevels []timewheel.LevelConfig
+
+	// MaxTimerDelay 最大定时器延迟. 默认值为 TimeWheelLevels 配置支持的最大值.
+	MaxTimerDelay time.Duration
+
+	// MaxTriggerdTimerAmount 表示能够容纳的已触发的待执行定时器的最大数量. 当容量达
+	// 到上限时, 新触发的定时器将等待先前的定时器执行后才能继续排队. 默认值 1000.
+	MaxTriggerdTimerAmount int
+
 	// DefRPCTimeout 默认 RPC 超时时间. 默认值 5s.
 	// 网络传输保留毫秒级精度, 向下取整.
 	DefRPCTimeout time.Duration
 
-	// RPCCallbackChanSize 待执行的 RPC 回调 chan 大小.
-	// 默认值 1000.
-	RPCCallbackChanSize int
+	// MaxCompletedRPCAmount 表示能够容纳的已完成调用且排队等待执行回调的最大 RPC
+	// 调用数量. 当容量达到上限时, 新完成的 RPC 调用将等待先前的 RPC 调用执行回调后才
+	// 能继续排队. 默认值 1000.
+	MaxCompletedRPCAmount int
 
-	// ActorReceiveAsyncRPCCallTimeout Actor 在接收已完成异步 RPC 调用时的超时时间.
-	// 默认值 1s.
-	ActorReceiveAsyncRPCCallTimeout time.Duration
+	// ActorReceiveCompletedAsyncRPCTimeout Actor 在接收已完成异步 RPC 调用时的
+	// 超时时间. 默认值 1s.
+	ActorReceiveCompletedAsyncRPCTimeout time.Duration
 
 	// MaxRTT 最大网络延迟 ms, 用于控制因为网络RTT导致的超时衰减.
 	// 默认值 50ms.
@@ -62,16 +75,33 @@ func (c *ServiceConfig) init() {
 		panic("gactor: ServiceConfig: ActorDefines not specified")
 	}
 
+	if len(c.TimeWheelLevels) == 0 {
+		panic("gactor: ServiceConfig: TimeWheelLevels not specified")
+	}
+
+	timeWheelMaxDelay := time.Duration(0)
+	timeWheelHLevel := c.TimeWheelLevels[len(c.TimeWheelLevels)-1]
+	timeWheelMaxDelay = timeWheelHLevel.Span * time.Duration(timeWheelHLevel.Slots)
+	if c.MaxTimerDelay <= 0 {
+		c.MaxTimerDelay = timeWheelMaxDelay
+	} else if c.MaxTimerDelay > timeWheelMaxDelay {
+		panic("gactor: ServiceConfig: MaxTimerDelay exceeds TimeWheelLevels")
+	}
+
+	if c.MaxTriggerdTimerAmount <= 0 {
+		c.MaxTriggerdTimerAmount = 1000
+	}
+
 	if c.DefRPCTimeout <= 0 {
 		c.DefRPCTimeout = 5 * time.Second
 	}
 
-	if c.ActorReceiveAsyncRPCCallTimeout <= 0 {
-		c.ActorReceiveAsyncRPCCallTimeout = 1 * time.Second
+	if c.MaxCompletedRPCAmount <= 0 {
+		c.MaxCompletedRPCAmount = 1000
 	}
 
-	if c.RPCCallbackChanSize <= 0 {
-		c.RPCCallbackChanSize = 1000
+	if c.ActorReceiveCompletedAsyncRPCTimeout <= 0 {
+		c.ActorReceiveCompletedAsyncRPCTimeout = 1 * time.Second
 	}
 
 	if c.MaxRTT <= 0 {
@@ -136,21 +166,33 @@ func serviceStateErr(state int8) error {
 	return err
 }
 
+// triggeredTimer 已触发的定时器.
+type triggeredTimer struct {
+	cb   TimerFunc
+	args TimerArgs
+}
+
 // Service Actor 服务.
 type Service struct {
-	*actorDefineSet                         // 集成 Actor 定义.
-	*rpcManager                             // RPC 调用管理器.
-	cfg             *ServiceConfig          // 配置.
-	priorityActors  map[int]*priorityActors // 按优先级管理的 Actor 集合.
-	oriLogger       log.Logger              // 原始日志工具.
-	logger          log.Logger              // 日志.
-	cStopped        chan struct{}           // 已停止信号.
+	*actorDefineSet                // 集成 Actor 定义.
+	*rpcManager                    // RPC 调用管理器.
+	cfg             *ServiceConfig // 配置.
+	oriLogger       log.Logger     // 原始日志工具.
+	logger          log.Logger     // 日志.
 
-	mtxState sync.RWMutex // 状态读写锁.
-	state    int8         // 状态.
+	mtxState sync.RWMutex  // 状态读写锁.
+	state    int8          // 状态.
+	cStopped chan struct{} // 已停止信号.
 
-	mtxData          sync.RWMutex // 数据读写锁.
-	maxPriorityIndex int          // 当前最大优先级索引.
+	mtxActor              sync.RWMutex            // Actor 读写锁.
+	priorityActors        map[int]*priorityActors // 按优先级管理的 Actor 集合.
+	maxActorPriorityIndex int                     // 当前 Actor 最大优先级索引.
+
+	mtxTimer          sync.RWMutex         // 定时器读写锁.
+	timeWheel         *timewheel.TimeWheel // 时间轮.
+	timeWheelTicker   *time.Ticker         // 时间轮 ticker.
+	lastTickTimeWheel time.Time            // 上次时间轮的 tick 时间.
+	triggeredTimers   chan triggeredTimer  // 已触发的定时器, 等待执行.
 }
 
 func NewService(cfg *ServiceConfig, option ...ServiceOption) *Service {
@@ -167,13 +209,21 @@ func NewService(cfg *ServiceConfig, option ...ServiceOption) *Service {
 	}
 
 	s := &Service{
-		actorDefineSet:   actorDefineSet,
-		rpcManager:       newRPCManager(cfg.Handler.GetTimeSystem(), cfg.RPCCallbackChanSize),
-		cfg:              cfg,
-		priorityActors:   priorityActors,
-		cStopped:         make(chan struct{}),
-		state:            serviceStateInit,
-		maxPriorityIndex: -1,
+		actorDefineSet:        actorDefineSet,
+		cfg:                   cfg,
+		state:                 serviceStateInit,
+		cStopped:              make(chan struct{}),
+		priorityActors:        priorityActors,
+		maxActorPriorityIndex: -1,
+		triggeredTimers:       make(chan triggeredTimer, cfg.MaxTriggerdTimerAmount),
+	}
+
+	s.rpcManager = newRPCManager(s, cfg.MaxCompletedRPCAmount)
+
+	if timeWheel, err := timewheel.NewTimeWheel(cfg.TimeWheelLevels, s.timerExecutor); err != nil {
+		panic(err)
+	} else {
+		s.timeWheel = timeWheel
 	}
 
 	for _, o := range option {
@@ -262,8 +312,18 @@ func (s *Service) Start() error {
 	}
 	defer s.unlockState(false)
 
+	// rpc.
 	s.rpcManager.start()
+
+	// timer.
+	s.lastTickTimeWheel = s.getTimeSystem().Now()
+	s.timeWheelTicker = time.NewTicker(s.cfg.TimeWheelLevels[0].Span)
+	for i := 0; i < runtime.NumCPU(); i++ {
+		go s.execTriggeredTimers()
+	}
+
 	s.state = serviceStateStarted
+
 	go s.loop()
 
 	s.logger.Info("started")
@@ -281,39 +341,8 @@ func (s *Service) Stop() error {
 
 	s.logger.Info("stopping")
 
-	// 按照优先级层级依次停机.
-	// 每个层级需要一次性停机成功达到阈值, 才能继续往上层停机.
-	var (
-		priorityIndex int = -1
-		counter       int
-	)
-	for {
-		s.mtxData.RLock()
-		if priorityIndex != s.maxPriorityIndex {
-			counter = 0
-			priorityIndex = s.maxPriorityIndex
-		}
-		s.mtxData.RUnlock()
-
-		// 停机完成.
-		if priorityIndex < 0 {
-			break
-		}
-
-		// 停机当前层级.
-		if s.stopPriority(priorityIndex) {
-			counter++
-			if counter >= 3 {
-				// 达到阈值.
-				s.mtxData.Lock()
-				s.nextMaxPriorityIndex(priorityIndex)
-				s.mtxData.Unlock()
-				counter = 0
-			}
-		}
-
-		time.Sleep(1 * time.Millisecond)
-	}
+	s.timeWheelTicker.Stop()
+	s.stopActors()
 
 	s.mtxState.Lock()
 	s.state = serviceStateStopped
@@ -325,21 +354,58 @@ func (s *Service) Stop() error {
 	return nil
 }
 
-// stopPriority 根据优先级索引停机执行优先级层级.
-func (s *Service) stopPriority(priorityIndex int) bool {
+// stopActors 停机所有 Actor.
+func (s *Service) stopActors() {
+	// 按照优先级层级依次停机.
+	// 每个层级需要一次性停机成功达到阈值, 才能继续往上层停机.
+	var (
+		priorityIndex int = -1
+		counter       int
+	)
+	for {
+		s.mtxActor.RLock()
+		if priorityIndex != s.maxActorPriorityIndex {
+			counter = 0
+			priorityIndex = s.maxActorPriorityIndex
+		}
+		s.mtxActor.RUnlock()
+
+		// 停机完成.
+		if priorityIndex < 0 {
+			break
+		}
+
+		// 停机当前层级.
+		if s.stopPriorityActors(priorityIndex) {
+			counter++
+			if counter >= 3 {
+				// 达到阈值.
+				s.mtxActor.Lock()
+				s.nextMaxActorPriorityIndex(priorityIndex)
+				s.mtxActor.Unlock()
+				counter = 0
+			}
+		}
+
+		time.Sleep(1 * time.Millisecond)
+	}
+}
+
+// stopPriorityActors 根据优先级索引停机执行优先级层级.
+func (s *Service) stopPriorityActors(priorityIndex int) bool {
 	priority := s.getPriority(priorityIndex)
 	priorityActors := s.getPriorityActors(priority)
 	stopped := true
 	for _, categoryActors := range priorityActors.categoryActors {
-		if !s.stopCategory(categoryActors) {
+		if !s.stopCategoryActors(categoryActors) {
 			stopped = false
 		}
 	}
 	return stopped
 }
 
-// stopCategory 停机分类.
-func (s *Service) stopCategory(categoryActors *categoryActors) bool {
+// stopCategoryActors 停机分类.
+func (s *Service) stopCategoryActors(categoryActors *categoryActors) bool {
 	stopped := true
 	categoryActors.actors.Traverse(func(id int64, actor actorImpl) bool {
 		_ = actor.stop()
@@ -397,30 +463,17 @@ func (s *Service) StartActor(ctx context.Context, uid ActorUID) error {
 	}
 }
 
-// loop 主循环.
-func (s *Service) loop() {
-	for {
-		select {
-		case <-s.rpcManager.chanTick():
-			s.rpcManager.tick()
-		case <-s.cStopped:
-			s.rpcManager.stop()
-			return
-		}
+// updateMaxActorPriorityIndex 更新 Actor最大优先级索引.
+func (s *Service) updateMaxActorPriorityIndex(index int) {
+	if index > s.maxActorPriorityIndex {
+		s.maxActorPriorityIndex = index
 	}
 }
 
-// updateMaxPriorityIndex 更新最大优先级索引.
-func (s *Service) updateMaxPriorityIndex(index int) {
-	if index > s.maxPriorityIndex {
-		s.maxPriorityIndex = index
-	}
-}
-
-// nextMaxPriorityIndex 更新最大优先级索引至下一级.
-func (s *Service) nextMaxPriorityIndex(index int) {
-	if index == s.maxPriorityIndex {
-		s.maxPriorityIndex--
+// nextMaxActorPriorityIndex 更新 Actor 最大优先级索引至下一级.
+func (s *Service) nextMaxActorPriorityIndex(index int) {
+	if index == s.maxActorPriorityIndex {
+		s.maxActorPriorityIndex--
 	}
 }
 
@@ -445,7 +498,7 @@ func (s *Service) startActor(ctx context.Context, uid ActorUID) (actorImpl, erro
 	// 获取 Actor 定义.
 	define := s.getDefine(uid.Category)
 	if define == nil {
-		return nil, fmt.Errorf("actor define of category %d not found", uid.Category)
+		return nil, ErrActorDefineNotExists
 	}
 
 	defineCommon := define.common()
@@ -495,9 +548,9 @@ func (s *Service) startActor(ctx context.Context, uid ActorUID) (actorImpl, erro
 
 				// 更新最大优先级索引.
 				priorityIndex := s.getPriorityIndex(defineCommon.Priority)
-				s.mtxData.Lock()
-				s.updateMaxPriorityIndex(priorityIndex)
-				s.mtxData.Unlock()
+				s.mtxActor.Lock()
+				s.updateMaxActorPriorityIndex(priorityIndex)
+				s.mtxActor.Unlock()
 
 				// 若当前不存在相同 id 的正在停机的 Actor, 执行启动逻辑.
 				// 否则, 等待 Actor 停机完成再出发启动逻辑.
@@ -532,6 +585,34 @@ func (s *Service) startActor(ctx context.Context, uid ActorUID) (actorImpl, erro
 	}
 }
 
+// refActor 引用 Actor.
+func (s *Service) refActor(uid ActorUID) (actorImpl, error) {
+	if err := s.lockState(serviceStateStarted, true); err != nil {
+		return nil, err
+	}
+	defer s.unlockState(true)
+
+	// 获取 Actor 定义.
+	define := s.getDefine(uid.Category)
+	if define == nil {
+		return nil, ErrActorDefineNotExists
+	}
+	defineCommon := define.common()
+
+	// 获取 Actor 分类集合.
+	categoryActors := s.getCategoryActors(defineCommon.Priority, defineCommon.Category)
+	categoryActors.lock(true)
+	defer categoryActors.unlock(true)
+
+	// 引用 Actor.
+	actor, err := categoryActors.refActor(uid.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	return actor, nil
+}
+
 // newActorCore 创建 Actor.
 func (s *Service) createActor(uid ActorUID) actorImpl {
 	actorDefine := s.defineMap[uid.Category]
@@ -543,9 +624,141 @@ func (s *Service) getNodeIdOfActor(uid ActorUID) (string, error) {
 	return getNodeIdOfActor(s.cfg.Handler.GetMetaDriver(), uid)
 }
 
+// StartTimer 启动定时器.
+func (s *Service) StartTimer(d time.Duration, repeat bool, args any, cb TimerFunc) TimerId {
+	if cb == nil {
+		panic("gactor: cb is nil")
+	}
+
+	if err := s.lockState(serviceStateStarted, true); err != nil {
+		return TimerIdNone
+	}
+	defer s.unlockState(true)
+
+	s.mtxTimer.RLock()
+	defer s.mtxTimer.RUnlock()
+
+	now := s.getTimeSystem().Now()
+	offset := now.Sub(s.lastTickTimeWheel)
+	tid, _ := s.timeWheel.AddTimer(timewheel.TimerOptions{
+		Delay:    d,
+		Offset:   offset,
+		Periodic: repeat,
+		Func:     cb,
+		Args:     args,
+	})
+
+	return tid
+}
+
+// actorTimerArgs Actor 定时器.
+type actorTimerArgs struct {
+	uid  ActorUID       // Actor UID.
+	cb   ActorTimerFunc // 回调函数.
+	args any            // 参数.
+}
+
+// startActorTimer 启动 Actor 定时器.
+func (s *Service) startActorTimer(uid ActorUID, d time.Duration, repeat bool, args any, cb ActorTimerFunc) TimerId {
+	if cb == nil {
+		panic("gactor: cb is nil")
+	}
+
+	return s.StartTimer(d, repeat, &actorTimerArgs{
+		uid:  uid,
+		cb:   cb,
+		args: args,
+	}, s.execActorTimer)
+}
+
+// execActorTimer 执行 Actor 定时器.
+func (s *Service) execActorTimer(args TimerArgs) {
+	aargs := args.Args.(*actorTimerArgs)
+
+	actor, err := s.refActor(aargs.uid)
+	if err != nil {
+		return
+	}
+
+	defer actor.core().deref()
+
+	actor.core().receiveTriggerdTimer(args.TID, aargs.args, aargs.cb)
+}
+
+// StopTimer 停止定时器.
+func (s *Service) StopTimer(tid TimerId) {
+	if err := s.lockState(serviceStateStarted, true); err != nil {
+		return
+	}
+	defer s.unlockState(true)
+
+	s.timeWheel.RemoveTimer(tid)
+}
+
+// tickTimer 推进时间轮.
+func (s *Service) tickTimeWheel() {
+	// 已流逝的 tick 数.
+	elapsedTicks := int64(0)
+
+	s.mtxTimer.Lock()
+
+	// 计算已流逝的 tick 数.
+	tickSpan := s.cfg.TimeWheelLevels[0].Span
+	now := s.getTimeSystem().Now()
+	elapsedTicks = int64(now.Sub(s.lastTickTimeWheel) / tickSpan)
+	if elapsedTicks <= 0 {
+		s.mtxTimer.Unlock()
+		return
+	}
+
+	// 更新时间轮的 tick 时间.
+	s.lastTickTimeWheel = s.lastTickTimeWheel.Add(tickSpan * time.Duration(elapsedTicks))
+
+	s.mtxTimer.Unlock()
+
+	// 推进时间轮.
+	for i := int64(0); i < elapsedTicks; i++ {
+		s.timeWheel.Tick(1)
+	}
+}
+
+// timerExecutor 定时器执行回调.
+func (s *Service) timerExecutor(tf TimerFunc, args timewheel.TimerArgs) {
+	select {
+	case s.triggeredTimers <- triggeredTimer{
+		cb:   tf,
+		args: args,
+	}:
+	case <-s.cStopped:
+	}
+}
+
+// execTriggerTimers 执行已触发的定时器.
+func (s *Service) execTriggeredTimers() {
+	for {
+		select {
+		case t := <-s.triggeredTimers:
+			s.execTriggeredTimer(t)
+		case <-s.cStopped:
+			return
+		}
+	}
+}
+
+// execTimer 执行定时器.
+func (s *Service) execTriggeredTimer(t triggeredTimer) {
+	defer func() {
+		if x := recover(); x != nil {
+			s.getLogger().ErrorFields("exec timer panic", lfdPanic(x))
+		}
+	}()
+
+	t.cb(t.args)
+}
+
 // doRPC 代理 from Actor 向 to 指向的 Actor 发起 RPC 调用.
-// ctx 用于控制超时. params 表示请求参数. callback 为回调函数.
-func (s *Service) doRPC(ctx context.Context, cancel context.CancelFunc, to ActorUID, params any, callback RPCCallback) error {
+// ctx 用于控制超时. params 表示请求参数. cb 为回调函数.
+func (s *Service) doRPC(ctx context.Context, cancel context.CancelFunc, to ActorUID, params any, cb RPCFunc) error {
 	var (
 		toNodeId string
 		call     *rpcCall
@@ -569,7 +782,7 @@ func (s *Service) doRPC(ctx context.Context, cancel context.CancelFunc, to Actor
 	}
 
 	// 创建 RPC 调用实例.
-	call, err = s.rpcManager.createCall(s, to, deadline, callback)
+	call, err = s.rpcManager.createCall(to, deadline, cb)
 	if err != nil {
 		return err
 	}
@@ -613,14 +826,25 @@ func (s *Service) doRPC(ctx context.Context, cancel context.CancelFunc, to Actor
 	return nil
 }
 
-// rpcDoneCallback 同步 RPC 回调封装.
-type rpcDoneCallback struct {
-	done chan RPCCall // 完成信号.
+// rpcDoneFunc 同步 RPC 回调封装.
+type rpcDoneFunc struct {
+	done  chan struct{} // 完成信号.
+	reply any           // 响应参数.
+	err   error         // 错误信息.
 }
 
-func (cb *rpcDoneCallback) callback(call RPCCall) {
-	cb.done <- call
-	close(cb.done)
+func (cb *rpcDoneFunc) invoke(resp *RPCResp) {
+	defer close(cb.done)
+
+	if err := resp.Err(); err != nil {
+		cb.err = err
+		return
+	}
+
+	if err := resp.DecodeReply(cb.reply); err != nil {
+		cb.err = err
+		return
+	}
 }
 
 // rpc 向 to 指向的 Actor 发起 RPC 调用.
@@ -638,8 +862,11 @@ func (s *Service) rpc(ctx context.Context, to ActorUID, params any, reply any) e
 	}
 
 	// 执行 RPC 调用.
-	doneCallback := rpcDoneCallback{done: make(chan RPCCall, 1)}
-	if err := s.doRPC(ctx, cancel, to, params, doneCallback.callback); err != nil {
+	doneFunc := rpcDoneFunc{
+		done:  make(chan struct{}),
+		reply: reply,
+	}
+	if err := s.doRPC(ctx, cancel, to, params, doneFunc.invoke); err != nil {
 		if cancel != nil {
 			cancel()
 		}
@@ -647,13 +874,9 @@ func (s *Service) rpc(ctx context.Context, to ActorUID, params any, reply any) e
 	}
 
 	// 等待调用完成(超时).
-	call := <-doneCallback.done
+	<-doneFunc.done
 
-	// 确保 rpcCall 对象能够正确释放.
-	defer call.release()
-
-	// 解码响应参数.
-	return call.DecodePayload(reply)
+	return doneFunc.err
 }
 
 // RPC 向 to 指向的 Actor 发起 RPC 调用. 若 Service 未启动或停机, 返回错误.
@@ -666,8 +889,8 @@ func (s *Service) RPC(ctx context.Context, to ActorUID, params any, reply any) e
 }
 
 // asyncRPC 向 to 指向的 Actor 发起异步 RPC 调用. ctx 用于控制超时时间.
-// params 表示请求参数. callback 表示异步回调函数.
-func (s *Service) asyncRPC(ctx context.Context, to ActorUID, params any, callback RPCCallback) error {
+// params 表示请求参数. cb 表示异步回调函数.
+func (s *Service) asyncRPC(ctx context.Context, to ActorUID, params any, cb RPCFunc) error {
 	var cancel context.CancelFunc
 
 	// 优先检查 ctx 是否done.
@@ -680,7 +903,7 @@ func (s *Service) asyncRPC(ctx context.Context, to ActorUID, params any, callbac
 	}
 
 	// 执行 RPC 调用.
-	if err := s.doRPC(ctx, cancel, to, params, callback); err != nil {
+	if err := s.doRPC(ctx, cancel, to, params, cb); err != nil {
 		if cancel != nil {
 			cancel()
 		}
@@ -691,12 +914,12 @@ func (s *Service) asyncRPC(ctx context.Context, to ActorUID, params any, callbac
 }
 
 // AsyncRPC 向 to 指向的 Actor 发起异步 RPC 调用. 若 Service 未启动或停机, 返回错误.
-func (s *Service) AsyncRPC(ctx context.Context, to ActorUID, params any, callback RPCCallback) error {
+func (s *Service) AsyncRPC(ctx context.Context, to ActorUID, params any, cb RPCFunc) error {
 	if err := s.lockState(serviceStateStarted, true); err != nil {
 		return err
 	}
 	defer s.unlockState(true)
-	return s.asyncRPC(ctx, to, params, callback)
+	return s.asyncRPC(ctx, to, params, cb)
 }
 
 // cast 代理 from Actor 向 to 指向的 Actor 投递消息.
@@ -849,6 +1072,23 @@ func (s *Service) sendPacket(ctx context.Context, nodeId string, ph packetHead, 
 // getTimeSystem 获取时间系统.
 func (s *Service) getTimeSystem() TimeSystem {
 	return s.cfg.Handler.GetTimeSystem()
+}
+
+// loop 主循环.
+func (s *Service) loop() {
+	for {
+		select {
+		case <-s.timeWheelTicker.C:
+			s.tickTimeWheel()
+		case <-s.rpcManager.chanTick():
+			s.rpcManager.tick()
+		case <-s.cStopped:
+			s.rpcManager.stop()
+			s.rpcManager = nil
+			s.timeWheel.Stop()
+			return
+		}
+	}
 }
 
 // actorStarter Actor 启动器.

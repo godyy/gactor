@@ -8,6 +8,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/godyy/gactor/core/timewheel"
 	"github.com/godyy/gactor/internal/examples/s2s/handlers/server"
 	"github.com/godyy/gactor/internal/examples/s2s/handlers/user"
 
@@ -38,13 +39,13 @@ var (
 	actorDefines = []gactor.ActorDefineImpl{
 		&gactor.CActorDefine{
 			ActorDefineCommon: &gactor.ActorDefineCommon{
-				Name:                  "user",
-				Category:              actors.CategoryUser,
-				Priority:              10,
-				MessageBoxSize:        10,
-				AsyncRPCCallQueueSize: 1,
-				RecycleTime:           0,
-				Handler:               user.Handler,
+				Name:                       "user",
+				Category:                   actors.CategoryUser,
+				Priority:                   10,
+				MessageBoxSize:             10,
+				MaxCompletedAsyncRPCAmount: 1,
+				RecycleTime:                0,
+				Handler:                    user.Handler,
 			},
 			BehaviorCreator: func(actor gactor.CActor) gactor.CActorBehavior {
 				return actors.NewUser(actor)
@@ -153,12 +154,18 @@ func main() {
 		s1.netAgent = &netAgent{agent}
 	}
 	s1.Service = gactor.NewService(&gactor.ServiceConfig{
-		ActorDefines:                    actorDefines,
-		DefRPCTimeout:                   0,
-		ActorReceiveAsyncRPCCallTimeout: 0,
-		RPCCallbackChanSize:             0,
-		MaxRTT:                          0,
-		Handler:                         s1,
+		ActorDefines: actorDefines,
+		TimeWheelLevels: []timewheel.LevelConfig{
+			{Name: "100ms", Span: 100 * time.Millisecond, Slots: 10},
+			{Name: "s", Span: 1 * time.Second, Slots: 60},
+			{Name: "m", Span: 1 * time.Minute, Slots: 60},
+			{Name: "hour", Span: 1 * time.Hour, Slots: 24},
+		},
+		DefRPCTimeout:                        0,
+		ActorReceiveCompletedAsyncRPCTimeout: 0,
+		MaxCompletedRPCAmount:                0,
+		MaxRTT:                               0,
+		Handler:                              s1,
 	})
 	if err := s1.Service.Start(); err != nil {
 		panic(pkgerrors.WithMessage(err, "start service 1 actor"))
@@ -189,12 +196,18 @@ func main() {
 		s2.netAgent = &netAgent{agent}
 	}
 	s2.Service = gactor.NewService(&gactor.ServiceConfig{
-		ActorDefines:                    actorDefines,
-		DefRPCTimeout:                   0,
-		ActorReceiveAsyncRPCCallTimeout: 0,
-		RPCCallbackChanSize:             0,
-		MaxRTT:                          0,
-		Handler:                         s2,
+		ActorDefines: actorDefines,
+		TimeWheelLevels: []timewheel.LevelConfig{
+			{Name: "100ms", Span: 100 * time.Millisecond, Slots: 10},
+			{Name: "s", Span: 1 * time.Second, Slots: 60},
+			{Name: "m", Span: 1 * time.Minute, Slots: 60},
+			{Name: "hour", Span: 1 * time.Hour, Slots: 24},
+		},
+		DefRPCTimeout:                        0,
+		ActorReceiveCompletedAsyncRPCTimeout: 0,
+		MaxCompletedRPCAmount:                0,
+		MaxRTT:                               0,
+		Handler:                              s2,
 	})
 	if err := s2.Service.Start(); err != nil {
 		panic(pkgerrors.WithMessage(err, "start service 2 actor"))

@@ -111,9 +111,13 @@ func actorLoop(a actorImpl) {
 				core.resetRecycleTimer(false)
 			}
 
-		case call := <-core.asyncRPCCalls:
+		case timer := <-core.triggeredTimer:
+			// 处理定时器.
+			actorExecTimer(a, &timer)
+
+		case call := <-core.completedAsyncRPC:
 			// 处理异步 RPC 调用.
-			call.invokeCallback(a)
+			actorInvokeAsyncRPCFunc(a, &call)
 
 		case <-core.sigPrepareStop:
 			// 清空信箱.
@@ -130,26 +134,20 @@ func actorLoop(a actorImpl) {
 
 			actorStopped(a)
 			return
-
-		case <-core.timerManager.chanTick():
-			// 处理定时器.
-			actorTimerTick(a)
 		}
 	}
 }
 
 // actorOnRecycle Actor 回收定时器回调.
-func actorOnRecycle(args *TimerCallbackArgs) error {
+func actorOnRecycle(args *ActorTimerArgs) {
 	a := args.Actor.(actorImpl)
 	if args.TID != a.core().recycleTimerId {
-		return nil
+		return
 	}
 
 	if err := a.stop(); err != nil {
 		a.core().getLogger().ErrorFields("stop failed on recycle", lfdError(err))
 	}
-
-	return nil
 }
 
 // actorDrain Actor 清空消息.
@@ -169,30 +167,43 @@ func actorDrain(a actorImpl, err error) {
 				}
 			}
 			msg.release()
-		case call := <-core.asyncRPCCalls:
-			call.invokeCallback(a)
+		case call := <-core.completedAsyncRPC:
+			actorInvokeAsyncRPCFunc(a, &call)
 		default:
 			drained = true
 		}
 	}
 }
 
-// actorTimerTick Actor 处理定时器 tick.
-func actorTimerTick(a actorImpl) {
+// actorExecTimer Actor 执行定时器.
+func actorExecTimer(a actorImpl, timer *actorTriggeredTimer) {
 	core := a.core()
 	if !core.isRunning() || !core.service().isRunning() {
 		return
 	}
-	core.timerManager.tick(a)
+	args := ActorTimerArgs{
+		Actor: a,
+		TID:   timer.tid,
+		Args:  timer.args,
+	}
+	timer.f(&args)
+}
+
+// actorInvokeAsyncRPCFunc 调用异步 RPC 回调.
+func actorInvokeAsyncRPCFunc(a actorImpl, call *actorCompletedAsyncRPC) {
+	resp := RPCResp{
+		svc:     a.core().service(),
+		payload: call.payload,
+		err:     call.err,
+	}
+	call.cb(a, &resp)
+	resp.release()
 }
 
 var (
 
 	// ErrActorNotConnected 表示 Actor 未连接.
 	ErrActorNotConnected = errors.New("gactor: actor not connected")
-
-	// ErrActorCantCallAsyncRPC 表示 Actor 无法调用异步 RPC.
-	ErrActorCantCallAsyncRPC = errors.New("gactor: actor cant call async rpc")
 
 	// ErrActorBeReferenced 表示 Actor 被引用.
 	ErrActorBeReferenced = errors.New("gactor: actor be referenced")
@@ -247,49 +258,35 @@ func actorStateErr(state int8) error {
 	return err
 }
 
-// actorAsyncRPCCall Actor 发起的异步 RPC 调用.
-type actorAsyncRPCCall struct {
-	call     RPCCall
-	callback ActorRPCCallback
+// actorTriggeredTimer Actor 已触发定时器.
+type actorTriggeredTimer struct {
+	tid  TimerId        // 定时器ID.
+	f    ActorTimerFunc // 定时器方法.
+	args any            // 参数.
 }
 
-var poolOfAsyncRPCCalls = &sync.Pool{New: func() interface{} {
-	return &actorAsyncRPCCall{}
-}}
-
-func newActorAsyncRPCCall(call RPCCall, callback ActorRPCCallback) *actorAsyncRPCCall {
-	c := poolOfAsyncRPCCalls.Get().(*actorAsyncRPCCall)
-	c.call = call
-	c.callback = callback
-	return c
-}
-
-func (c *actorAsyncRPCCall) invokeCallback(a actorImpl) {
-	c.callback(a, c.call)
-	c.release()
-}
-
-func (c *actorAsyncRPCCall) release() {
-	c.call.release()
-	c.callback = nil
-	poolOfAsyncRPCCalls.Put(c)
+// actorCompletedAsyncRPC Actor 发起的已完成的异步 RPC 调用.
+type actorCompletedAsyncRPC struct {
+	payload Packet       // 响应负载数据.
+	err     error        // 错误信息.
+	cb      ActorRPCFunc // 回调函数.
 }
 
 // actorCore Actor 内部核心实现.
 type actorCore struct {
-	*ActorDefineCommon                         // 集成 ActorDefineCommon.
-	id                 int64                   // Actor 分类实例ID.
-	svc                *Service                // 隶属的 Service.
-	messageBox         chan message            // 信箱.
-	sigPrepareStop     chan struct{}           // 准备停机信号.
-	asyncRPCCalls      chan *actorAsyncRPCCall //
-	logger             log.Logger              // 日志工具.
+	*ActorDefineCommon                             // 集成 ActorDefineCommon.
+	id                 int64                       // Actor 分类实例ID.
+	svc                *Service                    // 隶属的 Service.
+	messageBox         chan message                // 信箱.
+	triggeredTimer     chan actorTriggeredTimer    // 已触发的定时器.
+	completedAsyncRPC  chan actorCompletedAsyncRPC // 已完成的异步 RPC 调用.
+	sigPrepareStop     chan struct{}               // 准备停机信号.
+	logger             log.Logger                  // 日志工具.
 
 	mtx            sync.RWMutex // 读写锁.
 	state          int8         // 状态.
-	refCount       int32        // 引用计数. 当引用计数大于 0 时，Actor 不会被回收.
-	*timerManager               // 集成定时管理器.
-	recycleTimerId TimerID      // 回收定时器ID.
+	refCount       int          // 引用计数. 当引用计数大于 0 时，Actor 不会被回收.
+	recycleTimerId TimerId      // 回收定时器ID.
 }
 
 // newActorCore 构造 actorCore.
@@ -299,16 +296,14 @@ func newActorCore(ad *ActorDefineCommon, id int64, svc *Service) *actorCore {
 		id:                id,
 		svc:               svc,
 		messageBox:        make(chan message, ad.MessageBoxSize),
+		triggeredTimer:    make(chan actorTriggeredTimer, ad.MaxTriggeredTimerAmount),
+		completedAsyncRPC: make(chan actorCompletedAsyncRPC, ad.MaxCompletedAsyncRPCAmount),
 		sigPrepareStop:    make(chan struct{}),
 		logger: svc.oriLogger.Named("actor").
 			WithFields(lfdCategory(ad.Category)).
 			WithFields(lfdId(id)),
-		state:        actorStateInit,
-		refCount:     0,
-		timerManager: newTimerManager(svc.getTimeSystem()),
-	}
-	if ad.AsyncRPCCallQueueSize > 0 {
-		a.asyncRPCCalls = make(chan *actorAsyncRPCCall, ad.AsyncRPCCallQueueSize)
+		state:    actorStateInit,
+		refCount: 0,
 	}
 	return a
 }
@@ -379,8 +374,6 @@ func (a *actorCore) start() error {
 	}
 	defer a.unlock(false)
 
-	a.timerManager.start()
-
 	// 更新状态.
 	a.state = actorStateStarted
 
@@ -450,12 +443,10 @@ func (a *actorCore) stopped(f func()) {
 	close(a.messageBox)
 	a.messageBox = nil
 	a.sigPrepareStop = nil
-	if a.asyncRPCCalls != nil {
-		close(a.asyncRPCCalls)
-		a.asyncRPCCalls = nil
+	if a.completedAsyncRPC != nil {
+		close(a.completedAsyncRPC)
+		a.completedAsyncRPC = nil
 	}
-	a.timerManager.stop()
-	a.timerManager = nil
 	if f != nil {
 		f()
 	}
@@ -531,8 +522,8 @@ func (a *actorCore) receiveMessage(ctx context.Context, msg message) error {
 	}
 }
 
-// receiveAsyncRPCCall 接收异步 RPC 调用.
-func (a *actorCore) receiveAsyncRPCCall(ctx context.Context, call RPCCall, callback ActorRPCCallback) error {
+// receiveCompletedAsyncRPC 接收已完成的异步 RPC 调用.
+func (a *actorCore) receiveCompletedAsyncRPC(ctx context.Context, resp *RPCResp, cb ActorRPCFunc) error {
 	if err := a.lockRef(true); err != nil {
 		return err
 	}
@@ -542,12 +533,17 @@ func (a *actorCore) receiveAsyncRPCCall(ctx context.Context, call RPCCall, callb
 		return err
 	}
 
-	asyncCall := newActorAsyncRPCCall(call, callback)
+	asyncCall := actorCompletedAsyncRPC{
+		payload: resp.payload,
+		err:     resp.err,
+		cb:      cb,
+	}
+	resp.payload = nil
+
 	select {
-	case a.asyncRPCCalls <- asyncCall:
+	case a.completedAsyncRPC <- asyncCall:
 		return nil
 	case <-ctx.Done():
-		asyncCall.release()
 		return ctx.Err()
 	}
 }
@@ -558,46 +554,49 @@ func (a *actorCore) resetRecycleTimer(stop bool) {
 		return
 	}
 
-	if !a.recycleTimerId.None() {
+	if a.recycleTimerId != TimerIdNone {
 		a.StopTimer(a.recycleTimerId)
-		a.recycleTimerId.SetNone()
+		a.recycleTimerId = TimerIdNone
 	}
 
 	if !stop {
-		a.recycleTimerId = a.StartTimer(a.RecycleTime, nil, actorOnRecycle)
+		a.recycleTimerId = a.StartTimer(a.RecycleTime, false, nil, actorOnRecycle)
 	}
-}
-
-// onRecycle 回收定时器回调.
-func (a *actorCore) onRecycle(args TimerCallbackArgs) error {
-	if args.TID != a.recycleTimerId {
-		return nil
-	}
-	_ = a.stop()
-	return nil
 }
 
 // StartTimer 启动定时器.
-func (a *actorCore) StartTimer(d time.Duration, args any, callback TimerCallback) TimerID {
+func (a *actorCore) StartTimer(d time.Duration, repeat bool, args any, cb ActorTimerFunc) TimerId {
 	if err := a.lockState(actorStateStarted, true); err != nil {
 		return 0
 	}
 	defer a.unlock(true)
-	return a.timerManager.startTimer(d, args, callback)
-}
 
-// StartTimerRepeat 启动重复定时器.
-func (a *actorCore) StartTimerRepeat(d time.Duration, args any, callback TimerCallback) TimerID {
-	if err := a.lockState(actorStateStarted, true); err != nil {
-		return 0
-	}
-	defer a.unlock(true)
-	return a.timerManager.startTimerRepeat(d, args, callback)
+	return a.svc.startActorTimer(a.ActorUID(), d, repeat, args, cb)
 }
 
 // StopTimer 停止定时器.
-func (a *actorCore) StopTimer(tid TimerID) {
-	a.timerManager.stopTimer(tid)
+func (a *actorCore) StopTimer(tid TimerId) {
+	a.svc.StopTimer(tid)
+}
+
+// receiveTriggerdTimer 接收已触发的定时器.
+func (a *actorCore) receiveTriggerdTimer(tid TimerId, args any, cb ActorTimerFunc) {
+	if err := a.lockState(actorStateStarted, true); err != nil {
+		return
+	}
+	defer a.unlock(true)
+
+	timer := actorTriggeredTimer{
+		tid:  tid,
+		f:    cb,
+		args: args,
+	}
+	select {
+	case a.triggeredTimer <- timer:
+		return
+	case <-a.sigPrepareStop:
+		return
+	}
 }
 
 // RPC 发起同步 RPC 调用.
@@ -605,37 +604,33 @@ func (a *actorCore) RPC(ctx context.Context, to ActorUID, params, reply any) err
 	return a.svc.rpc(ctx, to, params, reply)
 }
 
-// actorAsyncRPCCallback Actor 异步 RPC 回调封装.
-type actorAsyncRPCCallback struct {
-	actor         actorImpl
-	asyncCallback ActorRPCCallback
+// actorAsyncRPCFunc Actor 异步 RPC 回调封装.
+type actorAsyncRPCFunc struct {
+	actor actorImpl
+	cb    ActorRPCFunc
 }
 
-func (cb *actorAsyncRPCCallback) callback(call RPCCall) {
-	defer cb.actor.core().deref()
-	ctx, cancel := context.WithTimeout(context.Background(), cb.actor.core().service().getCfg().ActorReceiveAsyncRPCCallTimeout)
+func (f *actorAsyncRPCFunc) invoke(resp *RPCResp) {
+	defer f.actor.core().deref()
+	ctx, cancel := context.WithTimeout(context.Background(), f.actor.core().service().getCfg().ActorReceiveCompletedAsyncRPCTimeout)
 	defer cancel()
-	if err := cb.actor.core().receiveAsyncRPCCall(ctx, call, cb.asyncCallback); err != nil {
-		cb.actor.core().getLogger().ErrorFields("receive message RPCCallback failed", lfdError(err))
+	if err := f.actor.core().receiveCompletedAsyncRPC(ctx, resp, f.cb); err != nil {
+		f.actor.core().getLogger().ErrorFields("receive async rpc call failed", lfdError(err))
 	}
 }
 
 // asyncRPC 异步 RPC 调用核心实现.
-func (a *actorCore) asyncRPC(ctx context.Context, impl actorImpl, to ActorUID, params any, callback ActorRPCCallback) error {
-	if a.ActorDefineCommon.AsyncRPCCallQueueSize <= 0 {
-		return ErrActorCantCallAsyncRPC
-	}
-
+func (a *actorCore) asyncRPC(ctx context.Context, impl actorImpl, to ActorUID, params any, cb ActorRPCFunc) error {
 	if err := impl.core().ref(); err != nil {
 		return err
 	}
 
-	asyncCallback := &actorAsyncRPCCallback{
-		actor:         impl,
-		asyncCallback: callback,
+	asyncFunc := &actorAsyncRPCFunc{
+		actor: impl,
+		cb:    cb,
 	}
 
-	if err := a.svc.asyncRPC(ctx, to, params, asyncCallback.callback); err != nil {
+	if err := a.svc.asyncRPC(ctx, to, params, asyncFunc.invoke); err != nil {
 		_ = impl.core().deref()
 		return err
 	}
@@ -677,8 +672,8 @@ func (a *actor) Behavior() ActorBehavior {
 }
 
 // AsyncRPC 发起异步 RPC 调用.
-func (a *actor) AsyncRPC(ctx context.Context, to ActorUID, params any, callback ActorRPCCallback) error {
-	return a.asyncRPC(ctx, a, to, params, callback)
+func (a *actor) AsyncRPC(ctx context.Context, to ActorUID, params any, cb ActorRPCFunc) error {
+	return a.asyncRPC(ctx, a, to, params, cb)
 }
 
 // cActor CActor 内部实现.
@@ -717,8 +712,8 @@ func (a *cActor) Session() ActorSession {
 }
 
 // AsyncRPC 发起异步 RPC 调用.
-func (a *cActor) AsyncRPC(ctx context.Context, to ActorUID, params any, callback ActorRPCCallback) error {
-	return a.asyncRPC(ctx, a, to, params, callback)
+func (a *cActor) AsyncRPC(ctx context.Context, to ActorUID, params any, cb ActorRPCFunc) error {
+	return a.asyncRPC(ctx, a, to, params, cb)
 }
 
 func (a *cActor) start() error {

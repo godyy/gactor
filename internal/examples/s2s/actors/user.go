@@ -50,10 +50,10 @@ func (u *User) OnDisconnected() {
 
 func randomGetServerName(u *User) {
 	d := time.Duration(100+rd.Intn(400)) * time.Millisecond
-	u.StartTimer(d, nil, onRandomGetServerName)
+	u.StartTimer(d, false, nil, onRandomGetServerName)
 }
 
-func onRandomGetServerName(args *gactor.TimerCallbackArgs) error {
+func onRandomGetServerName(args *gactor.ActorTimerArgs) {
 	u := args.Actor.Behavior().(*User)
 
 	if rand.Intn(2) > 0 {
@@ -70,8 +70,6 @@ func onRandomGetServerName(args *gactor.TimerCallbackArgs) error {
 		}
 		randomGetServerName(u)
 	}
-
-	return nil
 }
 
 var getServerNameRPCCallback = WrapRPCCallback(func(u *User, reply *message.GetServerNameResp, err error) {

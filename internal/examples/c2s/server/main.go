@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/godyy/gactor"
+	"github.com/godyy/gactor/core/timewheel"
 	"github.com/godyy/gactor/internal/examples/c2s/common"
 	"github.com/godyy/gactor/internal/examples/c2s/common/consts"
 	"github.com/godyy/gactor/internal/examples/c2s/common/logger"
@@ -236,7 +237,13 @@ func main() {
 	}
 
 	s.svc = gactor.NewService(&gactor.ServiceConfig{
-		ActorDefines:  define.Defines,
+		ActorDefines: define.Defines,
+		TimeWheelLevels: []timewheel.LevelConfig{
+			{Name: "100ms", Span: 100 * time.Millisecond, Slots: 10},
+			{Name: "s", Span: 1 * time.Second, Slots: 60},
+			{Name: "m", Span: 1 * time.Minute, Slots: 60},
+			{Name: "hour", Span: 1 * time.Hour, Slots: 24},
+		},
 		DefRPCTimeout: 5 * time.Second,
 		Handler:       s,
 	}, gactor.WithServiceLogger(logger.Logger()))

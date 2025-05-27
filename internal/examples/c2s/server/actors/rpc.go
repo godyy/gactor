@@ -20,17 +20,17 @@ func RPC(a gactor.Actor, ctx context.Context, to gactor.ActorUID, params any, re
 	}
 }
 
-func AsyncRPC(a gactor.Actor, ctx context.Context, to gactor.ActorUID, params any, callback gactor.ActorRPCCallback) error {
+func AsyncRPC(a gactor.Actor, ctx context.Context, to gactor.ActorUID, params any, callback gactor.ActorRPCFunc) error {
 	var msgParams message.RpcMessage
 	msgParams = message.NewRpcMessageWithPayload(params)
 	return a.AsyncRPC(ctx, to, &msgParams, callback)
 }
 
-func WrapRPCCallback[AB gactor.ActorBehavior, R any](callback func(ab AB, reply *R, err error)) gactor.ActorRPCCallback {
-	return func(a gactor.Actor, call gactor.RPCCall) {
+func WrapRPCCallback[AB gactor.ActorBehavior, R any](callback func(ab AB, reply *R, err error)) gactor.ActorRPCFunc {
+	return func(a gactor.Actor, resp *gactor.RPCResp) {
 		var msgReply message.RpcRespMessage
 		var reply R
-		if err := call.DecodePayload(&msgReply); err != nil {
+		if err := resp.DecodeReply(&msgReply); err != nil {
 			callback(a.Behavior().(AB), nil, err)
 		} else if err := msgReply.DecodePayload(&reply); err != nil {
 			callback(a.Behavior().(AB), nil, err)
@@ -53,17 +53,17 @@ func ContextRPC(ctx *gactor.Context, to gactor.ActorUID, params any, reply any) 
 	}
 }
 
-func ContextAsyncRPC(ctx *gactor.Context, to gactor.ActorUID, params any, callback gactor.ContextRPCCallback) error {
+func ContextAsyncRPC(ctx *gactor.Context, to gactor.ActorUID, params any, callback gactor.ContextRPCFunc) error {
 	var msgParams message.RpcMessage
 	msgParams = message.NewRpcMessageWithPayload(params)
 	return ctx.AsyncRPC(to, &msgParams, callback)
 }
 
-func WrapContextRPCCallback[R any](callback func(ctx *gactor.Context, reply *R, err error)) gactor.ContextRPCCallback {
-	return func(ctx *gactor.Context, call gactor.RPCCall) {
+func WrapContextRPCCallback[R any](callback func(ctx *gactor.Context, reply *R, err error)) gactor.ContextRPCFunc {
+	return func(ctx *gactor.Context, resp *gactor.RPCResp) {
 		var msgReply message.RpcRespMessage
 		var reply R
-		if err := call.DecodePayload(&msgReply); err != nil {
+		if err := resp.DecodeReply(&msgReply); err != nil {
 			callback(ctx, nil, err)
 		} else if err := msgReply.DecodePayload(&reply); err != nil {
 			callback(ctx, nil, err)

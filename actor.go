@@ -34,8 +34,18 @@ type ActorBehavior interface {
 // ActorBehaviorCreator Actor 行为构造器.
 type ActorBehaviorCreator func(Actor) ActorBehavior
 
-// ActorRPCCallback Actor RPC 回调.
-type ActorRPCCallback func(a Actor, c RPCCall)
+// ActorTimerArgs Actor 定时器参数.
+type ActorTimerArgs struct {
+	Actor Actor   // Actor.
+	TID   TimerId // 定时器ID
+	Args  any     // 参数.
+}
+
+// ActorTimerFunc Actor 定时器回调函数.
+type ActorTimerFunc func(args *ActorTimerArgs)
+
+// ActorRPCFunc Actor RPC 回调.
+type ActorRPCFunc func(a Actor, resp *RPCResp)
 
 // Actor 封装 Actor 接口.
 type Actor interface {
@@ -46,21 +56,18 @@ type Actor interface {
 	Behavior() ActorBehavior
 
 	// StartTimer 启动定时器.
-	StartTimer(d time.Duration, args any, callback TimerCallback) TimerID
-
-	// StartTimerRepeat 启动重复定时器.
-	StartTimerRepeat(d time.Duration, args any, callback TimerCallback) TimerID
+	StartTimer(d time.Duration, repeat bool, args any, cb ActorTimerFunc) TimerId
 
 	// StopTimer 停止定时器.
-	StopTimer(TimerID)
+	StopTimer(TimerId)
 
 	// RPC 向 to 指向的 Actor 发起 RPC 调用.
 	// ctx 用于控制超时时间. params 为请求参数, reply 用于接收响应参数.
 	RPC(ctx context.Context, to ActorUID, params, reply any) error
 
 	// AsyncRPC 向 to 指向的 Actor 发起异步 RPC 调用.
-	// ctx 用于控制超时时间. params 为请求参数. callback 为异步回调.
-	AsyncRPC(ctx context.Context, to ActorUID, params any, callback ActorRPCCallback) error
+	// ctx 用于控制超时时间. params 为请求参数. cb 为异步回调.
+	AsyncRPC(ctx context.Context, to ActorUID, params any, cb ActorRPCFunc) error
 
 	// Cast 向 to 指向的 Actor 投递消息.
 	// ctx 用于控制超时时间. payload 为投递的负载消息.

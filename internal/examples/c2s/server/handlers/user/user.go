@@ -18,7 +18,7 @@ type handler struct {
 	*handlers.RawHandler
 	*handlers.RpcHandler
 
-	rpcGetServerNameCallback gactor.ContextRPCCallback
+	rpcGetServerNameCallback gactor.ContextRPCFunc
 }
 
 func (h *handler) user(ctx *gactor.Context) *actors.User {

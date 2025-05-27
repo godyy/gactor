@@ -13,13 +13,13 @@ import (
 var Defines = []gactor.ActorDefineImpl{
 	&gactor.CActorDefine{
 		ActorDefineCommon: &gactor.ActorDefineCommon{
-			Name:                  consts.CategoryNameUser,
-			Category:              consts.CategoryUser,
-			Priority:              consts.CategoryPriorityUser,
-			MessageBoxSize:        10,
-			AsyncRPCCallQueueSize: 1,
-			RecycleTime:           10 * time.Second,
-			Handler:               user.Handler(),
+			Name:                       consts.CategoryNameUser,
+			Category:                   consts.CategoryUser,
+			Priority:                   consts.CategoryPriorityUser,
+			MessageBoxSize:             10,
+			MaxCompletedAsyncRPCAmount: 1,
+			RecycleTime:                10 * time.Second,
+			Handler:                    user.Handler(),
 		},
 		BehaviorCreator: func(c gactor.CActor) gactor.CActorBehavior {
 			return actors.NewUser(c)
@@ -27,13 +27,13 @@ var Defines = []gactor.ActorDefineImpl{
 	},
 	&gactor.ActorDefine{
 		ActorDefineCommon: &gactor.ActorDefineCommon{
-			Name:                  consts.CategoryNameServer,
-			Category:              consts.CategoryServer,
-			Priority:              consts.CategoryPriorityServer,
-			MessageBoxSize:        100,
-			AsyncRPCCallQueueSize: 10,
-			RecycleTime:           0,
-			Handler:               server.Handler(),
+			Name:                       consts.CategoryNameServer,
+			Category:                   consts.CategoryServer,
+			Priority:                   consts.CategoryPriorityServer,
+			MessageBoxSize:             100,
+			MaxCompletedAsyncRPCAmount: 10,
+			RecycleTime:                0,
+			Handler:                    server.Handler(),
 		},
 		BehaviorCreator: func(a gactor.Actor) gactor.ActorBehavior {
 			return actors.NewServer(a)

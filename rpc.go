@@ -12,35 +12,58 @@ import (
 // ErrRPCTimeout RPC 超时错误.
 var ErrRPCTimeout = errors.New("gactor: rpc timeout")
 
-// RPCCall RPC 调用实例.
-type RPCCall interface {
-	// DecodePayload 解码 RPC 响应到 v.
-	DecodePayload(v any) error
-
-	// Err 返回错误信息.
-	// 如果调用超时, 返回 ErrRPCTimeout.
-	// 如果服务停机, 返回 ErrServiceStopped.
-	Err() error
-
-	// release 释放.
-	release()
+// RPCResp RPC 响应参数.
+type RPCResp struct {
+	svc     *Service // Service.
+	payload Packet   // 响应负载数据.
+	err     error    // 错误信息.
 }
 
-// RPCCallback RPC回调.
+// DecodeReply 解码响应负载数据到 v.
+func (resp *RPCResp) DecodeReply(v any) error {
+	if resp.err != nil {
+		return resp.err
+	}
+	if err := resp.svc.decodePayload(PacketTypeS2SRpcResp, resp.payload, v); err == nil {
+		return nil
+	} else if errors.Is(err, ErrPacketEscape) {
+		resp.payload = nil
+		return nil
+	} else {
+		return err
+	}
+}
+
+// Err 返回错误信息.
+func (resp *RPCResp) Err() error {
+	return resp.err
+}
+
+func (resp *RPCResp) release() {
+	if resp.payload != nil {
+		resp.svc.putPacket(resp.payload)
+		resp.payload = nil
+	}
+}
+
+// RPCFunc RPC回调.
 // RPCCall 对象只能在回调内部访问, 切记不要传递到回调函数外.
-type RPCCallback func(RPCCall)
+type RPCFunc func(*RPCResp)
 
 // rpcCall 内部 RPC 调用实例实现.
 type rpcCall struct {
-	svc         *Service    // Service.
-	heapIndex   int         // heap index.
-	reqId       uint64      // RPC 调用序列 ID.
-	to          ActorUID    // 目标 ActorUID.
-	expiredAt   int64       // 过期时间.
-	respPayload Packet      // RPC 响应负载数据.
-	err         error       // 错误信息.
-	callback    RPCCallback // 回调函数.
+	heapIndex   int      // heap index.
+	reqId       uint64   // RPC 调用序列 ID.
+	to          ActorUID // 目标 ActorUID.
+	expiredAt   int64    // 过期时间.
+	respPayload Packet   // RPC 响应负载数据.
+	err         error    // 错误信息.
+	cb          RPCFunc  // 回调函数.
 }
+
+var poolOfRPCCall = &sync.Pool{New: func() interface{} {
+	return &rpcCall{heapIndex: -1}
+}}
 
 func (call *rpcCall) HeapLess(oth *rpcCall) bool {
 	return call.expiredAt < oth.expiredAt
@@ -54,104 +77,44 @@ func (call *rpcCall) HeapIndex() int {
 	return call.heapIndex
 }
 
-func (call *rpcCall) DecodePayload(v any) error {
-	if call.err != nil {
-		return call.err
-	}
-	if err := call.svc.decodePayload(PacketTypeS2SRpcResp, call.respPayload, v); err == nil {
-		return nil
-	} else if errors.Is(err, ErrPacketEscape) {
-		call.respPayload = nil
-		return nil
-	} else {
-		return err
-	}
-}
-
-func (call *rpcCall) Err() error {
-	return call.err
-}
-
-func (call *rpcCall) release() {
-	if call.respPayload != nil {
-		call.svc.putPacket(call.respPayload)
-		call.respPayload = nil
-	}
-	call.err = nil
-	call.callback = nil
-	call.svc = nil
-	poolOfRPCCall.Put(call)
-}
-
 func (call *rpcCall) onResponse(payload Packet, err error) {
 	call.respPayload = payload
 	call.err = err
 }
 
-func (call *rpcCall) invokeCallback() {
-	call.callback(call)
+func (call *rpcCall) release() {
+	call.respPayload = nil
+	call.err = nil
+	call.cb = nil
+	poolOfRPCCall.Put(call)
 }
-
-var poolOfRPCCall = &sync.Pool{New: func() interface{} {
-	return &rpcCall{heapIndex: -1}
-}}
 
 // rpcManager RPC Manager.
 type rpcManager struct {
-	timeSys    TimeSystem    // 时间系统.
-	chCallback chan *rpcCall // 已完成等待执行回调的 rpcCall.
-	ticker     *time.Ticker  // ticker.
+	svc            *Service      // Service.
+	completedCalls chan *rpcCall // 已完成等待执行回调的 rpcCall.
 
 	mtx       sync.Mutex           // mtx for following.
 	reqIdIncr uint64               // req id 自增键.
 	callMap   map[uint64]*rpcCall  // call map.
 	callHeap  *heap.Heap[*rpcCall] // call heap, 按照过期时间排序.
+	timerId   TimerId              // 定时器ID.
+	cTick     chan struct{}        // chan for tick.
+	cStopped  chan struct{}        // 已停止信号.
 }
 
-func newRPCManager(timeSys TimeSystem, callbackChanSize int) *rpcManager {
+func newRPCManager(svc *Service, maxCompletedCalls int) *rpcManager {
 	m := &rpcManager{
-		timeSys:    timeSys,
-		chCallback: make(chan *rpcCall, callbackChanSize),
-		reqIdIncr:  0,
-		callMap:    make(map[uint64]*rpcCall),
-		callHeap:   heap.NewHeap[*rpcCall](),
+		svc:            svc,
+		completedCalls: make(chan *rpcCall, maxCompletedCalls),
+		reqIdIncr:      0,
+		callMap:        make(map[uint64]*rpcCall),
+		callHeap:       heap.NewHeap[*rpcCall](),
+		timerId:        TimerIdNone,
+		cTick:          make(chan struct{}, 1),
+		cStopped:       make(chan struct{}),
 	}
 	return m
-}
-
-// start 启动.
-func (m *rpcManager) start() {
-	m.mtx.Lock()
-	defer m.mtx.Unlock()
-
-	m.startCallbackWorkers()
-	m.ticker = time.NewTicker(100 * time.Millisecond)
-}
-
-// stop 停止.
-func (m *rpcManager) stop() {
-	m.mtx.Lock()
-	defer m.mtx.Unlock()
-
-	close(m.chCallback)
-
-	for _, call := range m.callMap {
-		m.invokeCallback(call, nil, ErrServiceStopped)
-	}
-	m.callMap = nil
-	m.callHeap.Init()
-}
-
-// startCallbackWorkers 启动回调工作器.
-func (m *rpcManager) startCallbackWorkers() {
-	workers := runtime.NumCPU()
-	for i := 0; i < workers; i++ {
-		go func() {
-			for call := range m.chCallback {
-				call.invokeCallback()
-			}
-		}()
-	}
 }
 
 // genReqId 生成 req id.
@@ -172,20 +135,134 @@ func (m *rpcManager) removeCall(call *rpcCall) {
 	delete(m.callMap, call.reqId)
 }
 
+// start 启动.
+func (m *rpcManager) start() {
+	m.mtx.Lock()
+	defer m.mtx.Unlock()
+
+	m.startDoneCallWorkers()
+}
+
+// stop 停止.
+func (m *rpcManager) stop() {
+	m.mtx.Lock()
+	defer m.mtx.Unlock()
+
+	m.stopTimer()
+
+	for _, call := range m.callMap {
+		m.handleCallDone(call, nil, ErrServiceStopped)
+	}
+	m.callMap = nil
+	m.callHeap.Init()
+
+	close(m.cStopped)
+}
+
+// startDoneCallWorkers 启动已完成 RPC 调用的回调执行工作器.
+func (m *rpcManager) startDoneCallWorkers() {
+	workers := runtime.NumCPU()
+	for i := 0; i < workers; i++ {
+		go func() {
+			for {
+				select {
+				case call := <-m.completedCalls:
+					m.invokeCallback(call)
+				case <-m.cStopped:
+					drain := false
+					for !drain {
+						select {
+						case call := <-m.completedCalls:
+							m.invokeCallback(call)
+						default:
+							drain = true
+						}
+					}
+					return
+				}
+			}
+		}()
+	}
+}
+
+// invokeCallback 调用 RPC 回调.
+func (m *rpcManager) invokeCallback(call *rpcCall) {
+	defer func() {
+		if x := recover(); x != nil {
+			m.svc.getLogger().ErrorFields("invoke rpc callback panic", lfdPanic(x))
+		}
+	}()
+
+	resp := RPCResp{
+		svc:     m.svc,
+		payload: call.respPayload,
+		err:     call.err,
+	}
+	call.cb(&resp)
+	resp.release()
+	call.release()
+}
+
+// resetTimer 重置定时器.
+func (m *rpcManager) resetTimer(expiredAt int64) {
+	if m.timerId != TimerIdNone {
+		m.svc.StopTimer(m.timerId)
+		m.timerId = TimerIdNone
+	}
+
+	d := time.Duration(expiredAt - time.Now().UnixNano())
+	if d <= 0 {
+		select {
+		case m.cTick <- struct{}{}:
+		case <-m.cStopped:
+		}
+		return
+	}
+
+	m.timerId = m.svc.StartTimer(d, false, nil, m.onTimer)
+}
+
+// stopTimer 停止定时器
+func (m *rpcManager) stopTimer() {
+	if m.timerId == TimerIdNone {
+		return
+	}
+
+	m.svc.StopTimer(m.timerId)
+	m.timerId = TimerIdNone
+}
+
+// onTimer 定时器回调.
+func (m *rpcManager) onTimer(args TimerArgs) {
+	m.mtx.Lock()
+	if args.TID != m.timerId {
+		m.mtx.Unlock()
+	}
+	m.timerId = TimerIdNone
+	m.mtx.Unlock()
+
+	select {
+	case m.cTick <- struct{}{}:
+	case <-m.cStopped:
+	}
+}
+
 // createCall 创建 Call.
-func (m *rpcManager) createCall(s *Service, to ActorUID, expiredAt time.Time, callback RPCCallback) (*rpcCall, error) {
+func (m *rpcManager) createCall(to ActorUID, expiredAt time.Time, cb RPCFunc) (*rpcCall, error) {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 
 	call := poolOfRPCCall.Get().(*rpcCall)
-	call.svc = s
 	call.heapIndex = -1
 	call.reqId = m.genReqId()
 	call.to = to
 	call.expiredAt = expiredAt.UnixNano()
-	call.callback = callback
+	call.cb = cb
 
 	m.addCall(call)
+	if call == m.callHeap.Top() {
+		m.resetTimer(call.expiredAt)
+	}
 
 	return call, nil
 }
@@ -193,55 +270,63 @@ func (m *rpcManager) createCall(s *Service, to ActorUID, expiredAt time.Time, ca
 // removeCallByReqId 通过 reqId 移除 Call.
 // 通常在出现错误需要直接移除 Call 的情况下调用.
 func (m *rpcManager) removeCallByReqId(reqId uint64) bool {
-	m.mtx.Lock()
-
-	call := m.callMap[reqId]
+	call := m.popCall(reqId)
 	if call == nil {
-		m.mtx.Unlock()
 		return false
 	}
 
-	m.removeCall(call)
-
-	m.mtx.Unlock()
-
 	call.release()
-
 	return true
 }
 
-// invokeCallback 调用回调.
-func (m *rpcManager) invokeCallback(call *rpcCall, payload Packet, err error) {
+// popCall 移除 reqId 指定的 Call. 并重置定时器.
+func (m *rpcManager) popCall(reqId uint64) *rpcCall {
+	m.mtx.Lock()
+	defer m.mtx.Unlock()
+
+	call := m.callMap[reqId]
+	if call == nil {
+		return nil
+	}
+
+	top := call == m.callHeap.Top()
+	m.removeCall(call)
+	if top {
+		if m.callHeap.Len() > 0 {
+			m.resetTimer(m.callHeap.Top().expiredAt)
+		} else {
+			m.stopTimer()
+		}
+	}
+
+	return call
+}
+
+// handleCallDone 处理调用完成.
+func (m *rpcManager) handleCallDone(call *rpcCall, payload Packet, err error) {
 	call.onResponse(payload, err)
-	m.chCallback <- call
+	m.completedCalls <- call
 }
 
 // handleResponse 处理 RPC Response. 返回对应的 rpcCall 是否存在.
 func (m *rpcManager) handleResponse(reqId uint64, payload Packet, err error) bool {
-	m.mtx.Lock()
-
-	call := m.callMap[reqId]
+	call := m.popCall(reqId)
 	if call == nil {
-		m.mtx.Unlock()
 		return false
 	}
-
-	m.removeCall(call)
-
-	m.mtx.Unlock()
 
 	if errors.Is(err, errCodeOK) {
 		err = nil
 	}
 
-	m.invokeCallback(call, payload, err)
+	m.handleCallDone(call, payload, err)
 
 	return true
 }
 
 // chanTick 返回用于读取 tick time 的 chan.
-func (m *rpcManager) chanTick() <-chan time.Time {
-	return m.ticker.C
+func (m *rpcManager) chanTick() <-chan struct{} {
+	return m.cTick
 }
 
 // tick 处理已过期的 Call.
@@ -255,7 +340,8 @@ func (m *rpcManager) tick() {
 		}
 
 		call := m.callHeap.Top()
-		if m.timeSys.Now().UnixNano() < call.expiredAt {
+		if m.svc.getTimeSystem().Now().UnixNano() < call.expiredAt {
+			m.resetTimer(call.expiredAt)
 			m.mtx.Unlock()
 			break
 		}
@@ -264,6 +350,6 @@ func (m *rpcManager) tick() {
 
 		m.mtx.Unlock()
 
-		m.invokeCallback(call, nil, ErrRPCTimeout)
+		m.handleCallDone(call, nil, ErrRPCTimeout)
 	}
 }

@@ -13,7 +13,7 @@ import (
 type User struct {
 	cActor
 	name          string
-	notifyTimerId gactor.TimerID
+	notifyTimerId gactor.TimerId
 	IsLogin       bool
 }
 
@@ -38,22 +38,22 @@ func (u *User) GetName() string {
 }
 
 func (u *User) StartNotifyTimer() {
-	u.notifyTimerId = u.StartTimerRepeat(5*time.Second, nil, onNotifyTimer)
+	u.notifyTimerId = u.StartTimer(5*time.Second, true, nil, onNotifyTimer)
 }
 
 func (u *User) StopNotifyTimer() {
-	if u.notifyTimerId.None() {
+	if u.notifyTimerId == gactor.TimerIdNone {
 		return
 	}
 
 	u.StopTimer(u.notifyTimerId)
-	u.notifyTimerId.SetNone()
+	u.notifyTimerId = gactor.TimerIdNone
 }
 
-func onNotifyTimer(args *gactor.TimerCallbackArgs) error {
+func onNotifyTimer(args *gactor.ActorTimerArgs) {
 	u := args.Actor.Behavior().(*User)
 	if args.TID != u.notifyTimerId {
-		return nil
+		return
 	}
 
 	notifyMsg := message.NewPushMessageWithPayload(&message.Notify{
@@ -62,5 +62,5 @@ func onNotifyTimer(args *gactor.TimerCallbackArgs) error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	return u.PushRawMessage(ctx, &notifyMsg)
+	u.PushRawMessage(ctx, &notifyMsg)
 }

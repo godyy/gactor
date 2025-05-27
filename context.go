@@ -132,42 +132,42 @@ func (c *Context) RPCWithContext(ctx context.Context, to ActorUID, params any, r
 	return c.svc.rpc(ctx, to, params, reply)
 }
 
-// ContextRPCCallback 基于 Context 的 RPC 回调.
-type ContextRPCCallback func(ctx *Context, call RPCCall)
+// ContextRPCFunc 基于 Context 的 RPC 回调.
+type ContextRPCFunc func(ctx *Context, resp *RPCResp)
 
-// contextAsyncRPCCallback 基于 Context 的异步 RPC 回调.
-type contextAsyncRPCCallback struct {
+// contextAsyncRPCFunc 基于 Context 的异步 RPC 回调.
+type contextAsyncRPCFunc struct {
 	ctx *Context
-	cb  ContextRPCCallback
+	cb  ContextRPCFunc
 }
 
-func (cb *contextAsyncRPCCallback) callback(_ Actor, call RPCCall) {
+func (f *contextAsyncRPCFunc) invoke(_ Actor, resp *RPCResp) {
 	// 优先执行回调.
-	cb.cb(cb.ctx, call)
+	f.cb(f.ctx, resp)
 	// 继续执行 Handler.
-	if err := cb.ctx.Next(); err != nil {
-		cb.ctx.actor.core().getLogger().ErrorFields("continue handle request failed inside async rpc callback", lfdRequestType(cb.ctx.req.requestType()), lfdError(err))
+	if err := f.ctx.Next(); err != nil {
+		f.ctx.actor.core().getLogger().ErrorFields("continue handle request failed inside async rpc func", lfdRequestType(f.ctx.req.requestType()), lfdError(err))
 	}
 	// 回收.
-	cb.ctx.release()
+	f.ctx.release()
 }
 
 // AsyncRPC 基于 Context 的异步 RPC 调用.
-func (c *Context) AsyncRPC(to ActorUID, params any, callback ContextRPCCallback) error {
-	return c.AsyncRPCWithContext(c, to, params, callback)
+func (c *Context) AsyncRPC(to ActorUID, params any, cb ContextRPCFunc) error {
+	return c.AsyncRPCWithContext(c, to, params, cb)
 }
 
 // AsyncRPCWithContext Service.asyncRPC 的快捷方式, 可提供其它 context.
-func (c *Context) AsyncRPCWithContext(ctx context.Context, to ActorUID, params any, callback ContextRPCCallback) error {
+func (c *Context) AsyncRPCWithContext(ctx context.Context, to ActorUID, params any, cb ContextRPCFunc) error {
 	if c.actor == nil {
 		return errors.New("gactor: context is not bound to actor")
 	}
 	c.ref()
-	asyncCallback := &contextAsyncRPCCallback{
+	asyncFunc := &contextAsyncRPCFunc{
 		ctx: c,
-		cb:  callback,
+		cb:  cb,
 	}
-	if err := c.actor.AsyncRPC(c, to, params, asyncCallback.callback); err != nil {
+	if err := c.actor.AsyncRPC(c, to, params, asyncFunc.invoke); err != nil {
 		c.deref()
 		return err
 	}
