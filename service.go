@@ -11,7 +11,7 @@ import (
 	"github.com/godyy/gactor/core/timewheel"
 	"github.com/godyy/gactor/internal/utils"
 
-	"github.com/godyy/gutils/log"
+	"github.com/godyy/glog"
 )
 
 // ErrPacketEscape 表示数据包逃逸.
@@ -177,8 +177,8 @@ type Service struct {
 	*actorDefineSet                // 集成 Actor 定义.
 	*rpcManager                    // RPC 调用管理器.
 	cfg             *ServiceConfig // 配置.
-	oriLogger       log.Logger     // 原始日志工具.
-	logger          log.Logger     // 日志.
+	oriLogger       glog.Logger    // 原始日志工具.
+	logger          glog.Logger    // 日志.
 
 	mtxState sync.RWMutex  // 状态读写锁.
 	state    int8          // 状态.
@@ -243,7 +243,7 @@ func (s *Service) nodeId() string {
 // initLogger 初始化日志工具.
 func (s *Service) initLogger() {
 	if s.oriLogger == nil {
-		s.oriLogger = createStdLogger(log.DebugLevel)
+		s.oriLogger = createStdLogger(glog.DebugLevel)
 	}
 	if s.logger == nil {
 		s.logger = s.oriLogger.Named("Service").WithFields(lfdNodeId(s.nodeId()))
@@ -251,13 +251,13 @@ func (s *Service) initLogger() {
 }
 
 // setLogger 设置日志工具.
-func (s *Service) setLogger(logger log.Logger) {
+func (s *Service) setLogger(logger glog.Logger) {
 	s.oriLogger = logger.Named("gactor")
 	s.logger = s.oriLogger.Named("Service").WithFields(lfdNodeId(s.nodeId()))
 }
 
 // getLogger 获取 logger.
-func (s *Service) getLogger() log.Logger {
+func (s *Service) getLogger() glog.Logger {
 	return s.logger
 }
 

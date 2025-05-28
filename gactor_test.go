@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/godyy/gactor/core/timewheel"
-	"github.com/godyy/gutils/log"
+	"github.com/godyy/glog"
 
 	pkgerrors "github.com/pkg/errors"
 
@@ -18,17 +18,17 @@ import (
 )
 
 var (
-	logger    log.Logger
+	logger    glog.Logger
 	actorUIDs []ActorUID
 )
 
 func initLogger() error {
-	l := log.NewLogger(&log.Config{
-		Level:        log.DebugLevel,
+	l := glog.NewLogger(&glog.Config{
+		Level:        glog.DebugLevel,
 		EnableCaller: true,
 		CallerSkip:   0,
 		Development:  true,
-		Cores:        []log.CoreConfig{log.NewStdCoreConfig()},
+		Cores:        []glog.CoreConfig{glog.NewStdCoreConfig()},
 	})
 	logger = l
 	return nil

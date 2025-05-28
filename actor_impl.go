@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/godyy/gutils/log"
+	"github.com/godyy/glog"
 )
 
 // actorImpl Actor 内部实现接口封装.
@@ -281,7 +281,7 @@ type actorCore struct {
 	triggeredTimer     chan actorTriggeredTimer    // 已触发的定时器.
 	completedAsyncRPC  chan actorCompletedAsyncRPC // 已完成的异步 RPC 调用.
 	sigPrepareStop     chan struct{}               // 准备停机信号.
-	logger             log.Logger                  // 日志工具.
+	logger             glog.Logger                 // 日志工具.
 
 	mtx            sync.RWMutex // 读写锁.
 	state          int8         // 状态.
@@ -358,7 +358,7 @@ func (a *actorCore) isRunning() bool {
 }
 
 // getLogger 返回 getLogger.
-func (a *actorCore) getLogger() log.Logger {
+func (a *actorCore) getLogger() glog.Logger {
 	return a.logger
 }
 

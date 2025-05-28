@@ -1,18 +1,18 @@
 package gactor
 
 import (
-	"github.com/godyy/gutils/log"
+	"github.com/godyy/glog"
 	"go.uber.org/zap"
 )
 
 // createStdLogger 创建面向标准输出的 logger.
-func createStdLogger(level log.Level) log.Logger {
-	 return log.NewLogger(&log.Config{
+func createStdLogger(level glog.Level) glog.Logger {
+	return glog.NewLogger(&glog.Config{
 		Level:        level,
 		EnableCaller: true,
 		CallerSkip:   0,
 		Development:  true,
-		Cores:        []log.CoreConfig{log.NewStdCoreConfig()},
+		Cores:        []glog.CoreConfig{glog.NewStdCoreConfig()},
 	}).Named("gactor")
 }
 

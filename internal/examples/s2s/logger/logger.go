@@ -1,23 +1,23 @@
 package logger
 
 import (
-	"github.com/godyy/gutils/log"
+	"github.com/godyy/glog"
 )
 
-var logger log.Logger
+var logger glog.Logger
 
 func Init() error {
-	l := log.NewLogger(&log.Config{
-		Level:        log.DebugLevel,
+	l := glog.NewLogger(&glog.Config{
+		Level:        glog.DebugLevel,
 		EnableCaller: true,
 		CallerSkip:   0,
 		Development:  true,
-		Cores:        []log.CoreConfig{log.NewStdCoreConfig()},
+		Cores:        []glog.CoreConfig{glog.NewStdCoreConfig()},
 	})
 	logger = l
 	return nil
 }
 
-func Logger() log.Logger {
+func Logger() glog.Logger {
 	return logger
 }

@@ -6,7 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/godyy/gutils/log"
+	"github.com/godyy/glog"
 
 	pkgerrors "github.com/pkg/errors"
 )
@@ -84,7 +84,7 @@ func (c *ClientConfig) init() {
 type Client struct {
 	cfg     *ClientConfig // 配置.
 	sidIncr uint32        // 会话ID自增键.
-	logger  log.Logger    // 日志工具.
+	logger  glog.Logger   // 日志工具.
 }
 
 func NewClient(cfg *ClientConfig, option ...ClientOption) *Client {
@@ -110,16 +110,16 @@ func (c *Client) nodeId() string {
 
 // initLogger 初始化日志工具.
 func (c *Client) initLogger() {
-	c.logger = createStdLogger(log.DebugLevel).Named("Client").WithFields(lfdNodeId(c.nodeId()))
+	c.logger = createStdLogger(glog.DebugLevel).Named("Client").WithFields(lfdNodeId(c.nodeId()))
 }
 
 // setLogger 设置日志工具.
-func (c *Client) setLogger(logger log.Logger) {
+func (c *Client) setLogger(logger glog.Logger) {
 	c.logger = logger.Named("Client").WithFields(lfdNodeId(c.nodeId()))
 }
 
 // getLogger 获取日志工具.
-func (c *Client) getLogger() log.Logger {
+func (c *Client) getLogger() glog.Logger {
 	return c.logger
 }
 
