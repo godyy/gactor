@@ -131,7 +131,9 @@ func TestTimeWheelTimerExecution(t *testing.T) {
 	}
 
 	// 推进时间
-	tw.Tick(2)
+	for i := 0; i < 2; i++ {
+		tw.Tick()
+	}
 
 	// 等待定时器执行
 	wg.Wait()
@@ -155,7 +157,9 @@ func TestTimeWheelTimerExecution(t *testing.T) {
 		t.Error("Failed to remove timer")
 	}
 
-	tw.Tick(2)
+	for i := 0; i < 2; i++ {
+		tw.Tick()
+	}
 }
 
 func TestTimeWheelPeriodicTimer(t *testing.T) {
@@ -190,7 +194,7 @@ func TestTimeWheelPeriodicTimer(t *testing.T) {
 
 	// 推进时间并等待执行
 	for i := 0; i < expectedExecutions; i++ {
-		tw.Tick(1)
+		tw.Tick()
 		time.Sleep(100 * time.Millisecond) // 添加小延迟确保定时器执行完成
 	}
 
@@ -234,7 +238,7 @@ func TestTimeWheelMultipleTimers(t *testing.T) {
 
 	// 推进时间并等待所有定时器执行
 	for i := 0; i < timerCount; i++ {
-		tw.Tick(1)
+		tw.Tick()
 	}
 
 	wg.Wait()
@@ -296,7 +300,7 @@ func TestTimeWheelRandomTimers(t *testing.T) {
 		}
 
 		// 推进时间轮
-		tw.Tick(1)
+		tw.Tick()
 	}
 
 	// 等待一小段时间确保所有定时器都执行完成
@@ -352,7 +356,9 @@ func TestTimeWheelReset(t *testing.T) {
 	}
 
 	// 推进一些时间
-	tw.Tick(3)
+	for i := 0; i < 3; i++ {
+		tw.Tick()
+	}
 
 	// 重置时间轮
 	tw.Reset()
@@ -409,7 +415,7 @@ func TestTimeWheelReset(t *testing.T) {
 		t.Fatalf("Failed to add test timer after reset: %v", err)
 	}
 
-	tw.Tick(1)
+	tw.Tick()
 	execWg.Wait()
 }
 
@@ -505,7 +511,7 @@ func TestTimeWheelConcurrent(t *testing.T) {
 	// 推进时间轮直到所有定时器执行完成
 	expectedExecuted := totalTimers - expectedRemoved
 	for i := 0; i < 10; i++ { // 最多推进10秒
-		tw.Tick(1)
+		tw.Tick()
 		time.Sleep(time.Second)
 
 		if atomic.LoadInt32(&executedTimers) == int32(expectedExecuted) {
@@ -619,7 +625,7 @@ func TestTimeWheelExtremeConcurrent(t *testing.T) {
 	// 推进时间轮直到所有定时器执行完成
 	expectedExecuted := totalTimers - expectedRemoved
 	for i := 0; i < 20; i++ { // 最多推进20秒
-		tw.Tick(1)
+		tw.Tick()
 		time.Sleep(time.Second)
 
 		if atomic.LoadInt32(&executedTimers) == int32(expectedExecuted) {
@@ -900,7 +906,7 @@ func BenchmarkTimeWheel(b *testing.B) {
 		// 执行Tick基准测试
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			tw.Tick(1)
+			tw.Tick()
 		}
 		b.StopTimer()
 
@@ -962,7 +968,7 @@ func BenchmarkTickWithEvenlyDistributedTimers(b *testing.B) {
 
 	// 预热
 	for i := 0; i < 10; i++ {
-		tw.Tick(1)
+		tw.Tick()
 	}
 
 	// 重置计时器
@@ -970,6 +976,6 @@ func BenchmarkTickWithEvenlyDistributedTimers(b *testing.B) {
 
 	// 执行基准测试
 	for i := 0; i < b.N; i++ {
-		tw.Tick(1)
+		tw.Tick()
 	}
 }

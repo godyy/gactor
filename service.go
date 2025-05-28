@@ -697,28 +697,31 @@ func (s *Service) StopTimer(tid TimerId) {
 
 // tickTimer 推进时间轮.
 func (s *Service) tickTimeWheel() {
-	// 已流逝的 tick 数.
-	elapsedTicks := int64(0)
-
 	s.mtxTimer.Lock()
 
 	// 计算已流逝的 tick 数.
 	tickSpan := s.cfg.TimeWheelLevels[0].Span
 	now := s.getTimeSystem().Now()
-	elapsedTicks = int64(now.Sub(s.lastTickTimeWheel) / tickSpan)
-	if elapsedTicks <= 0 {
-		s.mtxTimer.Unlock()
-		return
-	}
-
-	// 更新时间轮的 tick 时间.
-	s.lastTickTimeWheel = s.lastTickTimeWheel.Add(tickSpan * time.Duration(elapsedTicks))
+	elapsedTicks := int64(now.Sub(s.lastTickTimeWheel) / tickSpan)
 
 	s.mtxTimer.Unlock()
 
-	// 推进时间轮.
+	// 流逝时间不足一个tick.
+	if elapsedTicks <= 0 {
+		return
+	}
+
+	// 循环推进时间轮.
 	for i := int64(0); i < elapsedTicks; i++ {
-		s.timeWheel.Tick(1)
+		s.mtxTimer.Lock()
+		// 更新时间轮的 tick 时间.
+		s.lastTickTimeWheel = s.lastTickTimeWheel.Add(tickSpan)
+		// 推进时间轮.
+		s.timeWheel.Tick()
+		s.mtxTimer.Unlock()
+
+		// 等待时间轮推进结束.
+		s.timeWheel.TickEnd()
 	}
 }
 

@@ -1,7 +1,6 @@
 package timewheel
 
 import (
-	"container/list"
 	"errors"
 	"fmt"
 	"runtime"
@@ -61,7 +60,7 @@ func newTimer(id uint64, delay int64, periodic bool, f TimerFunc, args any) *tim
 
 // timerPool 定时器池.
 type timerPool struct {
-	mtx sync.Mutex        // 互斥锁.
+	mtx sync.RWMutex      // 互斥锁.
 	m   map[uint64]*timer // 映射.
 }
 
@@ -76,48 +75,68 @@ func (p *timerPool) reset() {
 
 // slot 槽位.
 type slot struct {
-	mtx sync.RWMutex             // 互斥锁.
-	l   *list.List               // 列表.
-	m   map[uint64]*list.Element // 映射.
+	mtx    sync.Mutex        // 互斥锁.
+	timers map[uint64]*timer // 定时器.
 }
 
 func (s *slot) add(t *timer) {
-	s.m[t.id] = s.l.PushBack(t)
+	s.timers[t.id] = t
 }
 
 func (s *slot) remove(timerId uint64) {
-	e, exists := s.m[timerId]
-	if !exists {
-		return
-	}
-	s.l.Remove(e)
-	delete(s.m, timerId)
+	delete(s.timers, timerId)
 }
 
 func (s *slot) empty() bool {
-	return s.l.Len() == 0
+	return len(s.timers) == 0
 }
 
 func (s *slot) reset() {
-	if s.l.Len() == 0 {
+	if len(s.timers) == 0 {
 		return
 	}
-	s.l.Init()
-	s.m = make(map[uint64]*list.Element, s.l.Len())
+	s.timers = make(map[uint64]*timer)
 }
 
 // level 层级结构.
 type level struct {
-	span        time.Duration // 时间跨度.
-	slots       []*slot       // 槽位.
-	currentSlot int           // 当前槽位.
+	span  time.Duration // 时间跨度.
+	slots []*slot       // 槽位.
+
+	mtx         sync.RWMutex      // 读写锁.
+	currentSlot int               // 当前槽位.
+	triggerSlot int               // 正在触发的槽位. -1 表示没有触发. 正在触发的槽位无法添加定时器.
+	delayTimers map[uint64]*timer // 延迟定时器列表, 表示需要在当前触发槽位触发完毕后添加到其中的的定时器.
+}
+
+func (l *level) addDelayTimer(timer *timer) {
+	l.delayTimers[timer.id] = timer
+}
+
+func (l *level) removeDelayTimer(timerId uint64) {
+	delete(l.delayTimers, timerId)
+}
+
+func (l *level) popDelayTimers() map[uint64]*timer {
+	if len(l.delayTimers) == 0 {
+		return nil
+	}
+	delayTimers := l.delayTimers
+	l.delayTimers = make(map[uint64]*timer)
+	return delayTimers
 }
 
 func (l *level) reset() {
 	for i := range l.slots {
-		l.slots[i].reset()
+		if i != l.triggerSlot {
+			l.slots[i].mtx.Lock()
+			l.slots[i].reset()
+			l.slots[i].mtx.Unlock()
+		}
 	}
 	l.currentSlot = 0
+	l.triggerSlot = -1
+	l.delayTimers = make(map[uint64]*timer)
 }
 
 // TimerExecutor 定时器回调函数执行器.
@@ -129,17 +148,17 @@ type TimeWheel struct {
 	lMaxSpan time.Duration // 最低层级最大时间跨度.
 	hMaxSpan time.Duration // 最高层级最大时间跨度.
 
-	mtx                sync.RWMutex
-	stopped            bool           // 是否已停止.
-	cStopped           chan struct{}  // 停止信号.
-	timerIdGen         uint64         // ID生成器.
-	timerPools         []*timerPool   // 定时器池.
-	levels             []*level       // 层级.
-	triggerSlots       []*slot        // 触发槽位.
-	triggerSlotWorkers []chan *slot   // 触发槽位工作器.
-	triggerSlotsWg     sync.WaitGroup // 触发槽位等待组.
-	ticks              int64          // 当前tick数，用于追踪绝对时间.
-	totalTickTime      time.Duration  // 时间轮总运行时长.
+	mtx                 sync.RWMutex
+	stopped             bool           // 是否已停止.
+	cStopped            chan struct{}  // 停止信号.
+	timerIdGen          uint64         // ID生成器.
+	timerPools          []*timerPool   // 定时器池.
+	levels              []*level       // 层级.
+	triggerLevelAmount  int            // 触发层级数.
+	triggerLevelWorkers []chan *level  // 触发槽位工作器.
+	triggerLevelWG      sync.WaitGroup // 触发槽位等待组.
+	ticks               int64          // 当前tick数，用于追踪绝对时间.
+	totalTickTime       time.Duration  // 时间轮总运行时长.
 
 }
 
@@ -174,15 +193,14 @@ func NewTimeWheel(configs []LevelConfig, executor TimerExecutor) (*TimeWheel, er
 
 	// 创建时间轮
 	tw := &TimeWheel{
-		executor:           executor,
-		cStopped:           make(chan struct{}),
-		timerIdGen:         0,
-		timerPools:         make([]*timerPool, runtime.NumCPU()),
-		levels:             make([]*level, len(configs)),
-		triggerSlots:       make([]*slot, 0, len(configs)),
-		triggerSlotWorkers: make([]chan *slot, len(configs)),
-		ticks:              0,
-		totalTickTime:      0,
+		executor:            executor,
+		cStopped:            make(chan struct{}),
+		timerIdGen:          0,
+		timerPools:          make([]*timerPool, runtime.NumCPU()),
+		levels:              make([]*level, len(configs)),
+		triggerLevelWorkers: make([]chan *level, len(configs)),
+		ticks:               0,
+		totalTickTime:       0,
 	}
 
 	// 计算最低、最高层级最大时间跨度.
@@ -205,31 +223,32 @@ func NewTimeWheel(configs []LevelConfig, executor TimerExecutor) (*TimeWheel, er
 			span:        cfg.Span,
 			slots:       make([]*slot, cfg.Slots),
 			currentSlot: 0,
+			triggerSlot: -1,
+			delayTimers: make(map[uint64]*timer),
 		}
 		// 初始化槽位
 		for j := 0; j < cfg.Slots; j++ {
 			level.slots[j] = &slot{
-				l: list.New(),
-				m: make(map[uint64]*list.Element),
+				timers: make(map[uint64]*timer),
 			}
 		}
 		tw.levels[i] = level
 	}
 
 	// 初始化槽位触工作器.
-	for i := range tw.triggerSlotWorkers {
-		c := make(chan *slot, 1)
-		tw.triggerSlotWorkers[i] = c
+	for i := range tw.triggerLevelWorkers {
+		c := make(chan *level, 1)
+		tw.triggerLevelWorkers[i] = c
 		go func() {
 			for {
 				select {
-				case slot := <-c:
-					tw.triggerSlot(slot)
-					tw.triggerSlotsWg.Done()
+				case level := <-c:
+					tw.triggerLevel(level)
+					tw.triggerLevelWG.Done()
 				case <-tw.cStopped:
 					select {
 					case <-c:
-						tw.triggerSlotsWg.Done()
+						tw.triggerLevelWG.Done()
 					default:
 					}
 					return
@@ -361,20 +380,19 @@ func (tw *TimeWheel) AddTimer(opts TimerOptions) (uint64, error) {
 	// 添加定时器.
 	timerPool := tw.getTimerPool(timerId)
 	timerPool.mtx.Lock()
-	timerPool.m[timerId] = timer
+	{
+		// 添加到定时器池.
+		timerPool.m[timerId] = timer
+		// 固定定时器到时间轮
+		tw.pinTimer(timer, true)
+	}
 	timerPool.mtx.Unlock()
-
-	// 固定定时器到时间轮
-	tw.pinTimer(timer)
-
-	// 解锁时间轮.
-	tw.mtx.RUnlock()
 
 	return timerId, nil
 }
 
 // pinTimer 将定时器固定到时间轮的层级结构中
-func (tw *TimeWheel) pinTimer(timer *timer) {
+func (tw *TimeWheel) pinTimer(timer *timer, insideAddTimer bool) {
 	// 计算定时器的剩余延迟时间.
 	tickSpan := tw.tickSpan()
 	d := time.Duration(timer.scheduleTicks-tw.ticks) * tickSpan
@@ -401,14 +419,32 @@ func (tw *TimeWheel) pinTimer(timer *timer) {
 
 	// 计算槽位跨度
 	slots := int(d/level.span) - 1
+
+	// 锁定层级.
+	level.mtx.RLock()
+
+	// 如果是在添加定时器期间, 解锁时间轮.
+	if insideAddTimer {
+		tw.mtx.RUnlock()
+	}
+
 	// 计算最终槽位：当前槽位 + 槽位跨度，然后对总槽位数取模
 	timer.slot = (level.currentSlot + slots) % len(level.slots)
 
-	// 将定时器添加到槽位中.
-	slot := level.slots[timer.slot]
-	slot.mtx.Lock()
-	slot.add(timer)
-	slot.mtx.Unlock()
+	// 将定时器添加到对应槽位中.
+	if timer.slot == level.triggerSlot {
+		// 槽位正在触发, 将定时器添加到延迟队列中.
+		level.addDelayTimer(timer)
+	} else {
+		// 将定时器添加到槽位中.
+		slot := level.slots[timer.slot]
+		slot.mtx.Lock()
+		slot.add(timer)
+		slot.mtx.Unlock()
+	}
+
+	// 解锁层级.
+	level.mtx.RUnlock()
 
 }
 
@@ -428,109 +464,137 @@ func (tw *TimeWheel) RemoveTimer(timerId uint64) bool {
 		return false
 	}
 
-	// 将定时器从时间轮层级中移除.
-	if timer.level != -1 {
-		slot := tw.levels[timer.level].slots[timer.slot]
-		slot.mtx.Lock()
-		slot.remove(timerId)
-		slot.mtx.Unlock()
-	}
-
 	// 删除定时器.
 	delete(timerPool.m, timerId)
 
 	timerPool.mtx.Unlock()
 
+	// 将定时器从时间轮层级中移除.
+	if timer.level != -1 {
+		level := tw.levels[timer.level]
+		level.mtx.Lock()
+		if timer.slot == level.triggerSlot {
+			level.removeDelayTimer(timerId)
+		} else {
+			slot := level.slots[timer.slot]
+			slot.mtx.Lock()
+			slot.remove(timerId)
+			slot.mtx.Unlock()
+		}
+		level.mtx.Unlock()
+	}
+
 	return true
 }
 
 // Tick 推进时间轮，处理到期定时器
-func (tw *TimeWheel) Tick(ticks int) {
+func (tw *TimeWheel) Tick() {
 	if tw.isStopped() {
 		return
 	}
 
-	for i := 0; i < ticks; i++ {
-		// 推进时间轮.
-		if !tw.advance() {
-			return
-		}
+	// 等待上一次tick结束.
+	tw.TickEnd()
 
-		// 触发到期槽位.
-		if len(tw.triggerSlots) > 0 {
-			stopped := false
-			for i, slot := range tw.triggerSlots {
-				select {
-				case tw.triggerSlotWorkers[i] <- slot:
-				case <-tw.cStopped:
-					tw.triggerSlotsWg.Done()
-					stopped = true
-				}
-			}
-			tw.triggerSlotsWg.Wait()
-			if stopped {
-				return
-			}
-		}
-
+	// 推进时间轮.
+	if !tw.advance() {
+		return
 	}
+
+	// 等待触发完成.
+	tw.triggerLevelWG.Wait()
+
+}
+
+// TickEnd 等待时间轮tick结束.
+func (tw *TimeWheel) TickEnd() {
+	tw.triggerLevelWG.Wait()
 }
 
 // advance 推进时间轮.
 func (tw *TimeWheel) advance() bool {
 	tw.mtx.Lock()
 
+	// 时间轮已停止.
 	if tw.stopped {
 		tw.mtx.Unlock()
 		return false
 	}
 
-	tw.triggerSlots = tw.triggerSlots[:0]
+	// 重置触发层级数.
+	tw.triggerLevelAmount = 0
 
 	// 推进当前tick数.
 	tw.ticks++
 	tw.totalTickTime += tw.tickSpan()
 
+	// 添加等待组
+	tw.triggerLevelWG.Add(len(tw.levels))
+
+	tw.mtx.Unlock()
+
 	// 推进层级, 获取待执行的定时器槽位.
-	for _, level := range tw.levels {
-		// 更新层级, 获取待执行的定时器槽位.
+	for i, level := range tw.levels {
+		// 是否触发标记.
+		trigger := false
+
+		// 锁定层级.
+		level.mtx.Lock()
+
+		// 更新触发槽位.
 		slot := level.slots[level.currentSlot]
-		slot.mtx.RLock()
+		slot.mtx.Lock()
 		if !slot.empty() {
-			tw.triggerSlots = append(tw.triggerSlots, slot)
+			// 槽位非空, 添加触发槽位, 并设置层级触发槽位.
+			level.triggerSlot = level.currentSlot
+			tw.triggerLevelAmount++
+			trigger = true
 		}
-		slot.mtx.RUnlock()
+		slot.mtx.Unlock()
+
+		// 更新层级当前槽位.
 		level.currentSlot = (level.currentSlot + 1) % len(level.slots)
 
-		// 层级归零, 向上层推进.
-		if level.currentSlot != 0 {
+		// 判断层级是否归零.
+		return2Zero := level.currentSlot == 0
+
+		// 解锁层级.
+		level.mtx.Unlock()
+
+		// 分配触发层级.
+		if trigger {
+			tw.triggerLevelWorkers[i] <- level
+		}
+
+		// 层级归零, 才向上层推进.
+		if !return2Zero {
 			break
 		}
 	}
 
-	if n := len(tw.triggerSlots); n > 0 {
-		tw.triggerSlotsWg.Add(n)
+	// 根据已触发槽位数调整等待组.
+	if n := len(tw.levels) - tw.triggerLevelAmount; n > 0 {
+		tw.triggerLevelWG.Add(-n)
 	}
-
-	tw.mtx.Unlock()
 
 	return true
 }
 
-// triggerSlot 触发槽位.
-func (tw *TimeWheel) triggerSlot(slot *slot) {
-	for {
-		// 取出定时器.
-		slot.mtx.Lock()
-		front := slot.l.Front()
-		if front == nil {
-			slot.mtx.Unlock()
-			break
-		}
-		timer := front.Value.(*timer)
-		slot.l.Remove(front)
-		delete(slot.m, timer.id)
-		slot.mtx.Unlock()
+// triggerLevel 触发层级.
+func (tw *TimeWheel) triggerLevel(level *level) {
+	// 获取触发槽位.
+	level.mtx.RLock()
+	if level.triggerSlot == -1 {
+		level.mtx.RUnlock()
+		return
+	}
+	slot := level.slots[level.triggerSlot]
+	level.mtx.RUnlock()
+
+	// 触发槽位中的定时器.
+	for tid, timer := range slot.timers {
+		// 删除定时器.
+		delete(slot.timers, tid)
 
 		// 获取定时器池.
 		timerPool := tw.getTimerPool(timer.id)
@@ -556,7 +620,7 @@ func (tw *TimeWheel) triggerSlot(slot *slot) {
 				timer.level = -1
 				timer.slot = -1
 				timer.scheduleTicks = tw.ticks + timer.delay
-				tw.pinTimer(timer)
+				tw.pinTimer(timer, false)
 				timerPool.mtx.Unlock()
 			} else {
 				// 非周期性定时器直接删除.
@@ -571,13 +635,37 @@ func (tw *TimeWheel) triggerSlot(slot *slot) {
 			timerPool.mtx.Lock()
 			if !timerPool.exists(timer.id) {
 				timerPool.mtx.Unlock()
+				slot.remove(tid)
 				continue
 			}
-			tw.pinTimer(timer)
+			tw.pinTimer(timer, false)
 			timerPool.mtx.Unlock()
 		}
 
 	}
+
+	// 更新层级, 取出延迟定时器.
+	level.mtx.Lock()
+	level.triggerSlot = -1
+	delayTimers := level.popDelayTimers()
+	level.mtx.Unlock()
+
+	// 处理延迟定时器.
+	if len(delayTimers) > 0 {
+		for tid, timer := range delayTimers {
+			timerPool := tw.getTimerPool(tid)
+			timerPool.mtx.Lock()
+			if !timerPool.exists(tid) {
+				timerPool.mtx.Unlock()
+				continue
+			}
+			slot.mtx.Lock()
+			slot.add(timer)
+			slot.mtx.Unlock()
+			timerPool.mtx.Unlock()
+		}
+	}
+
 }
 
 // Reset 重置时间轮.
@@ -608,16 +696,11 @@ func (tw *TimeWheel) Stop() {
 
 // reset 重置时间轮.
 func (tw *TimeWheel) reset() {
-	// 先尽快停止正在触发的槽位.
-	for _, slot := range tw.triggerSlots {
-		slot.mtx.Lock()
-		slot.reset()
-		slot.mtx.Unlock()
-	}
-
 	// 重置层级.
 	for _, level := range tw.levels {
+		level.mtx.Lock()
 		level.reset()
+		level.mtx.Unlock()
 	}
 
 	// 重置定时器池.
@@ -628,10 +711,11 @@ func (tw *TimeWheel) reset() {
 	}
 
 	// 等待槽位触发完成.
-	tw.triggerSlotsWg.Wait()
+	tw.triggerLevelWG.Wait()
 
 	// 重置其它数据.
 	tw.timerIdGen = 0
 	tw.ticks = 0
 	tw.totalTickTime = 0
+	tw.triggerLevelAmount = 0
 }
