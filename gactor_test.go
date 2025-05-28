@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/godyy/gactor/core/timewheel"
 	"github.com/godyy/glog"
+	"github.com/godyy/gtimewheel"
 
 	pkgerrors "github.com/pkg/errors"
 
@@ -86,7 +86,7 @@ func TestService(t *testing.T) {
 
 	svcConfig := &ServiceConfig{
 		ActorDefines: actorDefines,
-		TimeWheelLevels: []timewheel.LevelConfig{
+		TimeWheelLevels: []gtimewheel.LevelConfig{
 			{Name: "100 ms", Span: 100 * time.Millisecond, Slots: 10},
 			{Name: "s", Span: 1 * time.Second, Slots: 60},
 			{Name: "min", Span: 1 * time.Minute, Slots: 60},

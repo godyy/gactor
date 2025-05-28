@@ -8,9 +8,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/godyy/gactor/core/timewheel"
 	"github.com/godyy/gactor/internal/examples/s2s/handlers/server"
 	"github.com/godyy/gactor/internal/examples/s2s/handlers/user"
+	"github.com/godyy/gtimewheel"
 
 	"github.com/godyy/gcluster/center"
 
@@ -155,7 +155,7 @@ func main() {
 	}
 	s1.Service = gactor.NewService(&gactor.ServiceConfig{
 		ActorDefines: actorDefines,
-		TimeWheelLevels: []timewheel.LevelConfig{
+		TimeWheelLevels: []gtimewheel.LevelConfig{
 			{Name: "100ms", Span: 100 * time.Millisecond, Slots: 10},
 			{Name: "s", Span: 1 * time.Second, Slots: 60},
 			{Name: "m", Span: 1 * time.Minute, Slots: 60},
@@ -197,7 +197,7 @@ func main() {
 	}
 	s2.Service = gactor.NewService(&gactor.ServiceConfig{
 		ActorDefines: actorDefines,
-		TimeWheelLevels: []timewheel.LevelConfig{
+		TimeWheelLevels: []gtimewheel.LevelConfig{
 			{Name: "100ms", Span: 100 * time.Millisecond, Slots: 10},
 			{Name: "s", Span: 1 * time.Second, Slots: 60},
 			{Name: "m", Span: 1 * time.Minute, Slots: 60},

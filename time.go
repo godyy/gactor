@@ -3,7 +3,7 @@ package gactor
 import (
 	"time"
 
-	"github.com/godyy/gactor/core/timewheel"
+	"github.com/godyy/gtimewheel"
 )
 
 // TimeSystem 时间系统.
@@ -35,10 +35,10 @@ func DefTimeSystem() TimeSystem {
 type TimerId = uint64
 
 // TimerIdNone 表示无效的定时器ID.
-const TimerIdNone = timewheel.TimerIdNone
+const TimerIdNone = gtimewheel.TimerIdNone
 
 // TimerFunc 定时器回调函数.
-type TimerFunc = timewheel.TimerFunc
+type TimerFunc = gtimewheel.TimerFunc
 
 // TimerArgs 定时器参数.
-type TimerArgs = timewheel.TimerArgs
+type TimerArgs = gtimewheel.TimerArgs

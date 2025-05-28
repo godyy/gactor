@@ -8,10 +8,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/godyy/gactor/core/timewheel"
 	"github.com/godyy/gactor/internal/utils"
-
 	"github.com/godyy/glog"
+	"github.com/godyy/gtimewheel"
 )
 
 // ErrPacketEscape 表示数据包逃逸.
@@ -39,7 +38,7 @@ type ServiceConfig struct {
 	ActorDefines []ActorDefineImpl
 
 	// TimeWheelLevels 时间轮配置.
-	TimeWheelLevels []timewheel.LevelConfig
+	TimeWheelLevels []gtimewheel.LevelConfig
 
 	// MaxTimerDelay 最大定时器延迟. 默认值为 TimeWheelLevels 配置支持的最大值.
 	MaxTimerDelay time.Duration
@@ -188,11 +187,11 @@ type Service struct {
 	priorityActors        map[int]*priorityActors // 按优先级管理的 Actor 集合.
 	maxActorPriorityIndex int                     // 当前 Actor 最大优先级索引.
 
-	mtxTimer          sync.RWMutex         // 定时器读写锁.
-	timeWheel         *timewheel.TimeWheel // 时间轮.
-	timeWheelTicker   *time.Ticker         // 时间轮 ticker.
-	lastTickTimeWheel time.Time            // 上次时间轮的 tick 时间.
-	triggeredTimers   chan triggeredTimer  // 已触发的定时器, 等待执行.
+	mtxTimer          sync.RWMutex          // 定时器读写锁.
+	timeWheel         *gtimewheel.TimeWheel // 时间轮.
+	timeWheelTicker   *time.Ticker          // 时间轮 ticker.
+	lastTickTimeWheel time.Time             // 上次时间轮的 tick 时间.
+	triggeredTimers   chan triggeredTimer   // 已触发的定时器, 等待执行.
 }
 
 func NewService(cfg *ServiceConfig, option ...ServiceOption) *Service {
@@ -220,7 +219,7 @@ func NewService(cfg *ServiceConfig, option ...ServiceOption) *Service {
 
 	s.rpcManager = newRPCManager(s, cfg.MaxCompletedRPCAmount)
 
-	if timeWheel, err := timewheel.NewTimeWheel(cfg.TimeWheelLevels, s.timerExecutor); err != nil {
+	if timeWheel, err := gtimewheel.NewTimeWheel(cfg.TimeWheelLevels, s.timerExecutor); err != nil {
 		panic(err)
 	} else {
 		s.timeWheel = timeWheel
@@ -640,7 +639,7 @@ func (s *Service) StartTimer(d time.Duration, repeat bool, args any, cb TimerFun
 
 	now := s.getTimeSystem().Now()
 	offset := now.Sub(s.lastTickTimeWheel)
-	tid, _ := s.timeWheel.AddTimer(timewheel.TimerOptions{
+	tid, _ := s.timeWheel.AddTimer(gtimewheel.TimerOptions{
 		Delay:    d,
 		Offset:   offset,
 		Periodic: repeat,
@@ -726,7 +725,7 @@ func (s *Service) tickTimeWheel() {
 }
 
 // timerExecutor 定时器执行回调.
-func (s *Service) timerExecutor(tf TimerFunc, args timewheel.TimerArgs) {
+func (s *Service) timerExecutor(tf TimerFunc, args gtimewheel.TimerArgs) {
 	select {
 	case s.triggeredTimers <- triggeredTimer{
 		cb:   tf,

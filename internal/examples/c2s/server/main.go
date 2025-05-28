@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/godyy/gactor"
-	"github.com/godyy/gactor/core/timewheel"
 	"github.com/godyy/gactor/internal/examples/c2s/common"
 	"github.com/godyy/gactor/internal/examples/c2s/common/consts"
 	"github.com/godyy/gactor/internal/examples/c2s/common/logger"
@@ -19,6 +18,7 @@ import (
 	"github.com/godyy/gactor/internal/examples/c2s/server/actors/define"
 	"github.com/godyy/gcluster"
 	"github.com/godyy/gcluster/net"
+	"github.com/godyy/gtimewheel"
 	"go.uber.org/zap"
 )
 
@@ -238,7 +238,7 @@ func main() {
 
 	s.svc = gactor.NewService(&gactor.ServiceConfig{
 		ActorDefines: define.Defines,
-		TimeWheelLevels: []timewheel.LevelConfig{
+		TimeWheelLevels: []gtimewheel.LevelConfig{
 			{Name: "100ms", Span: 100 * time.Millisecond, Slots: 10},
 			{Name: "s", Span: 1 * time.Second, Slots: 60},
 			{Name: "m", Span: 1 * time.Minute, Slots: 60},
