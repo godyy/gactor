@@ -97,7 +97,7 @@ type PacketCodec interface {
 	//	PacketTypeRawReq
 	//	PacketTypeS2SRpc, PacketTypeS2SRpcResp, PacketTypeS2SCast
 	//
-	// 返回 ErrPacketEscape, 系统内部将不再自动回收数据包 p.
+	// 返回 ErrPacketEscape, 表示数据包被外部劫持, 系统内部将不再自动回收数据包 p.
 	DecodePayload(pt PacketType, p Packet, v any) error
 }
 
