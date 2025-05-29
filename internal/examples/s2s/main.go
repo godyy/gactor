@@ -36,7 +36,7 @@ const (
 )
 
 var (
-	actorDefines = []gactor.ActorDefineImpl{
+	actorDefines = []gactor.IActorDefine{
 		&gactor.CActorDefine{
 			ActorDefineCommon: &gactor.ActorDefineCommon{
 				Name:                       "user",

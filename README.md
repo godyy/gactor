@@ -315,7 +315,7 @@ func (t *MyTimeSystem) Until(t time.Time) time.Duration {
 // 创建Service配置
 config := &gactor.ServiceConfig{
     // Actor定义列表
-    ActorDefines: []gactor.ActorDefineImpl{
+    ActorDefines: []gactor.IActorDefine{
         MyActorDefine,
         MyCActorDefine,
     },

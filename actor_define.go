@@ -12,30 +12,30 @@ import (
 // ErrActorDefineNotExists Actor 定义不存在.
 var ErrActorDefineNotExists = errors.New("gactor: actor define not exists")
 
-// ActorDefineImpl Actor 定义实现接口封装.
-type ActorDefineImpl interface {
+// IActorDefine Actor 定义接口.
+type IActorDefine interface {
 	// init 初始化配置, 验证数据是否有效.
 	init() error
 
 	// common 通用部分.
 	common() *ActorDefineCommon
 
-	// newActorCore 创建 Actor.
+	// createActor 创建 Actor.
 	createActor(svc *Service, id int64) actorImpl
 }
 
 // actorDefineSet Actor 定义集合.
 type actorDefineSet struct {
-	defineMap      map[uint16]ActorDefineImpl // Actor 定义.
-	priorityList   []int                      // 优先级列表.
-	priority2Index map[int]int                // 优先级索引.
+	defineMap      map[uint16]IActorDefine // Actor 定义.
+	priorityList   []int                   // 优先级列表.
+	priority2Index map[int]int             // 优先级索引.
 }
 
-func newActorDefineSet(actorDefines []ActorDefineImpl) *actorDefineSet {
+func newActorDefineSet(actorDefines []IActorDefine) *actorDefineSet {
 	if len(actorDefines) == 0 {
 		panic("gactor: no actor define")
 	}
-	defineMap := make(map[uint16]ActorDefineImpl, len(actorDefines))
+	defineMap := make(map[uint16]IActorDefine, len(actorDefines))
 	priorityList := make([]int, 0)
 	priorityMap := make(map[int]bool)
 	for i, actorDefine := range actorDefines {
@@ -63,7 +63,7 @@ func newActorDefineSet(actorDefines []ActorDefineImpl) *actorDefineSet {
 	}
 }
 
-func (s *actorDefineSet) getDefine(category uint16) ActorDefineImpl {
+func (s *actorDefineSet) getDefine(category uint16) IActorDefine {
 	return s.defineMap[category]
 }
 
@@ -144,7 +144,7 @@ type ActorDefine struct {
 
 func (ad *ActorDefine) init() error {
 	if ad.ActorDefineCommon == nil {
-		return errors.New("core nil")
+		return errors.New("common nil")
 	}
 
 	if err := ad.ActorDefineCommon.init(); err != nil {
@@ -180,7 +180,7 @@ type CActorDefine struct {
 
 func (ad *CActorDefine) init() error {
 	if ad.ActorDefineCommon == nil {
-		return errors.New("core nil")
+		return errors.New("common nil")
 	}
 
 	if err := ad.ActorDefineCommon.init(); err != nil {

@@ -41,7 +41,7 @@ func TestService(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	actorDefines := []ActorDefineImpl{
+	actorDefines := []IActorDefine{
 		&ActorDefine{
 			ActorDefineCommon: &ActorDefineCommon{
 				Name:                       "test",

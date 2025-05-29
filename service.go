@@ -35,7 +35,7 @@ type ServiceHandler interface {
 type ServiceConfig struct {
 	// ActorDefines Actor 定义.
 	// required.
-	ActorDefines []ActorDefineImpl
+	ActorDefines []IActorDefine
 
 	// TimeWheelLevels 时间轮配置.
 	TimeWheelLevels []gtimewheel.LevelConfig

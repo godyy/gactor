@@ -10,7 +10,7 @@ import (
 	"github.com/godyy/gactor/internal/examples/c2s/server/handlers/user"
 )
 
-var Defines = []gactor.ActorDefineImpl{
+var Defines = []gactor.IActorDefine{
 	&gactor.CActorDefine{
 		ActorDefineCommon: &gactor.ActorDefineCommon{
 			Name:                       consts.CategoryNameUser,
