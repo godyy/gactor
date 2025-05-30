@@ -64,6 +64,7 @@ func actorBeforeLoop(a actorImpl) error {
 	// 启动行为.
 	if err := a.Behavior().OnStart(); err != nil {
 		core.getLogger().ErrorFields("OnStart failed", lfdError(err))
+		a.core().service().monitorActorOnStartErr(a.core().Category)
 		return errCodeStartActorFailed
 	}
 
@@ -81,6 +82,7 @@ func actorLoop(a actorImpl) {
 	defer func() {
 		if err := recover(); err != nil {
 			a.core().getLogger().ErrorFields("loop panic", lfdPanic(err))
+			a.core().service().monitorActorPanic(a.core().Category)
 			actorStopWithErr(a, errCodeActorLoopError)
 		}
 	}()
@@ -565,13 +567,13 @@ func (a *actorCore) resetRecycleTimer(stop bool) {
 }
 
 // StartTimer 启动定时器.
-func (a *actorCore) StartTimer(d time.Duration, repeat bool, args any, cb ActorTimerFunc) TimerId {
+func (a *actorCore) StartTimer(d time.Duration, periodic bool, args any, cb ActorTimerFunc) TimerId {
 	if err := a.lockState(actorStateStarted, true); err != nil {
 		return 0
 	}
 	defer a.unlock(true)
 
-	return a.svc.startActorTimer(a.ActorUID(), d, repeat, args, cb)
+	return a.svc.startActorTimer(a.ActorUID(), d, periodic, args, cb)
 }
 
 // StopTimer 停止定时器.
@@ -606,16 +608,23 @@ func (a *actorCore) RPC(ctx context.Context, to ActorUID, params, reply any) err
 
 // actorAsyncRPCFunc Actor 异步 RPC 回调封装.
 type actorAsyncRPCFunc struct {
-	actor actorImpl
-	cb    ActorRPCFunc
+	svc *Service
+	uid ActorUID
+	cb  ActorRPCFunc
 }
 
 func (f *actorAsyncRPCFunc) invoke(resp *RPCResp) {
-	defer f.actor.core().deref()
-	ctx, cancel := context.WithTimeout(context.Background(), f.actor.core().service().getCfg().ActorReceiveCompletedAsyncRPCTimeout)
-	defer cancel()
-	if err := f.actor.core().receiveCompletedAsyncRPC(ctx, resp, f.cb); err != nil {
-		f.actor.core().getLogger().ErrorFields("receive async rpc call failed", lfdError(err))
+	if actor, err := f.svc.getActor(f.uid); err != nil {
+		f.svc.getLogger().ErrorFields("get actor failed inside actorAsyncRPCFunc", lfdActorUID(f.uid), lfdError(err))
+	} else if actor == nil {
+		f.svc.getLogger().WarnFields("actor not found inside actorAsyncRPCFunc", lfdActorUID(f.uid))
+	} else {
+		defer actor.core().deref()
+		ctx, cancel := context.WithTimeout(context.Background(), f.svc.getCfg().ActorReceiveCompletedAsyncRPCTimeout)
+		defer cancel()
+		if err := actor.core().receiveCompletedAsyncRPC(ctx, resp, f.cb); err != nil {
+			actor.core().getLogger().ErrorFields("receive async rpc call failed", lfdError(err))
+		}
 	}
 }
 
@@ -626,8 +635,9 @@ func (a *actorCore) asyncRPC(ctx context.Context, impl actorImpl, to ActorUID, p
 	}
 
 	asyncFunc := &actorAsyncRPCFunc{
-		actor: impl,
-		cb:    cb,
+		svc: a.svc,
+		uid: a.ActorUID(),
+		cb:  cb,
 	}
 
 	if err := a.svc.asyncRPC(ctx, to, params, asyncFunc.invoke); err != nil {
@@ -656,6 +666,7 @@ func (a *actor) start() error {
 func (a *actor) stopped() {
 	if err := a.Behavior().OnStop(); err != nil {
 		a.getLogger().ErrorFields("OnStop failed", lfdError(err))
+		a.service().monitorActorOnStopErr(a.Category)
 	} else {
 		a.getLogger().DebugFields("OnStop")
 	}

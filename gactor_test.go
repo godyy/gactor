@@ -261,6 +261,10 @@ func (sh *testServiceHandler) GetTimeSystem() TimeSystem {
 	return sh.TimeSystem
 }
 
+func (sh *testServiceHandler) GetMonitor() ServiceMonitor {
+	return nil
+}
+
 type testActor struct {
 	Actor
 	name   string

@@ -73,6 +73,10 @@ func (s *server) GetTimeSystem() gactor.TimeSystem {
 	return s.timeSys
 }
 
+func (s *server) GetMonitor() gactor.ServiceMonitor {
+	return nil
+}
+
 // NodeId 返回本地节点ID.
 func (s *server) NodeId() string {
 	return s.agent.NodeId()

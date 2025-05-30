@@ -29,6 +29,9 @@ type ServiceHandler interface {
 
 	// GetTimeSystem 获取时间系统.
 	GetTimeSystem() TimeSystem
+
+	// GetMonitor 获取监控器.
+	GetMonitor() ServiceMonitor
 }
 
 // ServiceConfig Service 配置.
@@ -295,6 +298,28 @@ func (s *Service) unlockState(read bool) {
 	} else {
 		s.mtxState.Unlock()
 	}
+}
+
+// lockNotStopped 如果已启动且未完全停机, 锁定状态.
+func (s *Service) lockNotStopped(read bool) error {
+	if read {
+		s.mtxState.RLock()
+	} else {
+		s.mtxState.Lock()
+	}
+
+	state := s.state
+	if state != serviceStateInit && state != serviceStateStopped {
+		return nil
+	}
+
+	if read {
+		s.mtxState.RUnlock()
+	} else {
+		s.mtxState.Unlock()
+	}
+
+	return serviceStateErr(state)
 }
 
 // isRunning 返回是否运行中.
@@ -586,7 +611,7 @@ func (s *Service) startActor(ctx context.Context, uid ActorUID) (actorImpl, erro
 
 // refActor 引用 Actor.
 func (s *Service) refActor(uid ActorUID) (actorImpl, error) {
-	if err := s.lockState(serviceStateStarted, true); err != nil {
+	if err := s.lockNotStopped(true); err != nil {
 		return nil, err
 	}
 	defer s.unlockState(true)
@@ -612,6 +637,34 @@ func (s *Service) refActor(uid ActorUID) (actorImpl, error) {
 	return actor, nil
 }
 
+// getActor 获取 Actor.
+func (s *Service) getActor(uid ActorUID) (actorImpl, error) {
+	if err := s.lockNotStopped(true); err != nil {
+		return nil, err
+	}
+	defer s.unlockState(true)
+
+	// 获取 Actor 定义.
+	define := s.getDefine(uid.Category)
+	if define == nil {
+		return nil, ErrActorDefineNotExists
+	}
+	defineCommon := define.common()
+
+	// 获取 Actor 分类集合.
+	categoryActors := s.getCategoryActors(defineCommon.Priority, defineCommon.Category)
+	categoryActors.lock(true)
+	defer categoryActors.unlock(true)
+
+	// 获取 Actor.
+	actor := categoryActors.getActor(uid.ID)
+	if actor == nil {
+		return nil, nil
+	}
+
+	return actor, nil
+}
+
 // newActorCore 创建 Actor.
 func (s *Service) createActor(uid ActorUID) actorImpl {
 	actorDefine := s.defineMap[uid.Category]
@@ -624,7 +677,7 @@ func (s *Service) getNodeIdOfActor(uid ActorUID) (string, error) {
 }
 
 // StartTimer 启动定时器.
-func (s *Service) StartTimer(d time.Duration, repeat bool, args any, cb TimerFunc) TimerId {
+func (s *Service) StartTimer(d time.Duration, periodic bool, args any, cb TimerFunc) TimerId {
 	if cb == nil {
 		panic("gactor: cb is nil")
 	}
@@ -639,13 +692,17 @@ func (s *Service) StartTimer(d time.Duration, repeat bool, args any, cb TimerFun
 
 	now := s.getTimeSystem().Now()
 	offset := now.Sub(s.lastTickTimeWheel)
-	tid, _ := s.timeWheel.AddTimer(gtimewheel.TimerOptions{
+	tid, err := s.timeWheel.AddTimer(gtimewheel.TimerOptions{
 		Delay:    d,
 		Offset:   offset,
-		Periodic: repeat,
+		Periodic: periodic,
 		Func:     cb,
 		Args:     args,
 	})
+	if err != nil {
+		// 更新监控数据.
+		s.monitorStartTimerAmount(s.timeWheel.AddAmount())
+	}
 
 	return tid
 }
@@ -658,12 +715,12 @@ type actorTimerArgs struct {
 }
 
 // startActorTimer 启动 Actor 定时器.
-func (s *Service) startActorTimer(uid ActorUID, d time.Duration, repeat bool, args any, cb ActorTimerFunc) TimerId {
+func (s *Service) startActorTimer(uid ActorUID, d time.Duration, periodic bool, args any, cb ActorTimerFunc) TimerId {
 	if cb == nil {
 		panic("gactor: cb is nil")
 	}
 
-	return s.StartTimer(d, repeat, &actorTimerArgs{
+	return s.StartTimer(d, periodic, &actorTimerArgs{
 		uid:  uid,
 		cb:   cb,
 		args: args,
@@ -675,7 +732,7 @@ func (s *Service) execActorTimer(args TimerArgs) {
 	aargs := args.Args.(*actorTimerArgs)
 
 	actor, err := s.refActor(aargs.uid)
-	if err != nil {
+	if err != nil || actor == nil {
 		return
 	}
 
@@ -691,7 +748,10 @@ func (s *Service) StopTimer(tid TimerId) {
 	}
 	defer s.unlockState(true)
 
-	s.timeWheel.RemoveTimer(tid)
+	if s.timeWheel.RemoveTimer(tid) {
+		// 更新监控数据.
+		s.monitorStopTimerAmount(s.timeWheel.RemoveAmount())
+	}
 }
 
 // tickTimer 推进时间轮.
@@ -721,6 +781,11 @@ func (s *Service) tickTimeWheel() {
 
 		// 等待时间轮推进结束.
 		s.timeWheel.TickEnd()
+
+		// 更新定时器监控数据.
+		s.monitorStartTimerAmount(s.timeWheel.AddAmount())
+		s.monitorStopTimerAmount(s.timeWheel.RemoveAmount())
+		s.monitorTriggerTimerAmount(s.timeWheel.TriggerAmount())
 	}
 }
 
@@ -771,23 +836,23 @@ func (s *Service) doRPC(ctx context.Context, cancel context.CancelFunc, to Actor
 	// 获取目标 Actor 所在节点信息.
 	toNodeId, err = s.getNodeIdOfActor(to)
 	if err != nil {
+		s.monitorRPCAction(MonitorCANodeInfoErr)
 		return err
 	}
 
 	if err := ctx.Err(); err != nil {
+		s.monitorRPCActionContextErr(err)
 		return err
 	}
 
 	deadline, ok := ctx.Deadline()
 	if !ok {
+		s.monitorRPCAction(MonitorCAContextErr)
 		return errors.New("context deadline not set")
 	}
 
 	// 创建 RPC 调用实例.
-	call, err = s.rpcManager.createCall(to, deadline, cb)
-	if err != nil {
-		return err
-	}
+	call = s.rpcManager.createCall(to, deadline, cb)
 
 	// 包头.
 	ph := s2sRpcPacketHead{
@@ -800,9 +865,9 @@ func (s *Service) doRPC(ctx context.Context, cancel context.CancelFunc, to Actor
 		// 目标节点非本地.
 		// 编码数据包并发送到远端节点.
 
-		err = s.sendPacket(ctx, toNodeId, &ph, params)
-
-		if err == nil && cancel != nil {
+		if err = s.sendPacket(ctx, toNodeId, &ph, params); err != nil {
+			s.monitorRPCActionSend2RemoteErr(err)
+		} else if cancel != nil {
 			cancel()
 		}
 
@@ -810,11 +875,13 @@ func (s *Service) doRPC(ctx context.Context, cancel context.CancelFunc, to Actor
 		// 目标节点为本地.
 
 		// 编码 payload, 创建 rpcRequest 并发送给 Actor.
-		p, err = s.encodePayload(PacketTypeS2SRpc, params)
-		if err == nil {
+		if p, err = s.encodePayload(PacketTypeS2SRpc, params); err != nil {
+			s.monitorRPCAction(MonitorCASend2LocalErr)
+		} else {
 			request := newContext(ctx, cancel, s, newRPCRequest(toNodeId, ph, p))
 			if err = s.send2Actor(ctx, to, request); err != nil {
 				request.release()
+				s.monitorRPCActionSend2LocalErr(err)
 			}
 		}
 	}
@@ -939,12 +1006,14 @@ func (s *Service) cast(ctx context.Context, to ActorUID, payload any) error {
 	// 获取目标 Actor 所在节点信息.
 	toNodeId, err = s.getNodeIdOfActor(to)
 	if err != nil {
+		s.monitorCastAction(MonitorCANodeInfoErr)
 		return err
 	}
 
 	// 优先检查 ctx 是否done.
 	// 如果 ctx 未设置 deadline, 设置默认超时.
 	if err := ctx.Err(); err != nil {
+		s.monitorCastActionContextErr(err)
 		return err
 	}
 	if _, ok := ctx.Deadline(); ok {
@@ -960,12 +1029,16 @@ func (s *Service) cast(ctx context.Context, to ActorUID, payload any) error {
 	// 如果 Actor 位于其它节点.
 	// 编码数据并发送到远端.
 	if toNodeId != s.nodeId() {
-		return s.sendPacket(ctx, toNodeId, &ph, payload)
+		if err := s.sendPacket(ctx, toNodeId, &ph, payload); err != nil {
+			s.monitorCastActionSend2RemoteErr(err)
+			return err
+		}
 	}
 
 	// 编码 payload
 	encodedPayload, err := s.encodePayload(PacketTypeS2SCast, payload)
 	if err != nil {
+		s.monitorCastAction(MonitorCASend2LocalErr)
 		return err
 	}
 
@@ -973,8 +1046,10 @@ func (s *Service) cast(ctx context.Context, to ActorUID, payload any) error {
 	request := newContext(ctx, cancel, s, newCastRequest(ph, encodedPayload))
 	if err := s.send2Actor(ctxTimeout, to, request); err != nil {
 		request.release()
+		s.monitorCastActionSend2LocalErr(err)
 		return err
 	} else {
+		s.monitorCastAction(MonitorCACast)
 		return nil
 	}
 }
@@ -1010,9 +1085,16 @@ func (s *Service) send2Actor(ctx context.Context, uid ActorUID, msg message) err
 // onActorStopped 处理 Actor 停机完成事件.
 func (s *Service) onActorStopped(actor actorImpl) {
 	s.logger.DebugFields("on actor stopped", lfdActorWithImpl(actor))
+
+	// 删除 Actor.
 	ac := actor.core()
 	categoryActors := s.getCategoryActorsByCategory(ac.Category)
 	categoryActors.delActor(ac.id)
+
+	// 更新监控数据.
+	s.monitorActorStop(ac.Category)
+
+	// 启动下一个 Actor.
 	if starter := categoryActors.getStarter(ac.id); starter != nil {
 		starter.start(s)
 	}
@@ -1161,6 +1243,9 @@ func (s *actorStarter) start(svc *Service) {
 	// 引用并公告 Actor 启动完成.
 	err := actor.core().ref()
 	if err == nil {
+		// 更新监控数据.
+		svc.monitorActorStart(s.uid.Category)
+
 		// 公告 Actor.
 		categoryActors.lock(false)
 		categoryActors.addActor(actor)
@@ -1219,6 +1304,14 @@ func (ca *categoryActors) addActor(actor actorImpl) {
 
 func (ca *categoryActors) delActor(id int64) {
 	ca.actors.Delete(id)
+}
+
+func (ca *categoryActors) getActor(id int64) actorImpl {
+	if actor, exists := ca.actors.Load(id); exists {
+		return actor
+	} else {
+		return nil
+	}
 }
 
 func (ca *categoryActors) refActor(id int64) (actorImpl, error) {

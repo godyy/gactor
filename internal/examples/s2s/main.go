@@ -332,6 +332,10 @@ func (s *service) GetTimeSystem() gactor.TimeSystem {
 	return s.TimeSystem
 }
 
+func (s *service) GetMonitor() gactor.ServiceMonitor {
+	return nil
+}
+
 func (s *service) OnNodePacket(remoteNodeId string, p *net.RawPacket) error {
 	return s.Service.HandlePacket(remoteNodeId, p)
 }

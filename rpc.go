@@ -248,7 +248,7 @@ func (m *rpcManager) onTimer(args TimerArgs) {
 }
 
 // createCall 创建 Call.
-func (m *rpcManager) createCall(to ActorUID, expiredAt time.Time, cb RPCFunc) (*rpcCall, error) {
+func (m *rpcManager) createCall(to ActorUID, expiredAt time.Time, cb RPCFunc) *rpcCall {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 
@@ -264,7 +264,7 @@ func (m *rpcManager) createCall(to ActorUID, expiredAt time.Time, cb RPCFunc) (*
 		m.resetTimer(call.expiredAt)
 	}
 
-	return call, nil
+	return call
 }
 
 // removeCallByReqId 通过 reqId 移除 Call.
@@ -304,6 +304,15 @@ func (m *rpcManager) popCall(reqId uint64) *rpcCall {
 
 // handleCallDone 处理调用完成.
 func (m *rpcManager) handleCallDone(call *rpcCall, payload Packet, err error) {
+	// 更新监控数据.
+	if err == nil {
+		m.svc.monitorRPCAction(MonitorCARPC)
+	} else if errors.Is(err, ErrRPCTimeout) {
+		m.svc.monitorRPCAction(MonitorCARPCTimeout)
+	} else {
+		m.svc.monitorRPCAction(MonitorCAResponseErr)
+	}
+
 	call.onResponse(payload, err)
 	m.completedCalls <- call
 }

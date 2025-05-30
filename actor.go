@@ -56,7 +56,7 @@ type Actor interface {
 	Behavior() ActorBehavior
 
 	// StartTimer 启动定时器.
-	StartTimer(d time.Duration, repeat bool, args any, cb ActorTimerFunc) TimerId
+	StartTimer(d time.Duration, periodic bool, args any, cb ActorTimerFunc) TimerId
 
 	// StopTimer 停止定时器.
 	StopTimer(TimerId)
