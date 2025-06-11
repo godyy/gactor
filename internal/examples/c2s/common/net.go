@@ -16,7 +16,8 @@ const (
 	ReadBufSize            = 128 * 1024
 	WriteBufSize           = 128 * 1024
 	ReadWriteTimeout       = 60 * time.Second
-	HeartbeatInterval      = 15 * time.Second
+	TickInterval           = 5 * time.Second
+	HeartbeatTimeout       = 15 * time.Second
 	InactiveTimeout        = 5 * time.Minute
 )
 

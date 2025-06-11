@@ -3,7 +3,7 @@ module github.com/godyy/gactor
 go 1.22
 
 require (
-	github.com/godyy/gcluster v0.0.1
+	github.com/godyy/gcluster v0.0.3
 	github.com/godyy/glog v0.1.0
 	github.com/godyy/gnet v0.2.2
 	github.com/godyy/gtimewheel v0.1.1

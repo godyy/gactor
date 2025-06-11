@@ -223,11 +223,13 @@ func main() {
 			ReadBufSize:            common.ReadBufSize,
 			WriteBufSize:           common.WriteBufSize,
 			ReadWriteTimeout:       common.ReadWriteTimeout,
-			HeartbeatInterval:      common.HeartbeatInterval,
+			TickInterval:           common.TickInterval,
+			HeartbeatTimeout:       common.HeartbeatTimeout,
 			InactiveTimeout:        common.InactiveTimeout,
 		},
 		Dialer:          common.Dialer,
 		ListenerCreator: common.CreateListener,
+		TimerSystem:     net.NewTimerHeap(),
 	}
 
 	if agent, err := gcluster.CreateService(&gcluster.ServiceConfig{

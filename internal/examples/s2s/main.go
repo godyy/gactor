@@ -121,8 +121,8 @@ func main() {
 		MaxPacketLength:        64 * 1024,
 		ReadBufSize:            128 * 1024,
 		WriteBufSize:           128 * 1024,
-		ReadWriteTimeout:       5 * time.Second,
-		HeartbeatInterval:      2 * time.Second,
+		ReadWriteTimeout:       10 * time.Second,
+		TickInterval:           2 * time.Second,
 		InactiveTimeout:        60 * time.Second,
 	}
 	dialer := func(addr string) (stdnet.Conn, error) {
@@ -146,6 +146,7 @@ func main() {
 			Session:         sessionConfig,
 			Dialer:          dialer,
 			ListenerCreator: createListener,
+			TimerSystem:     net.NewTimerHeap(),
 		},
 		Handler: s1,
 	}, gcluster.WithLogger(logger.Logger())); err != nil {
@@ -188,6 +189,7 @@ func main() {
 			Session:         sessionConfig,
 			Dialer:          dialer,
 			ListenerCreator: createListener,
+			TimerSystem:     net.NewTimerHeap(),
 		},
 		Handler: s2,
 	}, gcluster.WithLogger(logger.Logger())); err != nil {
