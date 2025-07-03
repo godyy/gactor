@@ -53,8 +53,8 @@ func (s *server) stop() error {
 	return nil
 }
 
-func (s *server) OnNodePacket(remoteNodeId string, p *net.RawPacket) error {
-	return s.svc.HandlePacket(remoteNodeId, p)
+func (s *server) OnNodeBytes(remoteNodeId string, b []byte) error {
+	return s.svc.HandlePacket(remoteNodeId, b)
 }
 
 func (s *server) GetMetaDriver() gactor.MetaDriver {
@@ -83,17 +83,17 @@ func (s *server) NodeId() string {
 }
 
 // SendPacket 发送数据包 p 到 nodeId 指定的节点.
-func (s *server) SendPacket(ctx context.Context, nodeId string, p gactor.Packet) error {
-	return s.agent.Send2Node(ctx, nodeId, p.(*net.RawPacket))
+func (s *server) Send(ctx context.Context, nodeId string, b []byte) error {
+	return s.agent.Send2Node(ctx, nodeId, b)
 }
 
 // GetPacket 获取容量为 size 的数据包.
-func (s *server) GetPacket(size int) gactor.Packet {
-	return net.NewRawPacketWithCap(size)
+func (s *server) GetBytes(size int) []byte {
+	return make([]byte, 0, size)
 }
 
 // PutPacket 回收数据包.
-func (s *server) PutPacket(p gactor.Packet) {
+func (s *server) PutBytes(b []byte) {
 }
 
 // EncodePacket 编码数据包.
@@ -104,7 +104,7 @@ func (s *server) PutPacket(p gactor.Packet) {
 //
 //	PacketTypeRawResp, PacketTypeRawPush
 //	PacketTypeS2SRpc, PacketTypeS2SRpcResp, PacketTypeS2SCast
-func (s *server) Encode(allocator gactor.PacketAllocator, payload any) (gactor.Packet, error) {
+func (s *server) Encode(allocator gactor.PacketAllocator, payload any) ([]byte, error) {
 	switch allocator.PacketType() {
 	case gactor.PacketTypeRawReq:
 		return payload.(*message.ReqMessage).EncodePacket(allocator)
@@ -126,7 +126,7 @@ func (s *server) Encode(allocator gactor.PacketAllocator, payload any) (gactor.P
 // 数据包类型包括:
 //
 //	PacketTypeS2SRpc, PacketTypeS2SCast
-func (s *server) EncodePayload(pt gactor.PacketType, payload any) (gactor.Packet, error) {
+func (s *server) EncodePayload(pt gactor.PacketType, payload any) ([]byte, error) {
 	switch pt {
 	case gactor.PacketTypeRawReq:
 		return payload.(*message.ReqMessage).Encode()
@@ -151,18 +151,18 @@ func (s *server) EncodePayload(pt gactor.PacketType, payload any) (gactor.Packet
 //	PacketTypeS2SRpc, PacketTypeS2SRpcResp, PacketTypeS2SCast
 //
 // 返回 ErrPacketEscape, 系统内部将不再自动回收数据包 p.
-func (s *server) DecodePayload(pt gactor.PacketType, p gactor.Packet, v any) error {
+func (s *server) DecodePayload(pt gactor.PacketType, b *gactor.Buffer, v any) error {
 	switch pt {
 	case gactor.PacketTypeRawReq:
-		return v.(*message.ReqMessage).Decode(p)
+		return v.(*message.ReqMessage).Decode(b)
 	case gactor.PacketTypeRawResp:
-		return v.(*message.RespMessage).Decode(p)
+		return v.(*message.RespMessage).Decode(b)
 	case gactor.PacketTypeRawPush:
-		return v.(*message.PushMessage).Decode(p)
+		return v.(*message.PushMessage).Decode(b)
 	case gactor.PacketTypeS2SRpc:
-		return v.(*message.RpcMessage).Decode(p)
+		return v.(*message.RpcMessage).Decode(b)
 	case gactor.PacketTypeS2SRpcResp:
-		return v.(*message.RpcRespMessage).Decode(p)
+		return v.(*message.RpcRespMessage).Decode(b)
 	default:
 		panic("not implemented") // TODO: Implement
 	}
@@ -194,7 +194,7 @@ func main() {
 
 	s := &server{
 		MetaDriver: metaDriver,
-		timeSys:    gactor.DefTimeSystem(),
+		timeSys:    gactor.DefTimeSystem,
 	}
 
 	center := common.NewCenter()
@@ -223,16 +223,16 @@ func main() {
 			ReadBufSize:            common.ReadBufSize,
 			WriteBufSize:           common.WriteBufSize,
 			ReadWriteTimeout:       common.ReadWriteTimeout,
-			TickInterval:           common.TickInterval,
 			HeartbeatTimeout:       common.HeartbeatTimeout,
 			InactiveTimeout:        common.InactiveTimeout,
+			TickInterval:           common.TickInterval,
 		},
 		Dialer:          common.Dialer,
 		ListenerCreator: common.CreateListener,
 		TimerSystem:     net.NewTimerHeap(),
 	}
 
-	if agent, err := gcluster.CreateService(&gcluster.ServiceConfig{
+	if agent, err := gcluster.CreateAgent(&gcluster.AgentConfig{
 		Center:  center,
 		Net:     netServiceConfig,
 		Handler: s,
@@ -252,7 +252,12 @@ func main() {
 		},
 		DefRPCTimeout: 5 * time.Second,
 		Handler:       s,
-	}, gactor.WithServiceLogger(logger.Logger()))
+	}, gactor.WithServiceLogger(logger.Logger()),
+		gactor.WithServiceAckManager(&gactor.AckConfig{
+			Timeout:      common.AckTimeout,
+			MaxRetry:     common.AckRetry,
+			TickInterval: common.AckTickInterval,
+		}))
 
 	if err := s.start(); err != nil {
 		logger.Logger().FatalFields("start failed", zap.Error(err))

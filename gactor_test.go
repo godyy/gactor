@@ -13,8 +13,6 @@ import (
 	"github.com/godyy/gtimewheel"
 
 	pkgerrors "github.com/pkg/errors"
-
-	"github.com/godyy/gnet"
 )
 
 var (
@@ -81,7 +79,7 @@ func TestService(t *testing.T) {
 		testMetaDriver:  metaDriver,
 		testNetAgent:    &testNetAgent{nodeId: "test"},
 		testPacketCodec: &testPacketCodec{},
-		TimeSystem:      DefTimeSystem(),
+		TimeSystem:      DefTimeSystem,
 	}
 
 	svcConfig := &ServiceConfig{
@@ -141,21 +139,21 @@ func (na *testNetAgent) NodeId() string {
 	return na.nodeId
 }
 
-func (na *testNetAgent) SendPacket(ctx context.Context, nodeId string, p Packet) error {
+func (na *testNetAgent) Send(ctx context.Context, nodeId string, b []byte) error {
 	return nil
 }
 
 type testPacketCodec struct {
 }
 
-func (pc *testPacketCodec) GetPacket(size int) Packet {
-	return gnet.NewBufferWithCap(size)
+func (pc *testPacketCodec) GetBytes(size int) []byte {
+	return make([]byte, 0, size)
 }
 
-func (pc *testPacketCodec) PutPacket(p Packet) {
+func (pc *testPacketCodec) PutBytes(b []byte) {
 }
 
-func (pc *testPacketCodec) Encode(allocator PacketAllocator, payload any) (Packet, error) {
+func (pc *testPacketCodec) Encode(allocator PacketAllocator, payload any) ([]byte, error) {
 	switch allocator.PacketType() {
 	case PacketTypeS2SRpcResp, PacketTypeS2SRpc, PacketTypeS2SCast:
 		s2sMsg, ok := payload.(*testS2SMessage)
@@ -166,23 +164,23 @@ func (pc *testPacketCodec) Encode(allocator PacketAllocator, payload any) (Packe
 		if err != nil {
 			return nil, pkgerrors.WithMessage(err, "marshal RPC payload")
 		}
-		p, err := allocator.Allocate(4 + len(bytes))
-		if err != nil {
-			return nil, pkgerrors.WithMessage(err, "allocate packet")
+		var buf Buffer
+		if err := allocator.AllocBuf(&buf, 4+len(bytes)); err != nil {
+			return nil, pkgerrors.WithMessage(err, "allocate buffer")
 		}
-		if err := p.WriteUint32(uint32(s2sMsg.msgId)); err != nil {
+		if err := buf.WriteUint32(uint32(s2sMsg.msgId)); err != nil {
 			return nil, pkgerrors.WithMessage(err, "write msg id")
 		}
-		if _, err := p.Write(bytes); err != nil {
+		if _, err := buf.Write(bytes); err != nil {
 			return nil, pkgerrors.WithMessage(err, "write msg bytes")
 		}
-		return p, nil
+		return buf.Data(), nil
 	default:
 		return nil, fmt.Errorf("invalid packet type %d", allocator.PacketType())
 	}
 }
 
-func (pc *testPacketCodec) EncodePayload(pt PacketType, payload any) (Packet, error) {
+func (pc *testPacketCodec) EncodePayload(pt PacketType, payload any) ([]byte, error) {
 	switch pt {
 	case PacketTypeS2SRpcResp, PacketTypeS2SRpc, PacketTypeS2SCast:
 		s2sMsg, ok := payload.(*testS2SMessage)
@@ -193,34 +191,36 @@ func (pc *testPacketCodec) EncodePayload(pt PacketType, payload any) (Packet, er
 		if err != nil {
 			return nil, pkgerrors.WithMessage(err, "marshal RPC payload")
 		}
-		p := pc.GetPacket(4 + len(bytes))
-		if err := p.WriteUint32(uint32(s2sMsg.msgId)); err != nil {
+		b := pc.GetBytes(4 + len(bytes))
+		var buf Buffer
+		buf.SetBuf(b)
+		if err := buf.WriteUint32(uint32(s2sMsg.msgId)); err != nil {
 			return nil, pkgerrors.WithMessage(err, "write msg id")
 		}
-		if _, err := p.Write(bytes); err != nil {
+		if _, err := buf.Write(bytes); err != nil {
 			return nil, pkgerrors.WithMessage(err, "write msg bytes")
 		}
-		return p, nil
+		return buf.Data(), nil
 	default:
 		return nil, fmt.Errorf("invalid packet type %d", pt)
 	}
 }
 
-func (pc *testPacketCodec) DecodePayload(pt PacketType, p Packet, v any) error {
+func (pc *testPacketCodec) DecodePayload(pt PacketType, b *Buffer, v any) error {
 	switch pt {
 	case PacketTypeS2SRpcResp, PacketTypeS2SRpc, PacketTypeS2SCast:
 		s2sMsg, ok := v.(*testS2SMessage)
 		if !ok {
 			return errors.New("invalid payload type")
 		}
-		return pc.decodeS2SMessage(p, s2sMsg)
+		return pc.decodeS2SMessage(b, s2sMsg)
 	default:
 		return fmt.Errorf("invalid packet type %d", pt)
 	}
 }
 
-func (pc *testPacketCodec) decodeS2SMessage(p Packet, s2sMsg *testS2SMessage) error {
-	msgId, err := p.ReadUint32()
+func (pc *testPacketCodec) decodeS2SMessage(b *Buffer, s2sMsg *testS2SMessage) error {
+	msgId, err := b.ReadUint32()
 	if err != nil {
 		return pkgerrors.WithMessage(err, "read msg id")
 	}
@@ -235,7 +235,7 @@ func (pc *testPacketCodec) decodeS2SMessage(p Packet, s2sMsg *testS2SMessage) er
 	default:
 		return fmt.Errorf("invalid msg id %d", msgId)
 	}
-	return json.Unmarshal(p.UnreadData(), s2sMsg.payload)
+	return json.Unmarshal(b.UnreadData(), s2sMsg.payload)
 }
 
 type testServiceHandler struct {

@@ -269,7 +269,7 @@ type actorTriggeredTimer struct {
 
 // actorCompletedAsyncRPC Actor 发起的已完成的异步 RPC 调用.
 type actorCompletedAsyncRPC struct {
-	payload Packet       // 响应负载数据.
+	payload Buffer       // 响应负载数据.
 	err     error        // 错误信息.
 	cb      ActorRPCFunc // 回调函数.
 }
@@ -540,7 +540,7 @@ func (a *actorCore) receiveCompletedAsyncRPC(ctx context.Context, resp *RPCResp,
 		err:     resp.err,
 		cb:      cb,
 	}
-	resp.payload = nil
+	resp.payload.SetBuf(nil)
 
 	select {
 	case a.completedAsyncRPC <- asyncCall:
@@ -750,8 +750,12 @@ func (a *cActor) PushRawMessage(ctx context.Context, payload any) error {
 	if a.session.NodeId == "" {
 		return ErrActorNotConnected
 	}
-	ph := rawPushPacketHead{fromId: a.ActorUID(), sid: a.session.SID}
-	return a.svc.sendPacket(ctx, a.session.NodeId, &ph, payload)
+	ph := rawPushPacketHead{
+		seq_:   a.service().genSeq(),
+		fromId: a.ActorUID(),
+		sid:    a.session.SID,
+	}
+	return a.svc.sendRemotePacket(ctx, a.session.NodeId, &ph, payload)
 }
 
 // Disconnect 端开与客户端的连接.
@@ -764,7 +768,7 @@ func (a *cActor) Disconnect(ctx context.Context) {
 		uid: a.ActorUID(),
 		sid: a.session.SID,
 	}
-	if err := a.svc.sendPacket(ctx, a.session.NodeId, &ph, nil); err != nil {
+	if err := a.svc.sendRemotePacket(ctx, a.session.NodeId, &ph, nil); err != nil {
 		a.getLogger().ErrorFields("send disconnect packet failed", lfdSession(a.session), lfdError(err))
 	}
 

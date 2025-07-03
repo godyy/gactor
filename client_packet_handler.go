@@ -7,16 +7,39 @@ import (
 	pkgerrors "github.com/pkg/errors"
 )
 
+// cliHandlePacketAck PacketTypeAck 处理器.
+func cliHandlePacketAck(c *Client, nodeId string, b *Buffer) error {
+	// 解码包头.
+	var head ackPacketHead
+	if err := head.decode(b); err != nil {
+		return pkgerrors.WithMessage(err, "gactor: cliHandlePacketAck: decode request Head")
+	}
+
+	// 释放缓冲区.
+	c.freeBuffer(b)
+
+	// 移除待确认数据包.
+	c.remPacket2Ack(head.ackPt, head.ackSeq)
+
+	return nil
+}
+
 // cliHandlePacketRawResp PacketTypeRawResp 处理器.
-func cliHandlePacketRawResp(c *Client, nodeId string, p Packet) error {
+func cliHandlePacketRawResp(c *Client, nodeId string, b *Buffer) error {
 	// 解码包头.
 	var head rawRespPacketHead
-	if err := head.decode(p); err != nil {
+	if err := head.decode(b); err != nil {
 		return pkgerrors.WithMessage(err, "gactor: cliHandlePacketRawResp: decode request Head")
 	}
 
+	// 发送 Ack 确认.
+	if err := c.sendAckPacket(nodeId, &head); err != nil {
+		c.getLogger().ErrorFields("cliHandlePacketRawResp: send ack packet failed", lfdActorUID(head.fromId), lfdError(err))
+	}
+
+	// 发生错误.
 	if !errors.Is(head.errCode, errCodeOK) {
-		c.putPacket(p)
+		c.freeBuffer(b)
 		c.handleResponse(ClientResponse{
 			UID: head.fromId,
 			SID: head.sid,
@@ -25,49 +48,64 @@ func cliHandlePacketRawResp(c *Client, nodeId string, p Packet) error {
 		return nil
 	}
 
+	// 处理响应.
 	c.handleResponse(ClientResponse{
 		UID:     head.fromId,
 		SID:     head.sid,
-		Payload: p,
+		Payload: *b,
 	})
 
 	return nil
 }
 
 // cliHandlePacketRawPush PacketTypeRawPush 处理器.
-func cliHandlePacketRawPush(c *Client, nodeId string, p Packet) error {
+func cliHandlePacketRawPush(c *Client, nodeId string, b *Buffer) error {
 	// 解码包头.
 	var head rawPushPacketHead
-	if err := head.decode(p); err != nil {
+	if err := head.decode(b); err != nil {
 		return pkgerrors.WithMessage(err, "gactor: cliHandlePacketRawPush: decode request Head")
 	}
 
+	// 发送 Ack 确认.
+	if err := c.sendAckPacket(nodeId, &head); err != nil {
+		c.getLogger().ErrorFields("cliHandlePacketRawPush: send ack packet failed", lfdActorUID(head.fromId), lfdError(err))
+	}
+
+	// 处理推送.
 	c.handlePush(ClientPush{
 		UID:     head.fromId,
 		SID:     head.sid,
-		Payload: p,
+		Payload: *b,
 	})
 
 	return nil
 }
 
 // cliHandlePacketS2SDisconnect PacketTypeS2SDisconnected 处理器.
-func cliHandlePacketS2SDisconnect(c *Client, nodeId string, p Packet) error {
+func cliHandlePacketS2SDisconnect(c *Client, nodeId string, b *Buffer) error {
 	// 解码包头.
 	var head s2sDisconnectedPacketHead
-	if err := head.decode(p); err != nil {
+	if err := head.decode(b); err != nil {
 		return pkgerrors.WithMessage(err, "gactor: cliHandlePacketS2SDisconnect: decode request Head")
 	}
 
-	c.putPacket(p)
+	// 发送 Ack 确认.
+	if err := c.sendAckPacket(nodeId, &head); err != nil {
+		c.getLogger().ErrorFields("cliHandlePacketS2SDisconnect: send ack packet failed", lfdActorUID(head.uid), lfdError(err))
+	}
 
+	// 释放缓冲区.
+	c.freeBuffer(b)
+
+	// 处理断开连接.
 	c.handleDisconnect(head.uid, head.sid)
 
 	return nil
 }
 
 // clientPacketHandlers Client 数据包处理器.
-var clientPacketHandlers = map[PacketType]func(c *Client, nodeId string, p Packet) error{
+var clientPacketHandlers = map[PacketType]func(c *Client, nodeId string, b *Buffer) error{
+	PacketTypeAck:             cliHandlePacketAck,
 	PacketTypeRawResp:         cliHandlePacketRawResp,
 	PacketTypeRawPush:         cliHandlePacketRawPush,
 	PacketTypeS2SDisconnected: cliHandlePacketS2SDisconnect,
@@ -75,16 +113,27 @@ var clientPacketHandlers = map[PacketType]func(c *Client, nodeId string, p Packe
 
 // HandlePacket 处理网络 Packet.
 // 若返回非空 error, 则 p 需要用户自行回收. 否则内部工作流会自动回收.
-func (c *Client) HandlePacket(nodeId string, p Packet) error {
-	pt, err := packetIOHelper.readPacketType(p)
+func (c *Client) HandlePacket(nodeId string, b []byte) error {
+	// 设置缓冲区.
+	var buf Buffer
+	buf.SetBuf(b)
+
+	// 读取数据包类型.
+	pt, err := buf.readPacketType()
 	if err != nil {
-		return err
+		return pkgerrors.WithMessage(err, "read packet type")
 	}
 
+	// 获取处理器.
 	handler := clientPacketHandlers[pt]
 	if handler == nil {
 		return fmt.Errorf("packet type %d not support", pt)
 	}
 
-	return handler(c, nodeId, p)
+	if err := c.lockRunning(true); err != nil {
+		return err
+	}
+	defer c.unlockState(true)
+
+	return handler(c, nodeId, &buf)
 }

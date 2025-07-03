@@ -121,8 +121,8 @@ func main() {
 		MaxPacketLength:        64 * 1024,
 		ReadBufSize:            128 * 1024,
 		WriteBufSize:           128 * 1024,
-		ReadWriteTimeout:       10 * time.Second,
-		TickInterval:           2 * time.Second,
+		ReadWriteTimeout:       5 * time.Second,
+		HeartbeatTimeout:       2 * time.Second,
 		InactiveTimeout:        60 * time.Second,
 	}
 	dialer := func(addr string) (stdnet.Conn, error) {
@@ -132,12 +132,19 @@ func main() {
 		return stdnet.Listen("tcp", addr)
 	}
 
+	var ackConfig *gactor.AckConfig
+	ackConfig = &gactor.AckConfig{
+		Timeout:      100 * time.Millisecond,
+		MaxRetry:     1,
+		TickInterval: 50 * time.Millisecond,
+	}
+
 	s1 = &service{
 		metaDriver:  &metaDriver{metaMap},
 		packetCodec: &packetCodec{},
-		TimeSystem:  gactor.DefTimeSystem(),
+		TimeSystem:  gactor.DefTimeSystem,
 	}
-	if agent, err := gcluster.CreateService(&gcluster.ServiceConfig{
+	if agent, err := gcluster.CreateAgent(&gcluster.AgentConfig{
 		Center: center,
 		Net: &net.ServiceConfig{
 			NodeId:          s1NodeId,
@@ -167,7 +174,7 @@ func main() {
 		MaxCompletedRPCAmount:                0,
 		MaxRTT:                               0,
 		Handler:                              s1,
-	})
+	}, gactor.WithServiceLogger(logger.Logger()), gactor.WithServiceAckManager(ackConfig))
 	if err := s1.Service.Start(); err != nil {
 		panic(pkgerrors.WithMessage(err, "start service 1 actor"))
 	}
@@ -178,9 +185,9 @@ func main() {
 	s2 = &service{
 		metaDriver:  &metaDriver{metaMap},
 		packetCodec: &packetCodec{},
-		TimeSystem:  gactor.DefTimeSystem(),
+		TimeSystem:  gactor.DefTimeSystem,
 	}
-	if agent, err := gcluster.CreateService(&gcluster.ServiceConfig{
+	if agent, err := gcluster.CreateAgent(&gcluster.AgentConfig{
 		Center: center,
 		Net: &net.ServiceConfig{
 			NodeId:          s2NodeId,
@@ -210,7 +217,7 @@ func main() {
 		MaxCompletedRPCAmount:                0,
 		MaxRTT:                               0,
 		Handler:                              s2,
-	})
+	}, gactor.WithServiceLogger(logger.Logger()), gactor.WithServiceAckManager(ackConfig))
 	if err := s2.Service.Start(); err != nil {
 		panic(pkgerrors.WithMessage(err, "start service 2 actor"))
 	}
@@ -284,30 +291,30 @@ func (a *netAgent) NodeId() string {
 	return a.Agent.NodeId()
 }
 
-func (a *netAgent) SendPacket(ctx context.Context, nodeId string, p gactor.Packet) error {
-	return a.Send2Node(ctx, nodeId, p.(*net.RawPacket))
+func (a *netAgent) Send(ctx context.Context, nodeId string, b []byte) error {
+	return a.Send2Node(ctx, nodeId, b)
 }
 
 type packetCodec struct {
 }
 
-func (c *packetCodec) GetPacket(size int) gactor.Packet {
-	return net.NewRawPacketWithCap(size)
+func (c *packetCodec) GetBytes(size int) []byte {
+	return make([]byte, 0, size)
 }
 
-func (c *packetCodec) PutPacket(p gactor.Packet) {
+func (c *packetCodec) PutBytes(b []byte) {
 }
 
-func (c *packetCodec) Encode(allocator gactor.PacketAllocator, payload any) (gactor.Packet, error) {
+func (c *packetCodec) Encode(allocator gactor.PacketAllocator, payload any) ([]byte, error) {
 	return message.EncodePacket(allocator, payload.(*message.Msg))
 }
 
-func (c *packetCodec) EncodePayload(pt gactor.PacketType, payload any) (gactor.Packet, error) {
+func (c *packetCodec) EncodePayload(pt gactor.PacketType, payload any) ([]byte, error) {
 	return message.EncodeMsg(c, payload.(*message.Msg))
 }
 
-func (c *packetCodec) DecodePayload(pt gactor.PacketType, p gactor.Packet, v any) error {
-	return message.DecodeMsgWithoutDecodePayload(p, v.(*message.Msg))
+func (c *packetCodec) DecodePayload(pt gactor.PacketType, b *gactor.Buffer, v any) error {
+	return message.DecodeMsgWithoutDecodePayload(b, v.(*message.Msg))
 }
 
 type service struct {
@@ -338,6 +345,6 @@ func (s *service) GetMonitor() gactor.ServiceMonitor {
 	return nil
 }
 
-func (s *service) OnNodePacket(remoteNodeId string, p *net.RawPacket) error {
-	return s.Service.HandlePacket(remoteNodeId, p)
+func (s *service) OnNodeBytes(remoteNodeId string, b []byte) error {
+	return s.Service.HandlePacket(remoteNodeId, b)
 }

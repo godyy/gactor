@@ -8,7 +8,7 @@ var logger glog.Logger
 
 func Init() error {
 	l := glog.NewLogger(&glog.Config{
-		Level:        glog.DebugLevel,
+		Level:        glog.InfoLevel,
 		EnableCaller: true,
 		CallerSkip:   0,
 		Development:  true,

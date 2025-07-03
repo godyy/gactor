@@ -15,7 +15,7 @@ var ErrRPCTimeout = errors.New("gactor: rpc timeout")
 // RPCResp RPC 响应参数.
 type RPCResp struct {
 	svc     *Service // Service.
-	payload Packet   // 响应负载数据.
+	payload Buffer   // 响应负载数据.
 	err     error    // 错误信息.
 }
 
@@ -24,10 +24,10 @@ func (resp *RPCResp) DecodeReply(v any) error {
 	if resp.err != nil {
 		return resp.err
 	}
-	if err := resp.svc.decodePayload(PacketTypeS2SRpcResp, resp.payload, v); err == nil {
+	if err := resp.svc.decodePayload(PacketTypeS2SRpcResp, &resp.payload, v); err == nil {
 		return nil
-	} else if errors.Is(err, ErrPacketEscape) {
-		resp.payload = nil
+	} else if errors.Is(err, ErrBytesEscape) {
+		resp.payload.SetBuf(nil)
 		return nil
 	} else {
 		return err
@@ -40,10 +40,7 @@ func (resp *RPCResp) Err() error {
 }
 
 func (resp *RPCResp) release() {
-	if resp.payload != nil {
-		resp.svc.putPacket(resp.payload)
-		resp.payload = nil
-	}
+	resp.svc.freeBuffer(&resp.payload)
 }
 
 // RPCFunc RPC回调.
@@ -53,10 +50,10 @@ type RPCFunc func(*RPCResp)
 // rpcCall 内部 RPC 调用实例实现.
 type rpcCall struct {
 	heapIndex   int      // heap index.
-	reqId       uint64   // RPC 调用序列 ID.
+	reqId       uint32   // RPC 调用序列 ID.
 	to          ActorUID // 目标 ActorUID.
 	expiredAt   int64    // 过期时间.
-	respPayload Packet   // RPC 响应负载数据.
+	respPayload Buffer   // RPC 响应负载数据.
 	err         error    // 错误信息.
 	cb          RPCFunc  // 回调函数.
 }
@@ -77,13 +74,15 @@ func (call *rpcCall) HeapIndex() int {
 	return call.heapIndex
 }
 
-func (call *rpcCall) onResponse(payload Packet, err error) {
-	call.respPayload = payload
+func (call *rpcCall) onResponse(payload *Buffer, err error) {
+	if payload != nil {
+		call.respPayload = *payload
+	}
 	call.err = err
 }
 
 func (call *rpcCall) release() {
-	call.respPayload = nil
+	call.respPayload.SetBuf(nil)
 	call.err = nil
 	call.cb = nil
 	poolOfRPCCall.Put(call)
@@ -95,8 +94,8 @@ type rpcManager struct {
 	completedCalls chan *rpcCall // 已完成等待执行回调的 rpcCall.
 
 	mtx       sync.Mutex           // mtx for following.
-	reqIdIncr uint64               // req id 自增键.
-	callMap   map[uint64]*rpcCall  // call map.
+	reqIdIncr uint32               // req id 自增键.
+	callMap   map[uint32]*rpcCall  // call map.
 	callHeap  *heap.Heap[*rpcCall] // call heap, 按照过期时间排序.
 	timerId   TimerId              // 定时器ID.
 	cTick     chan struct{}        // chan for tick.
@@ -108,7 +107,7 @@ func newRPCManager(svc *Service, maxCompletedCalls int) *rpcManager {
 		svc:            svc,
 		completedCalls: make(chan *rpcCall, maxCompletedCalls),
 		reqIdIncr:      0,
-		callMap:        make(map[uint64]*rpcCall),
+		callMap:        make(map[uint32]*rpcCall),
 		callHeap:       heap.NewHeap[*rpcCall](),
 		timerId:        TimerIdNone,
 		cTick:          make(chan struct{}, 1),
@@ -118,7 +117,7 @@ func newRPCManager(svc *Service, maxCompletedCalls int) *rpcManager {
 }
 
 // genReqId 生成 req id.
-func (m *rpcManager) genReqId() uint64 {
+func (m *rpcManager) genReqId() uint32 {
 	m.reqIdIncr++
 	return m.reqIdIncr
 }
@@ -269,7 +268,7 @@ func (m *rpcManager) createCall(to ActorUID, expiredAt time.Time, cb RPCFunc) *r
 
 // removeCallByReqId 通过 reqId 移除 Call.
 // 通常在出现错误需要直接移除 Call 的情况下调用.
-func (m *rpcManager) removeCallByReqId(reqId uint64) bool {
+func (m *rpcManager) removeCallByReqId(reqId uint32) bool {
 	call := m.popCall(reqId)
 	if call == nil {
 		return false
@@ -280,7 +279,7 @@ func (m *rpcManager) removeCallByReqId(reqId uint64) bool {
 }
 
 // popCall 移除 reqId 指定的 Call. 并重置定时器.
-func (m *rpcManager) popCall(reqId uint64) *rpcCall {
+func (m *rpcManager) popCall(reqId uint32) *rpcCall {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 
@@ -303,7 +302,7 @@ func (m *rpcManager) popCall(reqId uint64) *rpcCall {
 }
 
 // handleCallDone 处理调用完成.
-func (m *rpcManager) handleCallDone(call *rpcCall, payload Packet, err error) {
+func (m *rpcManager) handleCallDone(call *rpcCall, payload *Buffer, err error) {
 	// 更新监控数据.
 	if err == nil {
 		m.svc.monitorRPCAction(MonitorCARPC)
@@ -318,7 +317,7 @@ func (m *rpcManager) handleCallDone(call *rpcCall, payload Packet, err error) {
 }
 
 // handleResponse 处理 RPC Response. 返回对应的 rpcCall 是否存在.
-func (m *rpcManager) handleResponse(reqId uint64, payload Packet, err error) bool {
+func (m *rpcManager) handleResponse(reqId uint32, payload *Buffer, err error) bool {
 	call := m.popCall(reqId)
 	if call == nil {
 		return false

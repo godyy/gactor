@@ -20,8 +20,23 @@ func lfdNodeId(nodeId string) zap.Field {
 	return zap.String("nodeId", nodeId)
 }
 
+func lfdRemoteNodeId(nodeId string) zap.Field {
+	return zap.String("remoteNodeId", nodeId)
+}
+
 func lfdPacketType(pt PacketType) zap.Field {
 	return zap.Int8("packetType", pt)
+}
+
+func lfdPacketSeq(seq uint32) zap.Field {
+	return zap.Uint32("packetSeq", seq)
+}
+
+func lfdPacketTypeSeq(ph packetHead) zap.Field {
+	return zap.Dict("packet",
+		zap.Int8("type", ph.pt()),
+		zap.Uint32("seq", ph.seq()),
+	)
 }
 
 func lfdRequestType(rt RequestType) zap.Field {
@@ -46,8 +61,8 @@ func lfdActorUID(uid ActorUID) zap.Field {
 	)
 }
 
-func lfdReqId(reqId uint64) zap.Field {
-	return zap.Uint64("reqId", reqId)
+func lfdReqId(reqId uint32) zap.Field {
+	return zap.Uint32("reqId", reqId)
 }
 
 func lfdPanic(err any) zap.Field {

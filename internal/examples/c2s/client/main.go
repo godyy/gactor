@@ -39,6 +39,8 @@ func (c *client) stop() error {
 		return err
 	}
 
+	c.cli.Stop()
+
 	return nil
 }
 
@@ -49,8 +51,8 @@ func (c *client) getUser(uid int64) *user {
 	return nil
 }
 
-func (c *client) OnNodePacket(nodeId string, p *net.RawPacket) error {
-	return c.cli.HandlePacket(nodeId, p)
+func (c *client) OnNodeBytes(nodeId string, b []byte) error {
+	return c.cli.HandlePacket(nodeId, b)
 }
 
 func (c *client) GetMetaDriver() gactor.MetaDriver {
@@ -61,7 +63,7 @@ func (c *client) GetNetAgent() gactor.NetAgent {
 	return c
 }
 
-func (c *client) GetPacketManager() gactor.PacketManager {
+func (c *client) GetBytesManager() gactor.BytesManager {
 	return c
 }
 
@@ -70,18 +72,18 @@ func (c *client) NodeId() string {
 	return c.agent.NodeId()
 }
 
-// SendPacket 发送数据包 p 到 nodeId 指定的节点.
-func (c *client) SendPacket(ctx context.Context, nodeId string, p gactor.Packet) error {
-	return c.agent.Send2Node(ctx, nodeId, p.(*net.RawPacket))
+// SendBytes 发送字节流到 nodeId 指定的节点.
+func (c *client) Send(ctx context.Context, nodeId string, b []byte) error {
+	return c.agent.Send2Node(ctx, nodeId, b)
 }
 
-// GetPacket 获取容量为 size 的数据包.
-func (c *client) GetPacket(size int) gactor.Packet {
-	return net.NewRawPacketWithCap(size)
+// GetBytes 获取容量为 size 的字节流.
+func (c *client) GetBytes(size int) []byte {
+	return make([]byte, 0, size)
 }
 
-// PutPacket 回收数据包.
-func (c *client) PutPacket(p gactor.Packet) {
+// PutBytes 回收字节流.
+func (c *client) PutBytes(b []byte) {
 }
 
 // HandleResponse 处理 ClientResponse.
@@ -127,7 +129,7 @@ type msg interface {
 
 type msgResp struct {
 	sid     uint32
-	payload gactor.Packet
+	payload gactor.Buffer
 	err     error
 }
 
@@ -143,7 +145,7 @@ func (m *msgResp) handle(u *user) {
 	}
 
 	var respMsg message.RespMessage
-	if err := respMsg.Decode(m.payload); err != nil && !errors.Is(err, gactor.ErrPacketEscape) {
+	if err := respMsg.Decode(&m.payload); err != nil && !errors.Is(err, gactor.ErrBytesEscape) {
 		logger.Logger().ErrorFields("user decode resp failed", zap.Error(err))
 		return
 	}
@@ -153,7 +155,7 @@ func (m *msgResp) handle(u *user) {
 
 type msgPush struct {
 	sid     uint32
-	payload gactor.Packet
+	payload gactor.Buffer
 }
 
 func (m *msgPush) handle(u *user) {
@@ -163,7 +165,7 @@ func (m *msgPush) handle(u *user) {
 	}
 
 	var pushMsg message.PushMessage
-	if err := pushMsg.Decode(m.payload); err != nil && !errors.Is(err, gactor.ErrPacketEscape) {
+	if err := pushMsg.Decode(&m.payload); err != nil && !errors.Is(err, gactor.ErrBytesEscape) {
 		logger.Logger().ErrorFields("user decode push failed", zap.Error(err))
 		return
 	}
@@ -227,7 +229,7 @@ func (u *user) login() error {
 		Username: u.userName,
 		Password: u.password,
 	})
-	p, err := loginReq.Encode()
+	b, err := loginReq.Encode()
 	if err != nil {
 		return err
 	}
@@ -238,7 +240,7 @@ func (u *user) login() error {
 	return cli.cli.SendRequest(ctx, gactor.ClientRequest{
 		UID:     gactor.ActorUID{consts.CategoryUser, u.uid},
 		SID:     u.sid,
-		Payload: p.UnreadData(),
+		Payload: b,
 	})
 }
 
@@ -246,7 +248,7 @@ func (u *user) heartbeat() error {
 	heartbeatReq := message.NewReqMessageWithPayload(u.genReqId(), &message.HeartbeatReq{
 		Ts: time.Now().Unix(),
 	})
-	p, err := heartbeatReq.Encode()
+	b, err := heartbeatReq.Encode()
 	if err != nil {
 		return err
 	}
@@ -257,7 +259,7 @@ func (u *user) heartbeat() error {
 	return cli.cli.SendRequest(ctx, gactor.ClientRequest{
 		UID:     gactor.ActorUID{consts.CategoryUser, u.uid},
 		SID:     u.sid,
-		Payload: p.UnreadData(),
+		Payload: b,
 	})
 }
 
@@ -423,16 +425,16 @@ func main() {
 			ReadBufSize:            common.ReadBufSize,
 			WriteBufSize:           common.WriteBufSize,
 			ReadWriteTimeout:       common.ReadWriteTimeout,
-			TickInterval:           common.TickInterval,
 			HeartbeatTimeout:       common.HeartbeatTimeout,
 			InactiveTimeout:        common.InactiveTimeout,
+			TickInterval:           common.TickInterval,
 		},
 		Dialer:          common.Dialer,
 		ListenerCreator: common.CreateListener,
 		TimerSystem:     net.NewTimerHeap(),
 	}
 
-	if agent, err := gcluster.CreateService(&gcluster.ServiceConfig{
+	if agent, err := gcluster.CreateAgent(&gcluster.AgentConfig{
 		Center:  center,
 		Net:     netServiceConfig,
 		Handler: cli,
@@ -444,7 +446,13 @@ func main() {
 
 	cli.cli = gactor.NewClient(&gactor.ClientConfig{
 		Handler: cli,
-	}, gactor.WithClientLogger(logger.Logger()))
+	}, gactor.WithClientLogger(logger.Logger()),
+		gactor.WithClientAckManager(&gactor.AckConfig{
+			Timeout:      common.AckTimeout,
+			MaxRetry:     common.AckRetry,
+			TickInterval: common.AckTickInterval,
+		}),
+	)
 
 	if err := cli.start(); err != nil {
 		logger.Logger().FatalFields("start failed", zap.Error(err))

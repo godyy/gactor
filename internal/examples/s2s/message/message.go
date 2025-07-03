@@ -24,7 +24,8 @@ func (m *Msg) DecodePayload(v any) error {
 		return fmt.Errorf("v Type not match")
 	}
 
-	if err := json.Unmarshal(m.Payload.(gactor.Packet).UnreadData(), v); err != nil {
+	buf := m.Payload.(gactor.Buffer)
+	if err := json.Unmarshal(buf.UnreadData(), v); err != nil {
 		return pkgerrors.WithMessage(err, "unmarshal payload")
 	}
 
@@ -42,48 +43,50 @@ func NewMsgWithPayload(payload any) Msg {
 	}
 }
 
-func EncodePacket(pa gactor.PacketAllocator, msg *Msg) (gactor.Packet, error) {
+func EncodePacket(pa gactor.PacketAllocator, msg *Msg) ([]byte, error) {
 	payloadBytes, err := json.Marshal(msg.Payload)
 	if err != nil {
 		return nil, pkgerrors.WithMessage(err, "marshal payload")
 	}
 
-	p, err := pa.Allocate(4 + len(payloadBytes))
-	if err != nil {
+	var buf gactor.Buffer
+	if err := pa.AllocBuf(&buf, 4+len(payloadBytes)); err != nil {
 		return nil, err
 	}
 
-	if err := p.WriteUint32(uint32(msg.ID)); err != nil {
+	if err := buf.WriteUint32(uint32(msg.ID)); err != nil {
 		return nil, pkgerrors.WithMessage(err, "write msgId")
 	}
 
-	if _, err := p.Write(payloadBytes); err != nil {
+	if _, err := buf.Write(payloadBytes); err != nil {
 		return nil, pkgerrors.WithMessage(err, "write payload")
 	}
 
-	return p, nil
+	return buf.Data(), nil
 }
 
-func EncodeMsg(pm gactor.PacketManager, msg *Msg) (gactor.Packet, error) {
+func EncodeMsg(bm gactor.BytesManager, msg *Msg) ([]byte, error) {
 	payloadBytes, err := json.Marshal(msg.Payload)
 	if err != nil {
 		return nil, pkgerrors.WithMessage(err, "marshal payload")
 	}
 
-	p := pm.GetPacket(4 + len(payloadBytes))
-	if err := p.WriteUint32(uint32(msg.ID)); err != nil {
+	var buf gactor.Buffer
+	buf.SetBuf(bm.GetBytes(4 + len(payloadBytes)))
+
+	if err := buf.WriteUint32(uint32(msg.ID)); err != nil {
 		return nil, pkgerrors.WithMessage(err, "write msgId")
 	}
 
-	if _, err := p.Write(payloadBytes); err != nil {
+	if _, err := buf.Write(payloadBytes); err != nil {
 		return nil, pkgerrors.WithMessage(err, "write payload")
 	}
 
-	return p, nil
+	return buf.Data(), nil
 }
 
-func DecodeMsgWithoutDecodePayload(p gactor.Packet, msg *Msg) error {
-	msgId, err := p.ReadUint32()
+func DecodeMsgWithoutDecodePayload(b *gactor.Buffer, msg *Msg) error {
+	msgId, err := b.ReadUint32()
 	if err != nil {
 		return pkgerrors.WithMessage(err, "read msgId")
 	}
@@ -93,8 +96,8 @@ func DecodeMsgWithoutDecodePayload(p gactor.Packet, msg *Msg) error {
 	}
 
 	msg.ID = int(msgId)
-	msg.Payload = p
-	return gactor.ErrPacketEscape
+	msg.Payload = *b
+	return gactor.ErrBytesEscape
 }
 
 var (

@@ -26,10 +26,8 @@ func (d *defTimeSystem) Until(t time.Time) time.Duration {
 	return time.Until(t)
 }
 
-// DefTimeSystem 返回默认时间系统.
-func DefTimeSystem() TimeSystem {
-	return &defTimeSystem{}
-}
+// DefTimeSystem 默认时间系统.
+var DefTimeSystem = &defTimeSystem{}
 
 // TimerId 定时器ID.
 type TimerId = uint64

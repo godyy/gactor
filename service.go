@@ -6,15 +6,17 @@ import (
 	"fmt"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/godyy/gactor/internal/utils"
 	"github.com/godyy/glog"
 	"github.com/godyy/gtimewheel"
+	pkgerrors "github.com/pkg/errors"
 )
 
-// ErrPacketEscape 表示数据包逃逸.
-var ErrPacketEscape = errors.New("gactor: packet escape")
+// ErrBytesEscape 表示字节切片逃逸.
+var ErrBytesEscape = errors.New("gactor: bytes escape")
 
 // ServiceHandler 封装 Service 处理器需要实现的功能.
 type ServiceHandler interface {
@@ -181,10 +183,12 @@ type Service struct {
 	cfg             *ServiceConfig // 配置.
 	oriLogger       glog.Logger    // 原始日志工具.
 	logger          glog.Logger    // 日志.
+	seqIncr         uint32         // 序号自增键值.
 
 	mtxState sync.RWMutex  // 状态读写锁.
 	state    int8          // 状态.
 	cStopped chan struct{} // 已停止信号.
+	ackM     *ackManager   // Ack 管理器.
 
 	mtxActor              sync.RWMutex            // Actor 读写锁.
 	priorityActors        map[int]*priorityActors // 按优先级管理的 Actor 集合.
@@ -266,6 +270,11 @@ func (s *Service) getLogger() glog.Logger {
 // getCfg 获取配置.
 func (s *Service) getCfg() *ServiceConfig {
 	return s.cfg
+}
+
+// genSeq 生成序号.
+func (s *Service) genSeq() uint32 {
+	return atomic.AddUint32(&s.seqIncr, 1)
 }
 
 // lockState 如果可以, 锁定 needState 指定的状态.
@@ -829,7 +838,7 @@ func (s *Service) doRPC(ctx context.Context, cancel context.CancelFunc, to Actor
 	var (
 		toNodeId string
 		call     *rpcCall
-		p        Packet
+		b        []byte
 		err      error
 	)
 
@@ -856,6 +865,7 @@ func (s *Service) doRPC(ctx context.Context, cancel context.CancelFunc, to Actor
 
 	// 包头.
 	ph := s2sRpcPacketHead{
+		seq_:    s.genSeq(),
 		reqId:   call.reqId,
 		toId:    to,
 		timeout: uint32(time.Until(deadline).Milliseconds()),
@@ -865,7 +875,7 @@ func (s *Service) doRPC(ctx context.Context, cancel context.CancelFunc, to Actor
 		// 目标节点非本地.
 		// 编码数据包并发送到远端节点.
 
-		if err = s.sendPacket(ctx, toNodeId, &ph, params); err != nil {
+		if err = s.sendRemotePacket(ctx, toNodeId, &ph, params); err != nil {
 			s.monitorRPCActionSend2RemoteErr(err)
 		} else if cancel != nil {
 			cancel()
@@ -875,10 +885,12 @@ func (s *Service) doRPC(ctx context.Context, cancel context.CancelFunc, to Actor
 		// 目标节点为本地.
 
 		// 编码 payload, 创建 rpcRequest 并发送给 Actor.
-		if p, err = s.encodePayload(PacketTypeS2SRpc, params); err != nil {
+		if b, err = s.encodePayload(PacketTypeS2SRpc, params); err != nil {
 			s.monitorRPCAction(MonitorCASend2LocalErr)
 		} else {
-			request := newContext(ctx, cancel, s, newRPCRequest(toNodeId, ph, p))
+			buf := Buffer{}
+			buf.SetBuf(b)
+			request := newContext(ctx, cancel, s, newRPCRequest(toNodeId, ph, buf))
 			if err = s.send2Actor(ctx, to, request); err != nil {
 				request.release()
 				s.monitorRPCActionSend2LocalErr(err)
@@ -1024,12 +1036,15 @@ func (s *Service) cast(ctx context.Context, to ActorUID, payload any) error {
 	}
 
 	// 包头.
-	ph := s2sCastPacketHead{toId: to}
+	ph := s2sCastPacketHead{
+		seq_: s.genSeq(),
+		toId: to,
+	}
 
 	// 如果 Actor 位于其它节点.
 	// 编码数据并发送到远端.
 	if toNodeId != s.nodeId() {
-		if err := s.sendPacket(ctx, toNodeId, &ph, payload); err != nil {
+		if err := s.sendRemotePacket(ctx, toNodeId, &ph, payload); err != nil {
 			s.monitorCastActionSend2RemoteErr(err)
 			return err
 		}
@@ -1043,7 +1058,9 @@ func (s *Service) cast(ctx context.Context, to ActorUID, payload any) error {
 	}
 
 	// 创建 castRequest 并发送给 Actor.
-	request := newContext(ctx, cancel, s, newCastRequest(ph, encodedPayload))
+	buf := Buffer{}
+	buf.SetBuf(encodedPayload)
+	request := newContext(ctx, cancel, s, newCastRequest(ph, buf))
 	if err := s.send2Actor(ctxTimeout, to, request); err != nil {
 		request.release()
 		s.monitorCastActionSend2LocalErr(err)
@@ -1101,61 +1118,186 @@ func (s *Service) onActorStopped(actor actorImpl) {
 }
 
 // encodePacket 编码数据包.
-func (s *Service) encodePacket(ph packetHead, payload any) (Packet, error) {
+func (s *Service) encodePacket(ph packetHead, payload any) ([]byte, error) {
 	return encodePacket(ph, payload, s.cfg.Handler.GetPacketCodec())
 }
 
 // encodePayload 编码负载数据.
-func (s *Service) encodePayload(pt PacketType, payload any) (Packet, error) {
+func (s *Service) encodePayload(pt PacketType, payload any) ([]byte, error) {
 	return s.cfg.Handler.GetPacketCodec().EncodePayload(pt, payload)
 }
 
 // decodePayload 解码负载数据.
-func (s *Service) decodePayload(pt PacketType, p Packet, v any) error {
-	return s.cfg.Handler.GetPacketCodec().DecodePayload(pt, p, v)
+func (s *Service) decodePayload(pt PacketType, b *Buffer, v any) error {
+	return s.cfg.Handler.GetPacketCodec().DecodePayload(pt, b, v)
 }
 
-// getPacket
-func (s *Service) getPacket(size int) Packet {
-	return s.cfg.Handler.GetPacketCodec().GetPacket(size)
+// getBytes 获取容量为 cap 的字节切片.
+func (s *Service) getBytes(cap int) []byte {
+	return s.cfg.Handler.GetPacketCodec().GetBytes(cap)
 }
 
-// putPacket 回收数据包.
-func (s *Service) putPacket(p Packet) {
-	s.cfg.Handler.GetPacketCodec().PutPacket(p)
+// putBytes 回收字节切片
+func (s *Service) putBytes(b []byte) {
+	s.cfg.Handler.GetPacketCodec().PutBytes(b)
 }
 
-// sendPacket 编码数据包, 并发送数据包到 nodeId 指定的节点.
-func (s *Service) sendPacket(ctx context.Context, nodeId string, ph packetHead, payload any) error {
+// allocBuffer 分配缓冲区.
+func (s *Service) allocBuffer(buf *Buffer, size int) {
+	b := s.cfg.Handler.GetPacketCodec().GetBytes(size)
+	buf.SetBuf(b)
+}
+
+// freeBuffer 回收缓冲区.
+func (s *Service) freeBuffer(buf *Buffer) {
+	if b := buf.Data(); b != nil {
+		s.cfg.Handler.GetPacketCodec().PutBytes(b)
+		buf.SetBuf(nil)
+	}
+}
+
+// send 发送字节数据.
+func (s *Service) send(ctx context.Context, nodeId string, b []byte) error {
+	return s.cfg.Handler.GetNetAgent().Send(ctx, nodeId, b)
+}
+
+// sendLocalPacket 发送本地数据包.
+func (s *Service) sendLocalPacket(ctx context.Context, nodeId string, ph packetHead, payload any) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 
 	// 编码数据包.
-	p, err := s.encodePacket(ph, payload)
+	b, err := s.encodePacket(ph, payload)
 	if err != nil {
 		s.logger.ErrorFields("encode packet-type failed", lfdPacketType(ph.pt()), lfdError(err))
 		return errCodeEncodePacketFailed
 	}
 
-	if nodeId == s.nodeId() {
-		// 本地.
-		err = s.onLocalPacket(p)
-	} else {
-		// 远端.
-		err = s.cfg.Handler.GetNetAgent().SendPacket(ctx, nodeId, p)
+	return s.onLocalPacket(b)
+}
+
+// sendRemotePacket 发送远程数据包.
+func (s *Service) sendRemotePacket(ctx context.Context, nodeId string, ph packetHead, payload any) error {
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 
+	// 编码数据包.
+	b, err := s.encodePacket(ph, payload)
 	if err != nil {
-		s.putPacket(p)
+		s.logger.ErrorFields("encode packet-type failed", lfdPacketType(ph.pt()), lfdError(err))
+		return errCodeEncodePacketFailed
 	}
 
-	return err
+	// 添加待确认数据包.
+	if err = s.addPacket2Ack(nodeId, ph.pt(), ph.seq(), b); err != nil {
+		return pkgerrors.WithMessage(err, "add packet to ack")
+	}
+
+	// 发送数据.
+	if err = s.send(ctx, nodeId, b); err != nil {
+		// 若发送失败, 直接移除待确认数据包.
+		s.remPacket2Ack(ph.pt(), ph.seq())
+		return pkgerrors.WithMessage(err, "send packet")
+	}
+
+	return nil
+}
+
+// sendPacket 编码数据包, 并发送数据包到 nodeId 指定的节点.
+func (s *Service) sendPacket(ctx context.Context, nodeId string, ph packetHead, payload any) error {
+	if nodeId == s.nodeId() {
+		return s.sendLocalPacket(ctx, nodeId, ph, payload)
+	} else {
+		return s.sendRemotePacket(ctx, nodeId, ph, payload)
+	}
 }
 
 // getTimeSystem 获取时间系统.
 func (s *Service) getTimeSystem() TimeSystem {
 	return s.cfg.Handler.GetTimeSystem()
+}
+
+// ackEnabled Ack 管理器是否启用.
+func (s *Service) ackEnabled() bool {
+	return s.ackM != nil
+}
+
+// addPacket2Ack 添加待确认数据包.
+func (s *Service) addPacket2Ack(nodeId string, pt PacketType, seq uint32, b []byte) error {
+	if !s.ackEnabled() {
+		return nil
+	}
+
+	return s.ackM.addPacket(nodeId, pt, seq, b)
+}
+
+// remPacket2Ack 移除待确认数据包.
+func (s *Service) remPacket2Ack(pt PacketType, seq uint32) {
+	if !s.ackEnabled() {
+		return
+	}
+
+	if removed, b := s.ackM.remPacket(pt, seq); removed {
+		s.putBytes(b)
+	}
+}
+
+// sendAckPacket 发送 Ack 数据包.
+func (s *Service) sendAckPacket(nodeId string, ph packetHead) error {
+	if !s.ackEnabled() {
+		return nil
+	}
+
+	// 不能向本地发送 Ack.
+	if nodeId == s.nodeId() {
+		return errors.New("send ack packet to local")
+	}
+
+	// 编码数据包.
+	head := ackPacketHead{
+		ackPt:  ph.pt(),
+		ackSeq: ph.seq(),
+	}
+	b, err := s.encodePacket(&head, nil)
+	if err != nil {
+		s.logger.ErrorFields("encode ack packet failed", lfdPacketTypeSeq(ph), lfdError(err))
+		return errCodeEncodePacketFailed
+	}
+
+	// 发送数据.
+	ctx, cancel := context.WithTimeout(context.Background(), s.ackM.getCfg().Timeout)
+	defer cancel()
+	return s.send(ctx, nodeId, b)
+}
+
+// onAckRetry 处理 Ack 重试.
+func (s *Service) onAckRetry(nodeId string, pt PacketType, seq uint32, b []byte) {
+	if err := s.lockNotStopped(true); err != nil {
+		return
+	}
+	defer s.unlockState(true)
+
+	ctx, cancel := context.WithTimeout(context.Background(), s.ackM.getCfg().Timeout)
+	defer cancel()
+
+	if err := s.send(ctx, nodeId, b); err != nil {
+		s.logger.ErrorFields("retry to send packet failed", lfdRemoteNodeId(nodeId), lfdPacketType(pt), lfdPacketSeq(seq), lfdError(err))
+	} else {
+		s.logger.WarnFields("retry to send packet", lfdRemoteNodeId(nodeId), lfdPacketType(pt), lfdPacketSeq(seq))
+	}
+}
+
+// onAckFailed 处理 Ack 失败.
+func (s *Service) onAckFailed(nodeId string, pt PacketType, seq uint32, b []byte) {
+	if err := s.lockNotStopped(true); err != nil {
+		return
+	}
+	defer s.unlockState(true)
+
+	s.logger.ErrorFields("packet to ack failed", lfdRemoteNodeId(nodeId), lfdPacketType(pt), lfdPacketSeq(seq))
+	s.putBytes(b)
 }
 
 // loop 主循环.

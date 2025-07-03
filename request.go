@@ -58,14 +58,14 @@ type request interface {
 
 type requestCom struct {
 	replied bool
-	payload Packet
+	payload Buffer
 }
 
 func (req *requestCom) decode(ctx *Context, pt PacketType, v any) error {
-	if err := ctx.service().decodePayload(pt, req.payload, v); err == nil {
+	if err := ctx.service().decodePayload(pt, &req.payload, v); err == nil {
 		return nil
-	} else if errors.Is(err, ErrPacketEscape) {
-		req.payload = nil
+	} else if errors.Is(err, ErrBytesEscape) {
+		req.payload.SetBuf(nil)
 		return nil
 	} else {
 		return err
@@ -74,20 +74,16 @@ func (req *requestCom) decode(ctx *Context, pt PacketType, v any) error {
 
 func (req *requestCom) clone(ctx *Context) requestCom {
 	cp := requestCom{}
-	if req.payload != nil {
-		if unreadData := req.payload.UnreadData(); len(unreadData) > 0 {
-			cp.payload = ctx.service().getPacket(len(unreadData))
-			cp.payload.Write(unreadData)
-		}
+	if unreadData := req.payload.UnreadData(); len(unreadData) > 0 {
+		b := ctx.service().getBytes(len(unreadData))
+		b = append(b, unreadData...)
+		cp.payload.SetBuf(b)
 	}
 	return cp
 }
 
 func (req *requestCom) release(ctx *Context) {
-	if req.payload != nil {
-		ctx.service().putPacket(req.payload)
-		req.payload = nil
-	}
+	ctx.service().freeBuffer(&req.payload)
 	req.replied = false
 }
 
@@ -106,7 +102,7 @@ var poolOfRawRequest = &sync.Pool{New: func() interface{} {
 	return &rawRequest{}
 }}
 
-func newRawRequest(fromNodeId string, head rawReqPacketHead, payload Packet) *rawRequest {
+func newRawRequest(fromNodeId string, head rawReqPacketHead, payload Buffer) *rawRequest {
 	req := poolOfRawRequest.Get().(*rawRequest)
 	req.fromNodeId = fromNodeId
 	req.head = head
@@ -128,11 +124,12 @@ func (req *rawRequest) reply(ctx *Context, payload any) error {
 	}
 
 	head := rawRespPacketHead{
+		seq_:    ctx.service().genSeq(),
 		fromId:  req.head.toId,
 		sid:     req.head.sid,
 		errCode: errCodeOK,
 	}
-	if err := ctx.service().sendPacket(ctx, req.fromNodeId, &head, payload); err != nil {
+	if err := ctx.service().sendRemotePacket(ctx, req.fromNodeId, &head, payload); err != nil {
 		if errors.Is(err, errCodeEncodePacketFailed) {
 			return req.replyError(ctx, errCodeEncodePacketFailed)
 		}
@@ -154,12 +151,13 @@ func (req *rawRequest) replyError(ctx *Context, ec errCode) error {
 	}
 
 	head := rawRespPacketHead{
+		seq_:    ctx.service().genSeq(),
 		fromId:  req.head.toId,
 		sid:     req.head.sid,
 		errCode: ec,
 	}
 
-	if err := ctx.service().sendPacket(ctx, req.fromNodeId, &head, nil); err != nil {
+	if err := ctx.service().sendRemotePacket(ctx, req.fromNodeId, &head, nil); err != nil {
 		return err
 	}
 
@@ -206,7 +204,7 @@ var poolOfRpcRequest = &sync.Pool{New: func() interface{} {
 	return &rpcRequest{}
 }}
 
-func newRPCRequest(remoteNodeId string, head s2sRpcPacketHead, payload Packet) *rpcRequest {
+func newRPCRequest(remoteNodeId string, head s2sRpcPacketHead, payload Buffer) *rpcRequest {
 	req := poolOfRpcRequest.Get().(*rpcRequest)
 	req.fromNodeId = remoteNodeId
 	req.head = head
@@ -228,6 +226,7 @@ func (req *rpcRequest) reply(ctx *Context, payload any) error {
 	}
 
 	head := s2sRpcRespPacketHead{
+		seq_:    ctx.service().genSeq(),
 		reqId:   req.head.reqId,
 		fromId:  req.head.toId,
 		errCode: errCodeOK,
@@ -254,6 +253,7 @@ func (req *rpcRequest) replyError(ctx *Context, ec errCode) error {
 	}
 
 	head := s2sRpcRespPacketHead{
+		seq_:    ctx.service().genSeq(),
 		reqId:   req.head.reqId,
 		fromId:  req.head.toId,
 		errCode: ec,
@@ -290,7 +290,7 @@ var poolOfCastRequest = &sync.Pool{New: func() interface{} {
 	return &castRequest{}
 }}
 
-func newCastRequest(head s2sCastPacketHead, payload Packet) *castRequest {
+func newCastRequest(head s2sCastPacketHead, payload Buffer) *castRequest {
 	req := poolOfCastRequest.Get().(*castRequest)
 	req.head = head
 	req.payload = payload
