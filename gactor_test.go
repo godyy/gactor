@@ -83,16 +83,22 @@ func TestService(t *testing.T) {
 	}
 
 	svcConfig := &ServiceConfig{
-		ActorDefines: actorDefines,
-		TimeWheelLevels: []gtimewheel.LevelConfig{
-			{Name: "100 ms", Span: 100 * time.Millisecond, Slots: 10},
-			{Name: "s", Span: 1 * time.Second, Slots: 60},
-			{Name: "min", Span: 1 * time.Minute, Slots: 60},
-			{Name: "h", Span: 1 * time.Hour, Slots: 24},
+		ActorConfig: ActorConfig{
+			ActorDefines: actorDefines,
 		},
-		DefRPCTimeout: 100 * time.Millisecond,
-		MaxRTT:        200,
-		Handler:       svcHandler,
+		TimerConfig: TimerConfig{
+			TimeWheelLevels: []gtimewheel.LevelConfig{
+				{Name: "100 ms", Span: 100 * time.Millisecond, Slots: 10},
+				{Name: "s", Span: 1 * time.Second, Slots: 60},
+				{Name: "min", Span: 1 * time.Minute, Slots: 60},
+				{Name: "h", Span: 1 * time.Hour, Slots: 24},
+			},
+		},
+		RPCConfig: RPCConfig{
+			DefRPCTimeout: 100 * time.Millisecond,
+		},
+		MaxRTT:  200,
+		Handler: svcHandler,
 	}
 
 	svc := NewService(svcConfig, WithServiceLogger(logger))
@@ -292,6 +298,8 @@ func (a *testActor) OnStart() error {
 			payload: &testMessageCast{Msg: fmt.Sprintf("hello, i am %s", ta.ActorUID())},
 		}); err != nil {
 			logger.Errorf("actor %s cast to %s, %v", a.ActorUID(), targetUID, err)
+		} else {
+			logger.Debugf("actor %s cast to %s success", a.ActorUID(), targetUID)
 		}
 
 		{
@@ -306,6 +314,8 @@ func (a *testActor) OnStart() error {
 				}
 			}); err != nil {
 				logger.Errorf("actor %s rpc async to %s, %v", a.ActorUID(), targetUID, err)
+			} else {
+				logger.Debugf("actor %s rpc async to %s success", a.ActorUID(), targetUID)
 			}
 		}
 

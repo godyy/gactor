@@ -16,6 +16,7 @@ import (
 	"github.com/godyy/gactor/internal/examples/c2s/common/message"
 	"github.com/godyy/gcluster"
 	"github.com/godyy/gcluster/net"
+	pkgerrors "github.com/pkg/errors"
 	"go.uber.org/zap"
 )
 
@@ -225,6 +226,11 @@ func (u *user) genReqId() uint32 {
 }
 
 func (u *user) login() error {
+	u.sid = cli.cli.GenSessionId()
+	if err := cli.cli.Connect(context.Background(), gactor.ActorUID{consts.CategoryUser, u.uid}, u.sid); err != nil {
+		return pkgerrors.WithMessage(err, "connect failed")
+	}
+
 	loginReq := message.NewReqMessageWithPayload(u.genReqId(), &message.LoginReq{
 		Username: u.userName,
 		Password: u.password,
@@ -287,9 +293,9 @@ func (u *user) loop() {
 	for {
 		select {
 		case <-ticker.C:
-			if !u.isLogin {
-				continue
-			}
+			// if !u.isLogin {
+			// 	continue
+			// }
 			// if heartbeatCount >= 5 {
 			// 	continue
 			// }
@@ -448,9 +454,10 @@ func main() {
 		Handler: cli,
 	}, gactor.WithClientLogger(logger.Logger()),
 		gactor.WithClientAckManager(&gactor.AckConfig{
-			Timeout:      common.AckTimeout,
-			MaxRetry:     common.AckRetry,
-			TickInterval: common.AckTickInterval,
+			MaxPacketAmount: 1000,
+			Timeout:         common.AckTimeout,
+			MaxRetry:        common.AckRetry,
+			TickInterval:    common.AckTickInterval,
 		}),
 	)
 

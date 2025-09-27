@@ -25,6 +25,9 @@ func (t RequestType) String() string {
 	return requestTypeStrings[t]
 }
 
+// errSkipHandleRequest 生命跳过处理请求的错误.
+var errSkipHandleRequest = errors.New("skip handle request")
+
 // request Request 内部接口封装.
 type request interface {
 	// requestType 请求类型.
@@ -53,6 +56,7 @@ type request interface {
 	release(ctx *Context)
 
 	// beforeHandle 处理请求.
+	// 如果返回 errSkipHandleRequest 错误, 则跳过处理请求.
 	beforeHandle(ctx *Context) error
 }
 
@@ -185,10 +189,19 @@ func (req *rawRequest) beforeHandle(ctx *Context) error {
 		return errors.New("not CActor")
 	}
 
-	ca.updateSession(ctx, ActorSession{
+	if !ca.session.IsConnected() {
+		_ = req.replyError(ctx, errCodeActorNotConnect)
+		return errSkipHandleRequest
+	}
+
+	reqSession := ActorSession{
 		NodeId: req.fromNodeId,
 		SID:    req.head.sid,
-	})
+	}
+	if reqSession != ca.session {
+		_ = req.replyError(ctx, errCodeActorOtherConnect)
+		return errSkipHandleRequest
+	}
 
 	return nil
 }

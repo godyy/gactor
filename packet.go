@@ -11,16 +11,18 @@ type PacketType = int8
 
 const (
 	PacketTypeUnknown = PacketType(0)
-	PacketTypeAck     = PacketType(1) // Ack.
+
+	PacketTypeAck        = PacketType(1) // Ack.
+	PacketTypeConnect    = PacketType(2) // 连接.
+	PacketTypeDisconnect = PacketType(3) // 连接断开.
 
 	PacketTypeRawReq  = PacketType(11) // C2S 请求.
 	PacketTypeRawResp = PacketType(12) // S2C 响应.
 	PacketTypeRawPush = PacketType(13) // S2C 推送.
 
-	PacketTypeS2SRpc          = PacketType(21) // S2S RPC调用.
-	PacketTypeS2SRpcResp      = PacketType(22) // S2S RPC调用响应.
-	PacketTypeS2SCast         = PacketType(23) // S2S 消息投递.
-	PacketTypeS2SDisconnected = PacketType(24) // S2S 连接断开.
+	PacketTypeS2SRpc     = PacketType(21) // S2S RPC调用.
+	PacketTypeS2SRpcResp = PacketType(22) // S2S RPC调用响应.
+	PacketTypeS2SCast    = PacketType(23) // S2S 消息投递.
 )
 
 const sizeOfPacketType = int(unsafe.Sizeof(PacketType(0)))
@@ -121,6 +123,104 @@ func (ph *ackPacketHead) decode(b *Buffer) (err error) {
 	ph.ackSeq, err = b.ReadUint32()
 	if err != nil {
 		return pkgerrors.WithMessage(err, "read ackSeq")
+	}
+	return
+}
+
+// connectPacketHead PacketTypeConnect 包头.
+type connectPacketHead struct {
+	seq_ uint32   // 序号.
+	uid  ActorUID // Actor ID.
+	sid  uint32   // 会话ID.
+}
+
+const sizeOfConnectPacketHead = sizeOfActorUID + 4
+
+func (ph *connectPacketHead) pt() PacketType {
+	return PacketTypeConnect
+}
+
+func (ph *connectPacketHead) seq() uint32 {
+	return ph.seq_
+}
+
+func (ph *connectPacketHead) size() int {
+	return sizeOfConnectPacketHead
+}
+
+// 编码数据包.
+func (ph *connectPacketHead) encode(b *Buffer) error {
+	if err := b.WriteUint32(ph.seq_); err != nil {
+		return pkgerrors.WithMessage(err, "write seq")
+	}
+	if err := b.writeActorUID(ph.uid); err != nil {
+		return pkgerrors.WithMessage(err, "write uid")
+	}
+	if err := b.WriteUint32(ph.sid); err != nil {
+		return pkgerrors.WithMessage(err, "write sid")
+	}
+	return nil
+}
+
+// 解码数据包.
+func (ph *connectPacketHead) decode(b *Buffer) (err error) {
+	ph.seq_, err = b.ReadUint32()
+	if err != nil {
+		return pkgerrors.WithMessage(err, "read seq")
+	}
+	ph.uid, err = b.readActorUID()
+	if err != nil {
+		return pkgerrors.WithMessage(err, "read uid")
+	}
+	ph.sid, err = b.ReadUint32()
+	if err != nil {
+		return pkgerrors.WithMessage(err, "read sid")
+	}
+	return nil
+}
+
+// disconnectPacketHead PacketTypeDisconnect 包头.
+type disconnectPacketHead struct {
+	seq_ uint32   // 序号.
+	uid  ActorUID // Actor ID.
+	sid  uint32   // 会话ID.
+}
+
+const sizeOfS2SDisconnectedPacketHead = 4 + sizeOfActorUID + 4
+
+func (ph *disconnectPacketHead) pt() PacketType { return PacketTypeDisconnect }
+
+func (ph *disconnectPacketHead) seq() uint32 { return ph.seq_ }
+
+func (ph *disconnectPacketHead) size() int {
+	return sizeOfS2SDisconnectedPacketHead
+}
+
+func (ph *disconnectPacketHead) encode(b *Buffer) error {
+	if err := b.WriteUint32(ph.seq_); err != nil {
+		return pkgerrors.WithMessage(err, "write seq")
+	}
+	if err := b.writeActorUID(ph.uid); err != nil {
+		return pkgerrors.WithMessage(err, "write toId")
+	}
+	if err := b.WriteUint32(ph.sid); err != nil {
+		return pkgerrors.WithMessage(err, "write sid")
+	}
+	return nil
+}
+
+func (ph *disconnectPacketHead) decode(b *Buffer) (err error) {
+	ph.seq_, err = b.ReadUint32()
+	if err != nil {
+		return pkgerrors.WithMessage(err, "read seq")
+	}
+	ph.uid, err = b.readActorUID()
+	if err != nil {
+		return pkgerrors.WithMessage(err, "read toId")
+	}
+	ph.sid, err = b.ReadUint32()
+	if err != nil {
+		return pkgerrors.WithMessage(err, "read sid")
 	}
 	return
 }
@@ -421,52 +521,6 @@ func (ph *s2sCastPacketHead) decode(b *Buffer) (err error) {
 	ph.toId, err = b.readActorUID()
 	if err != nil {
 		return pkgerrors.WithMessage(err, "read toId")
-	}
-	return
-}
-
-// s2sDisconnectedPacketHead PacketTypeS2SDisconnected 包头.
-type s2sDisconnectedPacketHead struct {
-	seq_ uint32   // 序号.
-	uid  ActorUID // Actor ID.
-	sid  uint32   // 会话ID.
-}
-
-const sizeOfS2SDisconnectedPacketHead = 4 + sizeOfActorUID + 4
-
-func (ph *s2sDisconnectedPacketHead) pt() PacketType { return PacketTypeS2SDisconnected }
-
-func (ph *s2sDisconnectedPacketHead) seq() uint32 { return ph.seq_ }
-
-func (ph *s2sDisconnectedPacketHead) size() int {
-	return sizeOfS2SDisconnectedPacketHead
-}
-
-func (ph *s2sDisconnectedPacketHead) encode(b *Buffer) error {
-	if err := b.WriteUint32(ph.seq_); err != nil {
-		return pkgerrors.WithMessage(err, "write seq")
-	}
-	if err := b.writeActorUID(ph.uid); err != nil {
-		return pkgerrors.WithMessage(err, "write toId")
-	}
-	if err := b.WriteUint32(ph.sid); err != nil {
-		return pkgerrors.WithMessage(err, "write sid")
-	}
-	return nil
-}
-
-func (ph *s2sDisconnectedPacketHead) decode(b *Buffer) (err error) {
-	ph.seq_, err = b.ReadUint32()
-	if err != nil {
-		return pkgerrors.WithMessage(err, "read seq")
-	}
-	ph.uid, err = b.readActorUID()
-	if err != nil {
-		return pkgerrors.WithMessage(err, "read toId")
-	}
-	ph.sid, err = b.ReadUint32()
-	if err != nil {
-		return pkgerrors.WithMessage(err, "read sid")
 	}
 	return
 }

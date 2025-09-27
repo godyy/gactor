@@ -17,8 +17,10 @@ const (
 	errCodeEncodePacketFailed = errCode(101) // 编码数据包失败.
 	errCodeDecodePacketFailed = errCode(102) // 解码数据包失败.
 
-	errCodeStartActorFailed = errCode(201) // 启动 Actor 失败.
-	errCodeActorLoopError   = errCode(202) // Actor 循环错误.
+	errCodeStartActorFailed  = errCode(201) // 启动 Actor 失败.
+	errCodeActorLoopError    = errCode(202) // Actor 循环错误.
+	errCodeActorNotConnect   = errCode(203) // Actor 未连接.
+	errCodeActorOtherConnect = errCode(204) // Actor 被other连接.
 )
 
 // errCodeStrings 错误码文本.
@@ -29,6 +31,8 @@ var errCodeStrings = map[errCode]string{
 	errCodeDecodePacketFailed: "decode packet failed",
 	errCodeStartActorFailed:   "start actor failed",
 	errCodeActorLoopError:     "actor loop error",
+	errCodeActorNotConnect:    "actor not connect",
+	errCodeActorOtherConnect:  "actor other connect",
 }
 
 func (ec errCode) Error() string {

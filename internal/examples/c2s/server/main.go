@@ -243,20 +243,27 @@ func main() {
 	}
 
 	s.svc = gactor.NewService(&gactor.ServiceConfig{
-		ActorDefines: define.Defines,
-		TimeWheelLevels: []gtimewheel.LevelConfig{
-			{Name: "100ms", Span: 100 * time.Millisecond, Slots: 10},
-			{Name: "s", Span: 1 * time.Second, Slots: 60},
-			{Name: "m", Span: 1 * time.Minute, Slots: 60},
-			{Name: "hour", Span: 1 * time.Hour, Slots: 24},
+		ActorConfig: gactor.ActorConfig{
+			ActorDefines: define.Defines,
 		},
-		DefRPCTimeout: 5 * time.Second,
-		Handler:       s,
+		TimerConfig: gactor.TimerConfig{
+			TimeWheelLevels: []gtimewheel.LevelConfig{
+				{Name: "100ms", Span: 100 * time.Millisecond, Slots: 10},
+				{Name: "s", Span: 1 * time.Second, Slots: 60},
+				{Name: "m", Span: 1 * time.Minute, Slots: 60},
+				{Name: "hour", Span: 1 * time.Hour, Slots: 24},
+			},
+		},
+		RPCConfig: gactor.RPCConfig{
+			DefRPCTimeout: 5 * time.Second,
+		},
+		Handler: s,
 	}, gactor.WithServiceLogger(logger.Logger()),
 		gactor.WithServiceAckManager(&gactor.AckConfig{
-			Timeout:      common.AckTimeout,
-			MaxRetry:     common.AckRetry,
-			TickInterval: common.AckTickInterval,
+			MaxPacketAmount: 10000,
+			Timeout:         common.AckTimeout,
+			MaxRetry:        common.AckRetry,
+			TickInterval:    common.AckTickInterval,
 		}))
 
 	if err := s.start(); err != nil {

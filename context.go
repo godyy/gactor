@@ -255,6 +255,9 @@ func (c *Context) handle(a actorImpl) error {
 
 	c.actor = a
 	if err := c.req.beforeHandle(c); err != nil {
+		if errors.Is(err, errSkipHandleRequest) {
+			err = nil
+		}
 		return err
 	}
 

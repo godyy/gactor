@@ -18,8 +18,8 @@ func cliHandlePacketAck(c *Client, nodeId string, b *Buffer) error {
 	// 释放缓冲区.
 	c.freeBuffer(b)
 
-	// 移除待确认数据包.
-	c.remPacket2Ack(head.ackPt, head.ackSeq)
+	// 收到数据包确认.
+	c.receivePacketAck(head.ackPt, head.ackSeq)
 
 	return nil
 }
@@ -81,17 +81,17 @@ func cliHandlePacketRawPush(c *Client, nodeId string, b *Buffer) error {
 	return nil
 }
 
-// cliHandlePacketS2SDisconnect PacketTypeS2SDisconnected 处理器.
-func cliHandlePacketS2SDisconnect(c *Client, nodeId string, b *Buffer) error {
+// cliHandlePacketDisconnect PacketTypeDisconnect 处理器.
+func cliHandlePacketDisconnect(c *Client, nodeId string, b *Buffer) error {
 	// 解码包头.
-	var head s2sDisconnectedPacketHead
+	var head disconnectPacketHead
 	if err := head.decode(b); err != nil {
-		return pkgerrors.WithMessage(err, "gactor: cliHandlePacketS2SDisconnect: decode request Head")
+		return pkgerrors.WithMessage(err, "gactor: cliHandlePacketDisconnect: decode request Head")
 	}
 
 	// 发送 Ack 确认.
 	if err := c.sendAckPacket(nodeId, &head); err != nil {
-		c.getLogger().ErrorFields("cliHandlePacketS2SDisconnect: send ack packet failed", lfdActorUID(head.uid), lfdError(err))
+		c.getLogger().ErrorFields("cliHandlePacketDisconnect: send ack packet failed", lfdActorUID(head.uid), lfdError(err))
 	}
 
 	// 释放缓冲区.
@@ -105,10 +105,10 @@ func cliHandlePacketS2SDisconnect(c *Client, nodeId string, b *Buffer) error {
 
 // clientPacketHandlers Client 数据包处理器.
 var clientPacketHandlers = map[PacketType]func(c *Client, nodeId string, b *Buffer) error{
-	PacketTypeAck:             cliHandlePacketAck,
-	PacketTypeRawResp:         cliHandlePacketRawResp,
-	PacketTypeRawPush:         cliHandlePacketRawPush,
-	PacketTypeS2SDisconnected: cliHandlePacketS2SDisconnect,
+	PacketTypeAck:        cliHandlePacketAck,
+	PacketTypeDisconnect: cliHandlePacketDisconnect,
+	PacketTypeRawResp:    cliHandlePacketRawResp,
+	PacketTypeRawPush:    cliHandlePacketRawPush,
 }
 
 // HandlePacket 处理网络 Packet.

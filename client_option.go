@@ -1,8 +1,6 @@
 package gactor
 
 import (
-	"time"
-
 	"github.com/godyy/glog"
 )
 
@@ -19,18 +17,6 @@ func WithClientLogger(logger glog.Logger) ClientOption {
 // WithClientAckManager Ack 管理器选项.
 func WithClientAckManager(cfg *AckConfig) ClientOption {
 	return func(c *Client) {
-		c.ackM = newAckManager(cfg, c)
-		go func() {
-			ticker := time.NewTicker(c.ackM.getCfg().TickInterval)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-ticker.C:
-					c.ackM.tick()
-				case <-c.cStopped:
-					return
-				}
-			}
-		}()
+		c.ackManager = newAckManager(cfg, c)
 	}
 }

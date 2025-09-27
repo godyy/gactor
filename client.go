@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/godyy/gactor/internal/utils"
 	"github.com/godyy/glog"
 
 	pkgerrors "github.com/pkg/errors"
@@ -86,15 +87,15 @@ var ErrClientStopped = errors.New("gactor: client stopped")
 
 // Client 代理用户向 Service 发送请求, 接收 Service 的响应数据并通知用户.
 type Client struct {
-	cfg     *ClientConfig // 配置.
-	sidIncr uint32        // 会话ID自增键.
-	seqIncr uint32        // 序号自增键.
-	ackM    *ackManager   // Ack 管理器.
-	logger  glog.Logger   // 日志工具.
+	cfg         *ClientConfig // 配置.
+	sidIncr     uint32        // 会话ID自增键.
+	seqIncr     uint32        // 序号自增键.
+	*ackManager               // Ack 管理器.
+	logger      glog.Logger   // 日志工具.
 
-	mtx      sync.RWMutex  // 读写锁.
-	stopped  bool          // 是否已停机.
-	cStopped chan struct{} // 已停止信号.
+	mtx      sync.RWMutex    // 读写锁.
+	stopped  bool            // 是否已停机.
+	stopWait *utils.StopWait // 停机工具.
 }
 
 func NewClient(cfg *ClientConfig, option ...ClientOption) *Client {
@@ -102,7 +103,7 @@ func NewClient(cfg *ClientConfig, option ...ClientOption) *Client {
 
 	c := &Client{
 		cfg:      cfg,
-		cStopped: make(chan struct{}),
+		stopWait: utils.NewStopWait(),
 	}
 
 	for _, o := range option {
@@ -110,6 +111,7 @@ func NewClient(cfg *ClientConfig, option ...ClientOption) *Client {
 	}
 
 	c.initLogger()
+	c.start()
 
 	return c
 }
@@ -151,7 +153,9 @@ func (c *Client) nodeId() string {
 
 // initLogger 初始化日志工具.
 func (c *Client) initLogger() {
-	c.logger = createStdLogger(glog.DebugLevel).Named("Client").WithFields(lfdNodeId(c.nodeId()))
+	if c.logger == nil {
+		c.logger = createStdLogger(glog.DebugLevel).Named("Client").WithFields(lfdNodeId(c.nodeId()))
+	}
 }
 
 // setLogger 设置日志工具.
@@ -162,6 +166,10 @@ func (c *Client) setLogger(logger glog.Logger) {
 // getLogger 获取日志工具.
 func (c *Client) getLogger() glog.Logger {
 	return c.logger
+}
+
+func (c *Client) getStopWait() *utils.StopWait {
+	return c.stopWait
 }
 
 // getBytes 获取容量为 cap 的字节切片.
@@ -229,9 +237,7 @@ func (c *Client) sendPacket(ctx context.Context, nodeId string, ph packetHead, p
 	}
 
 	// 添加待确认数据包.
-	if err = c.addPacket2Ack(nodeId, ph.pt(), ph.seq(), b); err != nil {
-		return pkgerrors.WithMessage(err, "add packet to ack")
-	}
+	c.addPacket2Ack(nodeId, ph.pt(), ph.seq(), b)
 
 	// 发送数据.
 	if err = c.send(ctx, nodeId, b); err != nil {
@@ -248,9 +254,80 @@ func (c *Client) getNodeIdOfActor(uid ActorUID) (string, error) {
 	return getNodeIdOfActor(c.cfg.Handler.GetMetaDriver(), uid)
 }
 
+// start 内部启动逻辑.
+func (c *Client) start() {
+	c.startAckManager()
+}
+
+// Stop 停机.
+func (c *Client) Stop() {
+	if err := c.lockRunning(false); err != nil {
+		return
+	}
+	c.stopped = true
+	c.unlockState(false)
+
+	c.stopWait.Stop(true)
+}
+
 // GenSessionId 生成会话ID.
 func (c *Client) GenSessionId() uint32 {
 	return atomic.AddUint32(&c.sidIncr, 1)
+}
+
+// Connnect 连接 uid 指定的 Actor.
+func (c *Client) Connect(ctx context.Context, uid ActorUID, sid uint32) error {
+	// 获取目标节点.
+	nodeId, err := c.getNodeIdOfActor(uid)
+	if err != nil {
+		return err
+	}
+
+	// 锁定状态.
+	if err := c.lockRunning(true); err != nil {
+		return err
+	}
+	defer c.unlockState(true)
+
+	// 优先检查 ctx 是否done.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	// 编码并发送消息.
+	ph := connectPacketHead{
+		uid: uid,
+		sid: sid,
+	}
+	return c.sendPacket(ctx, nodeId, &ph, nil)
+}
+
+// Disconnect 通知 uid 指定的 Actor 断开连接.
+func (c *Client) Disconnect(ctx context.Context, uid ActorUID, sid uint32) error {
+	// 获取目标节点.
+	nodeId, err := c.getNodeIdOfActor(uid)
+	if err != nil {
+		return err
+	}
+
+	// 锁定状态.
+	if err := c.lockRunning(true); err != nil {
+		return err
+	}
+	defer c.unlockState(true)
+
+	// 优先检查 ctx 是否done.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	// 编码并发送消息.
+	ph := disconnectPacketHead{
+		seq_: c.genSeq(),
+		uid:  uid,
+		sid:  sid,
+	}
+	return c.sendPacket(ctx, nodeId, &ph, nil)
 }
 
 // SendRequest 发送请求.
@@ -288,45 +365,6 @@ func (c *Client) SendRequest(ctx context.Context, req ClientRequest) error {
 	return c.sendPacket(ctx, nodeId, &ph, req.Payload)
 }
 
-// NotifyDisconnect 通知 uid 指定的 Actor 断开连接. 数据包类型为 PacketTypeS2SDisconnected.
-func (c *Client) NotifyDisconnect(ctx context.Context, uid ActorUID, sid uint32) error {
-	// 获取目标节点.
-	nodeId, err := c.getNodeIdOfActor(uid)
-	if err != nil {
-		return err
-	}
-
-	// 锁定状态.
-	if err := c.lockRunning(true); err != nil {
-		return err
-	}
-	defer c.unlockState(true)
-
-	// 优先检查 ctx 是否done.
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-
-	// 编码并发送消息.
-	ph := s2sDisconnectedPacketHead{
-		seq_: c.genSeq(),
-		uid:  uid,
-		sid:  sid,
-	}
-	return c.sendPacket(ctx, nodeId, &ph, nil)
-}
-
-// Stop 停机.
-func (c *Client) Stop() {
-	if err := c.lockRunning(false); err != nil {
-		return
-	}
-	defer c.unlockState(false)
-
-	close(c.cStopped)
-	c.stopped = true
-}
-
 // handleResponse 处理响应.
 func (c *Client) handleResponse(resp ClientResponse) {
 	c.cfg.Handler.HandleResponse(resp)
@@ -340,85 +378,4 @@ func (c *Client) handlePush(push ClientPush) {
 // handleDisconnect 处理断开连接.
 func (c *Client) handleDisconnect(uid ActorUID, sid uint32) {
 	c.cfg.Handler.HandleDisconnect(uid, sid)
-}
-
-// ackEnabled 是否启用 ACK 机制.
-func (c *Client) ackEnabled() bool {
-	return c.ackM != nil
-}
-
-// addPacket2Ack 添加待确认数据包.
-func (c *Client) addPacket2Ack(nodeId string, pt PacketType, seq uint32, b []byte) error {
-	if !c.ackEnabled() {
-		return nil
-	}
-
-	return c.ackM.addPacket(nodeId, pt, seq, b)
-}
-
-// remPacket2Ack 移除待确认数据包.
-func (c *Client) remPacket2Ack(pt PacketType, seq uint32) {
-	if !c.ackEnabled() {
-		return
-	}
-
-	if removed, b := c.ackM.remPacket(pt, seq); removed {
-		c.putBytes(b)
-	}
-}
-
-// sendAckPacket 发送 Ack 数据包.
-func (c *Client) sendAckPacket(nodeId string, ph packetHead) error {
-	if !c.ackEnabled() {
-		return nil
-	}
-
-	// 不能向本地发送 Ack.
-	if nodeId == c.nodeId() {
-		return errors.New("send ack packet to local")
-	}
-
-	// 编码数据包.
-	head := ackPacketHead{
-		ackPt:  ph.pt(),
-		ackSeq: ph.seq(),
-	}
-	b, err := c.encodePacket(&head, nil)
-	if err != nil {
-		c.logger.ErrorFields("encode ack packet failed", lfdPacketTypeSeq(ph), lfdError(err))
-		return errCodeEncodePacketFailed
-	}
-
-	// 发送数据.
-	ctx, cancel := context.WithTimeout(context.Background(), c.ackM.getCfg().Timeout)
-	defer cancel()
-	return c.send(ctx, nodeId, b)
-}
-
-// onAckRetry 处理 ACK 重试.
-func (c *Client) onAckRetry(nodeId string, pt PacketType, seq uint32, b []byte) {
-	if err := c.lockRunning(true); err != nil {
-		return
-	}
-	defer c.unlockState(true)
-
-	ctx, cancel := context.WithTimeout(context.Background(), c.ackM.getCfg().Timeout)
-	defer cancel()
-
-	if err := c.send(ctx, nodeId, b); err != nil {
-		c.logger.ErrorFields("retry to send packet failed", lfdRemoteNodeId(nodeId), lfdPacketType(pt), lfdPacketSeq(seq), lfdError(err))
-	} else {
-		c.logger.WarnFields("retry to send packet", lfdRemoteNodeId(nodeId), lfdPacketType(pt), lfdPacketSeq(seq))
-	}
-}
-
-// onAckFailed 处理 ACK 失败.
-func (c *Client) onAckFailed(nodeId string, pt PacketType, seq uint32, b []byte) {
-	if err := c.lockRunning(true); err != nil {
-		return
-	}
-	defer c.unlockState(true)
-
-	c.logger.ErrorFields("packet to ack failed", lfdRemoteNodeId(nodeId), lfdPacketType(pt), lfdPacketSeq(seq))
-	c.putBytes(b)
 }

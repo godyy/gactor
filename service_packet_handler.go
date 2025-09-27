@@ -20,8 +20,56 @@ func svcHandlePacketAck(s *Service, nodeId string, b *Buffer) error {
 	// 释放缓冲区.
 	s.freeBuffer(b)
 
-	// 移除待确认数据包.
-	s.remPacket2Ack(head.ackPt, head.ackSeq)
+	// 收到数据包确认.
+	s.receivePacketAck(head.ackPt, head.ackSeq)
+
+	return nil
+}
+
+// svcHandlePacketConnect PacketTypeConnect 处理器.
+func svcHandlePacketConnect(s *Service, nodeId string, b *Buffer) error {
+	// 解码包头.
+	var head connectPacketHead
+	if err := head.decode(b); err != nil {
+		return pkgerrors.WithMessage(err, "gactor: svcHandlePacketConnect: decode request Head")
+	}
+
+	// 回复确认数据包.
+	if err := s.sendAckPacket(nodeId, &head); err != nil {
+		s.getLogger().ErrorFields("svcHandlePacketConnect: send ack packet failed", lfdActorUID(head.uid), lfdError(err))
+
+	}
+
+	// 释放缓冲区.
+	s.freeBuffer(b)
+
+	// 发送消息.
+	if err := s.send2Actor(context.Background(), head.uid, newMessageConnect(nodeId, head.sid)); err != nil {
+		s.getLogger().ErrorFields("svcHandlePacketConnect: send message to actor failed", lfdActorUID(head.uid), lfdError(err))
+	}
+
+	return nil
+}
+
+// svcHandlePacketDisconnect PacketTypeDisconnect 处理器.
+func svcHandlePacketDisconnect(s *Service, nodeId string, b *Buffer) error {
+	// 解码包头.
+	var head disconnectPacketHead
+	if err := head.decode(b); err != nil {
+		return pkgerrors.WithMessage(err, "gactor: svcHandlePacketDisconnect: decode request Head")
+	}
+
+	// 回复确认数据包.
+	if err := s.sendAckPacket(nodeId, &head); err != nil {
+		s.getLogger().ErrorFields("svcHandlePacketDisconnect: send ack packet failed", lfdActorUID(head.uid), lfdError(err))
+
+	}
+
+	s.freeBuffer(b)
+
+	if err := s.send2Actor(context.Background(), head.uid, newMessageDisconnected(nodeId, head.sid)); err != nil {
+		s.getLogger().ErrorFields("svcHandlePacketDisconnect: send message to actor failed", lfdActorUID(head.uid), lfdError(err))
+	}
 
 	return nil
 }
@@ -138,9 +186,7 @@ func svcHandlePacketS2SRpcResp(s *Service, nodeId string, b *Buffer) error {
 		}
 	}
 
-	if !s.rpcManager.handleResponse(head.reqId, b, head.errCode) {
-		s.getLogger().ErrorFields("svcHandlePacketS2SRpcResp: call not found", lfdReqId(head.reqId))
-	}
+	s.rpcManager.handleResponse(head.reqId, b, head.errCode)
 
 	return nil
 }
@@ -164,29 +210,6 @@ func svcHandlePacketS2SCast(s *Service, nodeId string, b *Buffer) error {
 	if err := s.send2Actor(ctx, head.toId, request); err != nil {
 		request.release()
 		s.getLogger().ErrorFields("svcHandlePacketS2SCast: send request to actor failed", lfdActorUID(head.toId), lfdError(err))
-	}
-
-	return nil
-}
-
-// svcHandlePacketS2SDisconnected PacketTypeS2SDisconnected 处理器.
-func svcHandlePacketS2SDisconnected(s *Service, nodeId string, b *Buffer) error {
-	// 解码包头.
-	var head s2sDisconnectedPacketHead
-	if err := head.decode(b); err != nil {
-		return pkgerrors.WithMessage(err, "gactor: svcHandlePacketS2SDisconnected: decode request Head")
-	}
-
-	// 回复确认数据包.
-	if err := s.sendAckPacket(nodeId, &head); err != nil {
-		s.getLogger().ErrorFields("svcHandlePacketS2SDisconnected: send ack packet failed", lfdActorUID(head.uid), lfdError(err))
-
-	}
-
-	s.freeBuffer(b)
-
-	if err := s.send2Actor(context.Background(), head.uid, newMessageDisconnected(nodeId, head.sid)); err != nil {
-		s.getLogger().ErrorFields("svcHandlePacketS2SDisconnected: send message to actor failed", lfdActorUID(head.uid), lfdError(err))
 	}
 
 	return nil
@@ -226,12 +249,13 @@ func (s *Service) onLocalPacket(b []byte) error {
 
 // servicePacketHandlers Service Packet 处理器注册.
 var servicePacketHandlers = map[PacketType]func(s *Service, nodeId string, b *Buffer) error{
-	PacketTypeAck:             svcHandlePacketAck,
-	PacketTypeRawReq:          svcHandlePacketRawReq,
-	PacketTypeS2SRpc:          svcHandlePacketS2SRpc,
-	PacketTypeS2SRpcResp:      svcHandlePacketS2SRpcResp,
-	PacketTypeS2SCast:         svcHandlePacketS2SCast,
-	PacketTypeS2SDisconnected: svcHandlePacketS2SDisconnected,
+	PacketTypeAck:        svcHandlePacketAck,
+	PacketTypeConnect:    svcHandlePacketConnect,
+	PacketTypeDisconnect: svcHandlePacketDisconnect,
+	PacketTypeRawReq:     svcHandlePacketRawReq,
+	PacketTypeS2SRpc:     svcHandlePacketS2SRpc,
+	PacketTypeS2SRpcResp: svcHandlePacketS2SRpcResp,
+	PacketTypeS2SCast:    svcHandlePacketS2SCast,
 }
 
 // HandlePacket 处理字节切片 b 指代的网络数据包.

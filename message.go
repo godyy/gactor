@@ -1,5 +1,10 @@
 package gactor
 
+import (
+	"context"
+	"time"
+)
+
 // message 封装 Actor 消息.
 type message interface {
 	// handle 处理消息.
@@ -12,20 +17,58 @@ type message interface {
 	release()
 }
 
-// messageDisconnected 封装断开连接消息.
-type messageDisconnected struct {
+// messageConnect 封装连接消息.
+type messageConnect struct {
 	nodeId string
 	sid    uint32
 }
 
-func newMessageDisconnected(nodeId string, sid uint32) *messageDisconnected {
-	return &messageDisconnected{
+func newMessageConnect(nodeId string, sid uint32) *messageConnect {
+	return &messageConnect{
 		nodeId: nodeId,
 		sid:    sid,
 	}
 }
 
-func (m *messageDisconnected) handle(a actorImpl) error {
+const disconnectTimeout = 3 * time.Second
+
+// handle 处理消息.
+func (m *messageConnect) handle(a actorImpl) error {
+	ca, ok := a.(*cActor)
+	if !ok {
+		return ErrNotCActor
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), disconnectTimeout)
+	defer cancel()
+	ca.updateSession(ctx, ActorSession{
+		NodeId: m.nodeId,
+		SID:    m.sid,
+	})
+
+	return nil
+}
+
+// handleError 处理错误.
+func (m *messageConnect) handleError(a actorImpl, err error) error { return nil }
+
+// release 回收.
+func (m *messageConnect) release() {}
+
+// messageDisconnect 封装断开连接消息.
+type messageDisconnect struct {
+	nodeId string
+	sid    uint32
+}
+
+func newMessageDisconnected(nodeId string, sid uint32) *messageDisconnect {
+	return &messageDisconnect{
+		nodeId: nodeId,
+		sid:    sid,
+	}
+}
+
+func (m *messageDisconnect) handle(a actorImpl) error {
 	ca, ok := a.(*cActor)
 	if !ok {
 		return ErrNotCActor
@@ -39,9 +82,9 @@ func (m *messageDisconnected) handle(a actorImpl) error {
 	return nil
 }
 
-func (m *messageDisconnected) handleError(_ actorImpl, _ error) error { return nil }
+func (m *messageDisconnect) handleError(_ actorImpl, _ error) error { return nil }
 
-func (m *messageDisconnected) release() {}
+func (m *messageDisconnect) release() {}
 
 // messageCheckAlive 检查 Actor 是否存活的消息.
 type messageCheckAlive struct {

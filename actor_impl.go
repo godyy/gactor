@@ -732,11 +732,10 @@ func (a *cActor) start() error {
 }
 
 func (a *cActor) updateSession(ctx context.Context, session ActorSession) {
-	if a.session == session {
-		return
-	}
-
-	if a.session.NodeId != session.NodeId {
+	if a.session.IsConnected() {
+		if a.session == session {
+			return
+		}
 		a.Disconnect(ctx)
 	}
 
@@ -764,7 +763,7 @@ func (a *cActor) Disconnect(ctx context.Context) {
 		return
 	}
 
-	ph := s2sDisconnectedPacketHead{
+	ph := disconnectPacketHead{
 		uid: a.ActorUID(),
 		sid: a.session.SID,
 	}
