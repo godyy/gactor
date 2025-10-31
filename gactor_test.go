@@ -351,35 +351,35 @@ type testMessageCast struct {
 }
 
 var testHandlerChain = NewHandlersChain(
-	func(ctx *Context) error {
+	func(ctx *Context) {
 		var s2sMsg testS2SMessage
 		if err := ctx.Decode(&s2sMsg); err != nil {
 			ctx.Abort()
-			return ctx.ReplyDecodeError()
+			ctx.ReplyDecodeError()
+			return
 		}
 		ctx.Set("msg", &s2sMsg)
-		return nil
 	},
-	func(ctx *Context) error {
+	func(ctx *Context) {
 		msgVal, exists := ctx.Get("msg")
 		if !exists {
-			return errors.New("msg not found")
+			panic("msg not found")
 		}
 		msg := msgVal.(*testS2SMessage)
 		switch msg.msgId {
 		case msgIdPing:
 			logger.Debugf("actor %s receive rpc ping", ctx.Actor().ActorUID())
-			return ctx.Reply(&testS2SMessage{
+			ctx.Reply(&testS2SMessage{
 				msgId:   msgIdPong,
 				payload: &testMessagePong{Time: time.Now()},
 			})
 
 		case msgIdCast:
 			logger.Debugf("actor %s receive cast message: %s", ctx.Actor().ActorUID(), msg.payload.(*testMessageCast).Msg)
-			return ctx.Reply(nil)
+			ctx.Reply(nil)
 
 		default:
-			return fmt.Errorf("wrong msg id %d", msg.msgId)
+			panic(fmt.Errorf("wrong msg id %d", msg.msgId))
 		}
 	},
 )

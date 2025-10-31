@@ -25,25 +25,23 @@ func (h *handler) registerHandlers() {
 	h.RegisterHandler(message.MsgIDGetServerNameReq, h.wrapHandler(handlers.WrapMessageHandler(h.handleGetServerName)))
 }
 
-func (h *handler) begin(ctx *gactor.Context) error {
+func (h *handler) begin(ctx *gactor.Context) {
 	logger.Logger().DebugFields("server handler begin", zap.Int64("id", ctx.Actor().ActorUID().ID))
-	return nil
 }
 
-func (h *handler) end(ctx *gactor.Context) error {
+func (h *handler) end(ctx *gactor.Context) {
 	logger.Logger().DebugFields("server handler end", zap.Int64("id", ctx.Actor().ActorUID().ID))
-	return nil
 }
 
 func (h *handler) wrapHandler(handlers ...gactor.HandlerFunc) gactor.HandlersChain {
 	return gactor.NewHandlersChain(h.begin).Append(handlers...).Append(h.end)
 }
 
-func (h *handler) handleGetServerName(ctx *gactor.Context, params *message.GetServerNameReq) error {
+func (h *handler) handleGetServerName(ctx *gactor.Context, params *message.GetServerNameReq) {
 	// logger.Logger().DebugFields("server handle get server name", zap.Int64("id", ctx.Actor().ActorUID().ID))
 	server := h.server(ctx)
 	reply := message.GetServerNameResp{ServerName: server.GetName()}
-	return h.Reply(ctx, &reply)
+	h.Reply(ctx, &reply)
 }
 
 func Handler() gactor.HandlerFunc {
