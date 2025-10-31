@@ -212,11 +212,7 @@ func (s *Service) processTriggeredTimers() {
 
 // execTimer 执行定时器.
 func (s *Service) execTriggeredTimer(t triggeredTimer) {
-	defer func() {
-		if x := recover(); x != nil {
-			s.getLogger().ErrorFields("exec timer panic", lfdPanic(x))
-		}
-	}()
+	defer recoverAndLog("exec timer panic", s.getLogger(), nil)
 
 	t.cb(t.args)
 }

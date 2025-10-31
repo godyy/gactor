@@ -224,11 +224,7 @@ func (m *rpcManager) addCall(call *rpcCall) {
 
 // invokeCallback 调用 RPC 回调.
 func (m *rpcManager) invokeCallback(call *rpcCall) {
-	defer func() {
-		if x := recover(); x != nil {
-			m.svc.getLogger().ErrorFields("invoke rpc callback panic", lfdPanic(x))
-		}
-	}()
+	defer recoverAndLog("invoke rpc callback panic", m.svc.getLogger(), nil)
 
 	resp := RPCResp{
 		svc:     m.svc,
