@@ -55,7 +55,7 @@ func (h *handler) handleServerName(ctx *gactor.Context, msg *message.GetNameReq)
 	logger.Logger().DebugFields("server handle serverName", zap.Int64("id", ctx.Actor().ActorUID().ID))
 	if err := actors.ContextAsyncRPC(
 		ctx,
-		gactor.ActorUID{Category: consts.CategoryUser, ID: actors.ServerId},
+		gactor.ActorUID{Category: consts.CategoryUser, ID: 1},
 		&message.GetNameReq{},
 		h.rpcGetUserNameCallback); err != nil {
 		logger.Logger().ErrorFields("server async rpc call user name failed", zap.Int64("id", ctx.Actor().ActorUID().ID), zap.Error(err))

@@ -78,15 +78,6 @@ func actorBeforeLoop(a actorImpl) error {
 
 // actorLoop Actor 主循环逻辑.
 func actorLoop(a actorImpl) {
-	// recover.
-	// defer func() {
-	// 	if err := recover(); err != nil {
-	// 		a.core().getLogger().ErrorFields("loop panic", lfdPanic(err))
-	// 		a.core().getLogger().Errorf("loop panic, %v", err)
-
-	// 	}
-	// }()
-
 	defer recoverAndLog("loop panic", a.core().getLogger(), func() {
 		a.core().service().monitorActorPanic(a.core().Category)
 		actorStopWithErr(a, errCodeActorLoopError)
@@ -307,7 +298,7 @@ func newActorCore(ad *ActorDefineCommon, id int64, svc *Service) *actorCore {
 		completedAsyncRPC: make(chan actorCompletedAsyncRPC, ad.MaxCompletedAsyncRPCAmount),
 		sigPrepareStop:    make(chan struct{}),
 		logger: svc.oriLogger.Named("actor").
-			WithFields(lfdCategory(ad.Category)).
+			WithFields(lfdCategoryName(ad.Name)).
 			WithFields(lfdId(id)),
 		state:    actorStateInit,
 		refCount: 0,
@@ -396,6 +387,7 @@ func (a *actorCore) stop() error {
 
 	// 若仍被引用, 无法停机.
 	if a.refCount > 0 {
+		a.getLogger().Debug("refCount", a.refCount)
 		return ErrActorBeReferenced
 	}
 
