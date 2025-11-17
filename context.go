@@ -5,6 +5,8 @@ import (
 	"errors"
 	"sync"
 	"time"
+
+	"go.uber.org/zap"
 )
 
 // Context 表示 Actor 需要处理的请求上下文.
@@ -212,13 +214,13 @@ func (c *Context) release() {
 func (c *Context) beforeHandle(a actorImpl) bool {
 	if c.ctx != nil {
 		if err := c.ctx.Err(); err != nil {
-			a.core().getLogger().WarnFields("handle request but context canceled", lfdError(err))
+			a.core().getLogger().WarnFields("[BeforeHandleRequest] context canceled", zap.Object("req", c.req), lfdError(err))
 			return false
 		}
 	}
 
 	if c.req.isTimeout(time.Now().UnixMilli()) {
-		a.core().getLogger().Warn("handle request but timeout")
+		a.core().getLogger().WarnFields("[BeforeHandleRequest] request timeout", zap.Object("req", c.req), lfdRequestType(c.req.requestType()))
 		return false
 	}
 
@@ -227,38 +229,43 @@ func (c *Context) beforeHandle(a actorImpl) bool {
 }
 
 // handle 实现 message.
-func (c *Context) handle(a actorImpl) error {
+func (c *Context) handle(a actorImpl) {
 	if !c.beforeHandle(a) {
-		return nil
+		return
 	}
 
 	if err := c.req.beforeHandle(c); err != nil {
 		if errors.Is(err, errSkipHandleRequest) {
 			err = nil
 		}
-		return err
+		if err != nil {
+			a.core().getLogger().ErrorFields("[HandleRequest] request before-handle check failed", zap.Object("req", c.req), lfdError(err))
+		}
+		return
 	}
 
 	core := a.core()
 	core.Handler(c)
-
-	return nil
 }
 
 // handleError 实现 message.
-func (c *Context) handleError(a actorImpl, err error) error {
+func (c *Context) handleError(a actorImpl, err error) {
 	if !c.beforeHandle(a) {
-		return nil
+		return
 	}
 
 	// 如果返回的是错误码.
 	var ec errCode
 	if errors.As(err, &ec) {
-		return c.req.replyError(c, ec)
+		if err := c.req.replyError(c, ec); err != nil {
+			a.core().getLogger().ErrorFields("[HandleRequest] reply error", zap.Object("req", c.req), lfdError(err))
+		}
+		return
 	}
 
-	a.core().getLogger().ErrorFields("handle request with error", lfdRequestType(c.req.requestType()), lfdError(err))
-	return c.req.replyError(c, errCodeInternalError)
+	if err := c.req.replyError(c, errCodeInternalError); err != nil {
+		a.core().getLogger().ErrorFields("[HandleRequest] reply internal error", zap.Object("req", c.req), lfdError(err))
+	}
 }
 
 func (c *Context) Deadline() (deadline time.Time, ok bool) {

@@ -4,7 +4,7 @@ go 1.22
 
 require (
 	github.com/godyy/gcluster v0.0.4
-	github.com/godyy/glog v0.1.0
+	github.com/godyy/glog v0.1.1
 	github.com/godyy/gnet v0.3.0
 	github.com/godyy/gtimewheel v0.1.1
 	github.com/godyy/gutils v0.0.1

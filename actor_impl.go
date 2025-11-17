@@ -99,9 +99,7 @@ func actorLoop(a actorImpl) {
 			core.resetRecycleTimer(true)
 
 			// 处理消息.
-			if err := msg.handle(a); err != nil {
-				core.getLogger().ErrorFields("handle message failed", lfdError(err))
-			}
+			msg.handle(a)
 			msg.release()
 
 			// 若信箱已清空, 重置回收定时器.
@@ -156,13 +154,9 @@ func actorDrain(a actorImpl, err error) {
 		select {
 		case msg := <-core.messageBox:
 			if err == nil {
-				if err := msg.handle(a); err != nil {
-					core.getLogger().ErrorFields("handle message failed", lfdError(err))
-				}
+				msg.handle(a)
 			} else {
-				if err := msg.handleError(a, err); err != nil {
-					core.getLogger().ErrorFields("handle message error failed", lfdError(err))
-				}
+				msg.handleError(a, err)
 			}
 			msg.release()
 		case call := <-core.completedAsyncRPC:
@@ -298,8 +292,7 @@ func newActorCore(ad *ActorDefineCommon, id int64, svc *Service) *actorCore {
 		completedAsyncRPC: make(chan actorCompletedAsyncRPC, ad.MaxCompletedAsyncRPCAmount),
 		sigPrepareStop:    make(chan struct{}),
 		logger: svc.oriLogger.Named("actor").
-			WithFields(lfdCategoryName(ad.Name)).
-			WithFields(lfdId(id)),
+			WithFields(lfdCategoryName(ad.Name), lfdId(id)),
 		state:    actorStateInit,
 		refCount: 0,
 	}
@@ -612,9 +605,9 @@ type actorAsyncRPCFunc struct {
 
 func (f *actorAsyncRPCFunc) invoke(resp *RPCResp) {
 	if actor, err := f.svc.getActor(f.uid); err != nil {
-		f.svc.getLogger().ErrorFields("get actor failed inside actorAsyncRPCFunc", f.svc.lfdActor(f.uid), lfdError(err))
+		f.svc.getLogger().ErrorFields("get actor failed inside actorAsyncRPCFunc", f.svc.lfdActorUID("uid", f.uid), lfdError(err))
 	} else if actor == nil {
-		f.svc.getLogger().WarnFields("actor not found inside actorAsyncRPCFunc", f.svc.lfdActor(f.uid))
+		f.svc.getLogger().WarnFields("actor not found inside actorAsyncRPCFunc", f.svc.lfdActorUID("uid", f.uid))
 	} else {
 		defer actor.core().deref()
 		ctx, cancel := context.WithTimeout(context.Background(), f.svc.cfg.DefRPCTimeout/2)
@@ -736,9 +729,9 @@ func (a *cActor) updateSession(ctx context.Context, session ActorSession) {
 		a.Disconnect(ctx)
 	}
 
+	a.getLogger().DebugFields("connect", lfdSession(session))
 	a.session = session
 	a.behavior.OnConnected()
-	a.getLogger().Debug("connected")
 }
 
 // PushRawMessage 向客户端推送消息.
@@ -766,11 +759,12 @@ func (a *cActor) Disconnect(ctx context.Context) {
 	}
 	if err := a.svc.sendRemotePacket(ctx, a.session.NodeId, &ph, nil); err != nil {
 		a.getLogger().ErrorFields("send disconnect packet failed", lfdSession(a.session), lfdError(err))
+	} else {
+		a.getLogger().DebugFields("disconnect", lfdSession(a.session))
 	}
 
 	a.session.reset()
 	a.behavior.OnDisconnected()
-	a.getLogger().Debug("disconnected")
 }
 
 // onDisconnect 处理客户端端开链接.
@@ -778,7 +772,7 @@ func (a *cActor) onDisconnect(session ActorSession) {
 	if session != a.session {
 		return
 	}
+	a.getLogger().Debug("onDisconnect")
 	a.session.reset()
 	a.behavior.OnDisconnected()
-	a.getLogger().Debug("disconnected")
 }

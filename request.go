@@ -3,6 +3,8 @@ package gactor
 import (
 	"errors"
 	"sync"
+
+	"go.uber.org/zap/zapcore"
 )
 
 // RequestType 请求类型.
@@ -61,6 +63,9 @@ type request interface {
 	// beforeHandle 处理请求.
 	// 如果返回 errSkipHandleRequest 错误, 则跳过处理请求.
 	beforeHandle(ctx *Context) error
+
+	// zap.Field支持
+	zapcore.ObjectMarshaler
 }
 
 type requestCom struct {
@@ -219,6 +224,15 @@ func (req *rawRequest) beforeHandle(ctx *Context) error {
 	return nil
 }
 
+func (req *rawRequest) MarshalLogObject(enc zapcore.ObjectEncoder) error {
+	enc.AddString("type", req.requestType().String())
+	enc.AddString("fromNode", req.fromNodeId)
+	enc.AddUint32("seq", req.head.seq_)
+	enc.AddUint32("sid", req.head.sid)
+	enc.AddInt64("timeoutAtMs", req.timeoutAtMs)
+	return nil
+}
+
 // rpcRequest 对应 PacketTypeS2SRpc.
 type rpcRequest struct {
 	requestCom
@@ -312,6 +326,15 @@ func (req *rpcRequest) release(ctx *Context) {
 	poolOfRpcRequest.Put(req)
 }
 
+func (req *rpcRequest) MarshalLogObject(enc zapcore.ObjectEncoder) error {
+	enc.AddString("type", req.requestType().String())
+	enc.AddString("fromNode", req.fromNodeId)
+	enc.AddUint32("seq", req.head.seq_)
+	enc.AddUint32("reqId", req.head.reqId)
+	enc.AddInt64("timeoutAtMs", req.timeoutAtMs)
+	return nil
+}
+
 // castRequest 对应 PacketTypeS2SCast.
 type castRequest struct {
 	requestCom
@@ -359,4 +382,10 @@ func (req *castRequest) clone(ctx *Context) request {
 func (req *castRequest) release(ctx *Context) {
 	req.requestCom.release(ctx)
 	poolOfCastRequest.Put(req)
+}
+
+func (req *castRequest) MarshalLogObject(enc zapcore.ObjectEncoder) error {
+	enc.AddString("type", req.requestType().String())
+	enc.AddUint32("seq", req.head.seq_)
+	return nil
 }

@@ -88,9 +88,9 @@ func (c *Client) onAckRetry(ap ackPacket) {
 	defer cancel()
 
 	if err := c.send(ctx, ap.nodeId, ap.b); err != nil {
-		c.logger.ErrorFields("retry to send packet failed", lfdRemoteNodeId(ap.nodeId), lfdPacketType(ap.pt), lfdPacketSeq(ap.seq), lfdError(err))
+		c.logger.ErrorFields("retry to send packet failed", lfdRemoteNodeId(ap.nodeId), lfdPacketType(ap.pt), lfdSeq(ap.seq), lfdError(err))
 	} else {
-		c.logger.WarnFields("retry to send packet", lfdRemoteNodeId(ap.nodeId), lfdPacketType(ap.pt), lfdPacketSeq(ap.seq))
+		c.logger.WarnFields("retry to send packet", lfdRemoteNodeId(ap.nodeId), lfdPacketType(ap.pt), lfdSeq(ap.seq))
 	}
 }
 
@@ -102,7 +102,7 @@ func (c *Client) onAckOver(ap ackPacket, reason ackOverReason) {
 	defer c.unlockState(true)
 
 	if reason.isFailed() {
-		c.logger.ErrorFields("packet to ack failed", lfdRemoteNodeId(ap.nodeId), lfdPacketType(ap.pt), lfdPacketSeq(ap.seq))
+		c.logger.ErrorFields("packet to ack failed", lfdRemoteNodeId(ap.nodeId), lfdPacketType(ap.pt), lfdSeq(ap.seq))
 	}
 	c.putBytes(ap.b)
 }

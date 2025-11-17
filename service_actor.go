@@ -367,7 +367,7 @@ func (s *Service) send2Actor(ctx context.Context, uid ActorUID, msg message) err
 
 // onActorStopped 处理 Actor 停机完成事件.
 func (s *Service) onActorStopped(actor actorImpl) {
-	s.logger.DebugFields("on actor stopped", lfdActorWithImpl(actor))
+	s.logger.DebugFields("on actor stopped", s.lfdActorUID("uid", actor.ActorUID()))
 
 	// 删除 Actor.
 	ac := actor.core()
@@ -517,7 +517,7 @@ func (s *actorStarter) start(svc *Service) {
 	s.state = 1
 	s.mtx.Unlock()
 
-	svc.getLogger().DebugFields("actorStarter start", svc.lfdActor(s.uid))
+	svc.getLogger().DebugFields("actorStarter start", svc.lfdActorUID("uid", s.uid))
 
 	categoryActors := svc.getCategoryActorsByCategory(s.uid.Category)
 	defer categoryActors.delStarter(s.uid.ID)
@@ -525,7 +525,7 @@ func (s *actorStarter) start(svc *Service) {
 	// 创建并启动 Actor.
 	actor := svc.createActor(s.uid)
 	if err := actor.start(); err != nil {
-		svc.getLogger().ErrorFields("actor start failed", lfdActorWithImpl(actor), lfdError(err))
+		svc.getLogger().ErrorFields("actor start failed", svc.lfdActorUID("uid", s.uid), lfdError(err))
 		s.complete(nil, err)
 		return
 	}
@@ -541,7 +541,7 @@ func (s *actorStarter) start(svc *Service) {
 		categoryActors.addActor(actor)
 		categoryActors.unlock(false)
 	} else {
-		svc.getLogger().ErrorFields("ref actor failed started", lfdActorWithImpl(actor), lfdError(err))
+		svc.getLogger().ErrorFields("ref actor failed started", svc.lfdActorUID("uid", s.uid), lfdError(err))
 		actor = nil
 	}
 

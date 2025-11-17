@@ -12,8 +12,11 @@ func cliHandlePacketAck(c *Client, nodeId string, b *Buffer) error {
 	// 解码包头.
 	var head ackPacketHead
 	if err := head.decode(b); err != nil {
-		return pkgerrors.WithMessage(err, "gactor: cliHandlePacketAck: decode request Head")
+		return pkgerrors.WithMessage(err, "gactor: [HandlePacketAck] decode request Head")
 	}
+
+	c.getLogger().DebugFields("[HandlePacketAck]",
+		lfdRemoteNodeId(nodeId), lfdPacketType(head.ackPt), lfdSeq(head.ackSeq))
 
 	// 释放缓冲区.
 	c.freeBuffer(b)
@@ -29,12 +32,16 @@ func cliHandlePacketRawResp(c *Client, nodeId string, b *Buffer) error {
 	// 解码包头.
 	var head rawRespPacketHead
 	if err := head.decode(b); err != nil {
-		return pkgerrors.WithMessage(err, "gactor: cliHandlePacketRawResp: decode request Head")
+		return pkgerrors.WithMessage(err, "gactor: [HandlePacketRawResp] decode request Head")
 	}
+
+	c.getLogger().DebugFields("[HandlePacketRawResp]",
+		lfdRemoteNodeId(nodeId), lfdSeq(head.seq()), lfdId(head.fromId), lfdErrCode(head.errCode))
 
 	// 发送 Ack 确认.
 	if err := c.sendAckPacket(nodeId, &head); err != nil {
-		c.getLogger().ErrorFields("cliHandlePacketRawResp: send ack packet failed", lfdId(head.fromId), lfdError(err))
+		c.getLogger().ErrorFields("[HandlePacketRawResp] send ack packet failed",
+			lfdRemoteNodeId(nodeId), lfdSeq(head.seq()), lfdId(head.fromId), lfdErrCode(head.errCode), lfdError(err))
 	}
 
 	// 发生错误.
@@ -63,12 +70,16 @@ func cliHandlePacketRawPush(c *Client, nodeId string, b *Buffer) error {
 	// 解码包头.
 	var head rawPushPacketHead
 	if err := head.decode(b); err != nil {
-		return pkgerrors.WithMessage(err, "gactor: cliHandlePacketRawPush: decode request Head")
+		return pkgerrors.WithMessage(err, "gactor: [HandlePacketRawPush] decode request Head")
 	}
+
+	c.getLogger().DebugFields("[HandlePacketRawPush]",
+		lfdRemoteNodeId(nodeId), lfdSeq(head.seq()), lfdId(head.fromId))
 
 	// 发送 Ack 确认.
 	if err := c.sendAckPacket(nodeId, &head); err != nil {
-		c.getLogger().ErrorFields("cliHandlePacketRawPush: send ack packet failed", lfdId(head.fromId), lfdError(err))
+		c.getLogger().ErrorFields("[HandlePacketRawPush] send ack packet failed",
+			lfdRemoteNodeId(nodeId), lfdSeq(head.seq()), lfdId(head.fromId), lfdError(err))
 	}
 
 	// 处理推送.
@@ -86,12 +97,16 @@ func cliHandlePacketDisconnect(c *Client, nodeId string, b *Buffer) error {
 	// 解码包头.
 	var head disconnectPacketHead
 	if err := head.decode(b); err != nil {
-		return pkgerrors.WithMessage(err, "gactor: cliHandlePacketDisconnect: decode request Head")
+		return pkgerrors.WithMessage(err, "gactor: [HandlePacketDisconnect] decode request Head")
 	}
+
+	c.getLogger().DebugFields("[HandlePacketDisconnect]",
+		lfdRemoteNodeId(nodeId), lfdSeq(head.seq()), lfdId(head.id), lfdSid(head.sid))
 
 	// 发送 Ack 确认.
 	if err := c.sendAckPacket(nodeId, &head); err != nil {
-		c.getLogger().ErrorFields("cliHandlePacketDisconnect: send ack packet failed", lfdId(head.id), lfdError(err))
+		c.getLogger().ErrorFields("[HandlePacketDisconnect] send ack packet failed",
+			lfdRemoteNodeId(nodeId), lfdSeq(head.seq()), lfdId(head.id), lfdSid(head.sid), lfdError(err))
 	}
 
 	// 释放缓冲区.

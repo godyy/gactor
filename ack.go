@@ -160,7 +160,7 @@ func (m *ackManager) addPacket(ap ackPacket) {
 	case m.chCmds <- newAckCmdAdd(p):
 	case <-chStop:
 	default:
-		m.handler.getLogger().ErrorFields("add packet2Ack but chan is full", lfdPacketType(ap.pt), lfdPacketSeq(ap.seq))
+		m.handler.getLogger().ErrorFields("add packet2Ack but chan is full", lfdPacketType(ap.pt), lfdSeq(ap.seq))
 	}
 }
 
@@ -185,7 +185,7 @@ func (m *ackManager) addPacketInternal(p *packet2Ack) {
 
 	// 检查ID是否存在.
 	if _, exists := m.m[id]; exists {
-		m.handler.getLogger().ErrorFields("packet2Ack already exists", lfdPacketType(p.pt), lfdPacketSeq(p.seq), lfdId(id))
+		m.handler.getLogger().ErrorFields("packet2Ack already exists", lfdPacketType(p.pt), lfdSeq(p.seq), lfdId(id))
 		return
 	}
 

@@ -35,6 +35,10 @@ var errCodeStrings = map[errCode]string{
 	errCodeActorOtherConnect:  "actor other connect",
 }
 
+func (ec errCode) String() string {
+	return errCodeStrings[ec]
+}
+
 func (ec errCode) Error() string {
 	if s, ok := errCodeStrings[ec]; ok {
 		return fmt.Sprintf("gactor: %d - %s", ec, s)

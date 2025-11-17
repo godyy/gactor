@@ -17,19 +17,19 @@ func createStdLogger(level glog.Level) glog.Logger {
 }
 
 func lfdNodeId(nodeId string) zap.Field {
-	return zap.String("nodeId", nodeId)
+	return zap.String("node", nodeId)
 }
 
 func lfdRemoteNodeId(nodeId string) zap.Field {
-	return zap.String("remoteNodeId", nodeId)
+	return zap.String("remoteNode", nodeId)
 }
 
 func lfdPacketType(pt PacketType) zap.Field {
 	return zap.Int8("packetType", pt)
 }
 
-func lfdPacketSeq(seq uint32) zap.Field {
-	return zap.Uint32("packetSeq", seq)
+func lfdSeq(seq uint32) zap.Field {
+	return zap.Uint32("seq", seq)
 }
 
 func lfdPacketTypeSeq(ph packetHead) zap.Field {
@@ -41,24 +41,6 @@ func lfdPacketTypeSeq(ph packetHead) zap.Field {
 
 func lfdRequestType(rt RequestType) zap.Field {
 	return zap.String("requestType", rt.String())
-}
-
-func lfdActor(category string, id int64) zap.Field {
-	return zap.Dict("actor",
-		zap.String("category", category),
-		zap.Int64("id", id),
-	)
-}
-
-func lfdActorWithImpl(impl actorImpl) zap.Field {
-	return lfdActor(impl.core().Name, impl.ActorUID().ID)
-}
-
-func lfdActorUID(uid ActorUID) zap.Field {
-	return zap.Dict("actorUID",
-		zap.Uint16("category", uid.Category),
-		zap.Int64("id", uid.ID),
-	)
 }
 
 func lfdReqId(reqId uint32) zap.Field {
@@ -79,10 +61,6 @@ func lfdSession(session ActorSession) zap.Field {
 	)
 }
 
-func lfdCategory(category uint16) zap.Field {
-	return zap.Uint16("category", category)
-}
-
 func lfdCategoryName(name string) zap.Field {
 	return zap.String("category", name)
 }
@@ -95,10 +73,30 @@ func lfdError(err error) zap.Field {
 	return zap.NamedError("error", err)
 }
 
-func (s *Service) lfdActor(uid ActorUID) zap.Field {
+func lfdSid(sid uint32) zap.Field {
+	return zap.Uint32("sid", sid)
+}
+
+func lfdTimeout(timeout int64) zap.Field {
+	return zap.Int64("timeout", timeout)
+}
+
+func lfdErrCode(ec errCode) zap.Field {
+	return zap.String("errcode", ec.String())
+}
+
+func (s *Service) lfdActorUID(name string, uid ActorUID) zap.Field {
 	if ad := s.actorDefineSet.getDefine(uid.Category); ad != nil {
-		return lfdActor(ad.common().Name, uid.ID)
+		return zap.Dict(
+			name,
+			zap.String("category", ad.common().Name),
+			zap.Int64("id", uid.ID),
+		)
 	} else {
-		return lfdActor("unkown", uid.ID)
+		return zap.Dict(
+			name,
+			zap.Uint16("category", uid.Category),
+			zap.Int64("id", uid.ID),
+		)
 	}
 }

@@ -25,8 +25,8 @@ func initLogger() error {
 		Level:        glog.DebugLevel,
 		EnableCaller: true,
 		CallerSkip:   0,
-		Development:  true,
-		Cores:        []glog.CoreConfig{glog.NewStdCoreConfig()},
+		// Development:  true,
+		Cores: []glog.CoreConfig{glog.NewStdCoreConfig()},
 	})
 	logger = l
 	return nil

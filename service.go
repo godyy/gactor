@@ -403,7 +403,7 @@ func (s *Service) sendLocalPacket(ctx context.Context, ph packetHead, payload an
 	// 编码数据包.
 	b, err := s.encodePacket(ph, payload)
 	if err != nil {
-		s.logger.ErrorFields("encode packet-type failed", lfdPacketType(ph.pt()), lfdError(err))
+		s.logger.ErrorFields("[sendLocalPacket] encode packet failed", lfdPacketType(ph.pt()), lfdError(err))
 		return errCodeEncodePacketFailed
 	}
 
@@ -419,7 +419,7 @@ func (s *Service) sendRemotePacket(ctx context.Context, nodeId string, ph packet
 	// 编码数据包.
 	b, err := s.encodePacket(ph, payload)
 	if err != nil {
-		s.logger.ErrorFields("encode packet-type failed", lfdPacketType(ph.pt()), lfdError(err))
+		s.logger.ErrorFields("[sendRemotePacket] encode packet failed", lfdPacketType(ph.pt()), lfdError(err))
 		return errCodeEncodePacketFailed
 	}
 
