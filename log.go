@@ -68,7 +68,7 @@ func lfdReqId(reqId uint32) zap.Field {
 func lfdPanic(err any) zap.Field {
 	return zap.Dict("panic",
 		zap.Any("error", err),
-		zap.StackSkip("stack", 1),
+		zap.StackSkip("stack", 3),
 	)
 }
 
