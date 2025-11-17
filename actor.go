@@ -19,6 +19,10 @@ func (uid ActorUID) String() string {
 	return fmt.Sprintf("%d-%d", uid.Category, uid.ID)
 }
 
+func (uid ActorUID) IsZero() bool {
+	return uid.Category == 0 && uid.ID == 0
+}
+
 // ActorBehavior Actor 行为.
 type ActorBehavior interface {
 	// GetActor 获取 Actor.

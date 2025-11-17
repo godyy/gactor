@@ -2,7 +2,6 @@ package gactor
 
 import (
 	"context"
-	"errors"
 	"time"
 )
 
@@ -32,9 +31,11 @@ func (s *Service) startRpcManager() {
 	s.rpcManager.start()
 }
 
-// doRPC 代理 from Actor 向 to 指向的 Actor 发起 RPC 调用.
-// ctx 用于控制超时. params 表示请求参数. cb 为回调函数.
-func (s *Service) doRPC(ctx context.Context, cancel context.CancelFunc, to ActorUID, params any, cb RPCFunc) error {
+// doRPC 向 to 请求的目标 Actor 发起 RPC 调用.
+// ctx 若未设置dealine, 底层会设置默认的超时时间. ctx 的 deadline 会通过超时传递到
+// 远端, 用于简单的超时协同控制.
+// async 表示是否采用异步模式. 非异步模式下, ctx 会被传递给请求上下文.
+func (s *Service) doRPC(ctx context.Context, to ActorUID, params any, cb RPCFunc, async bool) error {
 	var (
 		toNodeId string
 		b        []byte
@@ -48,15 +49,19 @@ func (s *Service) doRPC(ctx context.Context, cancel context.CancelFunc, to Actor
 		return err
 	}
 
+	// 检查 ctx 是否已经取消.
 	if err := ctx.Err(); err != nil {
 		s.monitorRPCActionContextErr(err)
 		return err
 	}
 
+	// 检查ctx deadline, 若未设置, 设置默认超时.
 	deadline, ok := ctx.Deadline()
 	if !ok {
-		s.monitorRPCAction(MonitorCAContextErr)
-		return errors.New("context deadline not set")
+		var cancel context.CancelFunc
+		deadline = time.Now().Add(s.cfg.DefRPCTimeout)
+		ctx, cancel = context.WithDeadline(ctx, deadline)
+		defer cancel()
 	}
 
 	// 创建 RPC 调用实例.
@@ -79,8 +84,6 @@ func (s *Service) doRPC(ctx context.Context, cancel context.CancelFunc, to Actor
 
 		if err = s.sendRemotePacket(ctx, toNodeId, &ph, params); err != nil {
 			s.monitorRPCActionSend2RemoteErr(err)
-		} else if cancel != nil {
-			cancel()
 		}
 
 	} else {
@@ -92,9 +95,17 @@ func (s *Service) doRPC(ctx context.Context, cancel context.CancelFunc, to Actor
 		} else {
 			buf := Buffer{}
 			buf.SetBuf(b)
-			request := newContext(ctx, cancel, s, newRPCRequest(toNodeId, ph, buf))
-			if err = s.send2Actor(ctx, to, request); err != nil {
-				request.release()
+
+			// 根据是否异步，创建请求上下文.
+			// 并发送给目标actor.
+			var req *Context
+			if async {
+				req = newContext(s, newRPCRequest(toNodeId, ph, buf, deadline.UnixMilli()))
+			} else {
+				req = newContextWithCtx(ctx, s, newRPCRequest(toNodeId, ph, buf, deadline.UnixMilli()))
+			}
+			if err = s.send2Actor(ctx, to, req); err != nil {
+				req.release()
 				s.monitorRPCActionSend2LocalErr(err)
 			}
 		}
@@ -129,28 +140,13 @@ func (cb *rpcDoneFunc) invoke(resp *RPCResp) {
 }
 
 // rpc 向 to 指向的 Actor 发起 RPC 调用.
-// ctx 用于控制超时. params 表示请求参数, reply 用于接收响应参数.
 func (s *Service) rpc(ctx context.Context, to ActorUID, params any, reply any) error {
-	var cancel context.CancelFunc
-
-	// 优先检查 ctx 是否done.
-	// 如果 ctx 未设置 deadline, 设置默认超时.
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if _, ok := ctx.Deadline(); !ok {
-		ctx, cancel = context.WithTimeout(ctx, s.cfg.DefRPCTimeout)
-	}
-
-	// 执行 RPC 调用.
+	// 执行同步RPC 调用.
 	doneFunc := rpcDoneFunc{
 		done:  make(chan struct{}),
 		reply: reply,
 	}
-	if err := s.doRPC(ctx, cancel, to, params, doneFunc.invoke); err != nil {
-		if cancel != nil {
-			cancel()
-		}
+	if err := s.doRPC(ctx, to, params, doneFunc.invoke, false); err != nil {
 		return err
 	}
 
@@ -169,29 +165,9 @@ func (s *Service) RPC(ctx context.Context, to ActorUID, params any, reply any) e
 	return s.rpc(ctx, to, params, reply)
 }
 
-// asyncRPC 向 to 指向的 Actor 发起异步 RPC 调用. ctx 用于控制超时时间.
-// params 表示请求参数. cb 表示异步回调函数.
+// asyncRPC 向 to 指向的 Actor 发起异步 RPC 调用.
 func (s *Service) asyncRPC(ctx context.Context, to ActorUID, params any, cb RPCFunc) error {
-	var cancel context.CancelFunc
-
-	// 优先检查 ctx 是否done.
-	// 如果 ctx 未设置 deadline, 设置默认超时.
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if _, ok := ctx.Deadline(); !ok {
-		ctx, cancel = context.WithTimeout(ctx, s.cfg.DefRPCTimeout)
-	}
-
-	// 执行 RPC 调用.
-	if err := s.doRPC(ctx, cancel, to, params, cb); err != nil {
-		if cancel != nil {
-			cancel()
-		}
-		return err
-	}
-
-	return nil
+	return s.doRPC(ctx, to, params, cb, true)
 }
 
 // AsyncRPC 向 to 指向的 Actor 发起异步 RPC 调用. 若 Service 未启动或停机, 返回错误.

@@ -10,8 +10,7 @@ import (
 // Context 表示 Actor 需要处理的请求上下文.
 type Context struct {
 	// 集成 context.Context
-	ctx    context.Context
-	cancel context.CancelFunc
+	ctx context.Context
 
 	svc   *Service       // Service.
 	req   request        // request.
@@ -31,10 +30,13 @@ var poolOfContext = &sync.Pool{
 	},
 }
 
-func newContext(ctx context.Context, cancel context.CancelFunc, svc *Service, req request) *Context {
+func newContext(svc *Service, req request) *Context {
+	return newContextWithCtx(context.Background(), svc, req)
+}
+
+func newContextWithCtx(ctx context.Context, svc *Service, req request) *Context {
 	cp := poolOfContext.Get().(*Context)
 	cp.ctx = ctx
-	cp.cancel = cancel
 	cp.svc = svc
 	cp.req = req
 	cp.kv = make(map[string]any)
@@ -103,8 +105,6 @@ func (c *Context) Next() {
 		}
 		c.handlerIdx++
 	}
-
-	return
 }
 
 // RPC Service.rpc 的快捷方式.
@@ -171,11 +171,7 @@ func (c *Context) CastWithContext(ctx context.Context, to ActorUID, payload any)
 // Clone 复制 Context.
 func (c *Context) Clone() *Context {
 	cp := &Context{}
-
-	ctx, cancel := c.cloneContext()
-	cp.ctx = ctx
-	cp.cancel = cancel
-
+	cp.ctx = c.ctx
 	cp.svc = c.svc
 	cp.actor = c.actor
 	cp.req = c.req.clone(c)
@@ -185,16 +181,6 @@ func (c *Context) Clone() *Context {
 	cp.suspend = false
 
 	return cp
-}
-
-// cloneContext 复制 context.Context.
-func (c *Context) cloneContext() (context.Context, context.CancelFunc) {
-	if c.cancel == nil {
-		return c.ctx, nil
-	} else {
-		deadline, _ := c.ctx.Deadline()
-		return context.WithDeadline(context.Background(), deadline)
-	}
 }
 
 // cloneKV 复制 kv mapping.
@@ -218,22 +204,34 @@ func (c *Context) release() {
 	c.kv = nil
 	c.handlers = nil
 	c.handlerIdx = -1
-	if c.cancel != nil {
-		c.cancel()
-		c.cancel = nil
-	}
 	c.ctx = nil
-
 	poolOfContext.Put(c)
+}
+
+// beforeHandle 处理请求前的检查.
+func (c *Context) beforeHandle(a actorImpl) bool {
+	if c.ctx != nil {
+		if err := c.ctx.Err(); err != nil {
+			a.core().getLogger().WarnFields("handle request but context canceled", lfdError(err))
+			return false
+		}
+	}
+
+	if c.req.isTimeout(time.Now().UnixMilli()) {
+		a.core().getLogger().Warn("handle request but timeout")
+		return false
+	}
+
+	c.actor = a
+	return true
 }
 
 // handle 实现 message.
 func (c *Context) handle(a actorImpl) error {
-	if err := c.ctx.Err(); err != nil {
-		return err
+	if !c.beforeHandle(a) {
+		return nil
 	}
 
-	c.actor = a
 	if err := c.req.beforeHandle(c); err != nil {
 		if errors.Is(err, errSkipHandleRequest) {
 			err = nil
@@ -249,11 +247,9 @@ func (c *Context) handle(a actorImpl) error {
 
 // handleError 实现 message.
 func (c *Context) handleError(a actorImpl, err error) error {
-	if err := c.ctx.Err(); err != nil {
-		return err
+	if !c.beforeHandle(a) {
+		return nil
 	}
-
-	c.actor = a
 
 	// 如果返回的是错误码.
 	var ec errCode
@@ -266,17 +262,17 @@ func (c *Context) handleError(a actorImpl, err error) error {
 }
 
 func (c *Context) Deadline() (deadline time.Time, ok bool) {
-	return c.ctx.Deadline()
+	return
 }
 
 func (c *Context) Done() <-chan struct{} {
-	return c.ctx.Done()
+	return nil
 }
 
 func (c *Context) Err() error {
-	return c.ctx.Err()
+	return nil
 }
 
 func (c *Context) Value(key any) any {
-	return c.ctx.Value(key)
+	return nil
 }

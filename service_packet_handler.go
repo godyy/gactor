@@ -106,8 +106,10 @@ func svcHandlePacketRawReq(s *Service, nodeId string, b *Buffer) error {
 	}
 
 	// 创建并发送请求.
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	request := newContext(ctx, cancel, s, newRawRequest(nodeId, head, *b))
+	deadline := time.Now().Add(timeout)
+	ctx, cancel := context.WithDeadline(context.Background(), deadline)
+	defer cancel()
+	request := newContext(s, newRawRequest(nodeId, head, *b, deadline.UnixMilli()))
 	if err := s.send2Actor(ctx, uid, request); err != nil {
 		request.release()
 		s.getLogger().ErrorFields("svcHandlePacketRawReq: send request to actor failed", s.lfdActor(uid), lfdError(err))
@@ -155,8 +157,10 @@ func svcHandlePacketS2SRpc(s *Service, nodeId string, b *Buffer) error {
 
 	// 创建并发送请求.
 	// 检查是否已经超时.
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	request := newContext(ctx, cancel, s, newRPCRequest(nodeId, head, *b))
+	deadline := time.Now().Add(timeout)
+	ctx, cancel := context.WithDeadline(context.Background(), deadline)
+	defer cancel()
+	request := newContext(s, newRPCRequest(nodeId, head, *b, deadline.UnixMilli()))
 	if err := s.send2Actor(ctx, head.toId, request); err != nil {
 		request.release()
 		s.getLogger().ErrorFields("svcHandlePacketS2SRpc: send request to actor failed", s.lfdActor(head.toId), lfdError(err))
@@ -212,7 +216,7 @@ func svcHandlePacketS2SCast(s *Service, nodeId string, b *Buffer) error {
 
 	// 创建并发送请求.
 	ctx := context.Background()
-	request := newContext(ctx, nil, s, newCastRequest(head, *b))
+	request := newContext(s, newCastRequest(head, *b))
 	if err := s.send2Actor(ctx, head.toId, request); err != nil {
 		request.release()
 		s.getLogger().ErrorFields("svcHandlePacketS2SCast: send request to actor failed", s.lfdActor(head.toId), lfdError(err))

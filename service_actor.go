@@ -384,16 +384,13 @@ func (s *Service) onActorStopped(actor actorImpl) {
 	}
 }
 
-// cast 代理 from Actor 向 to 指向的 Actor 投递消息.
-// ctx 用于控制超时时间, payload 表示负载消息.
-// ctx 控制的超时时间只会协同到消息被发送出去, 对方是否成功收到并处理不在控
-// 制范围内.
+// cast 向 to 指向的目标 Actor 投递消息.
+// ctx 若未设置deadline, 底层会设置默认的超时时间.
+// ctx 只会影响消息的投送, 不会涉及请求的处理.
 func (s *Service) cast(ctx context.Context, to ActorUID, payload any) error {
 	var (
-		toNodeId   string
-		ctxTimeout context.Context
-		cancel     context.CancelFunc
-		err        error
+		toNodeId string
+		err      error
 	)
 
 	// 获取目标 Actor 所在节点信息.
@@ -409,10 +406,9 @@ func (s *Service) cast(ctx context.Context, to ActorUID, payload any) error {
 		s.monitorCastActionContextErr(err)
 		return err
 	}
-	if _, ok := ctx.Deadline(); ok {
-		ctxTimeout = ctx
-	} else {
-		ctxTimeout, cancel = context.WithTimeout(ctx, s.cfg.DefRPCTimeout)
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, s.cfg.DefRPCTimeout)
 		defer cancel()
 	}
 
@@ -439,10 +435,11 @@ func (s *Service) cast(ctx context.Context, to ActorUID, payload any) error {
 	}
 
 	// 创建 castRequest 并发送给 Actor.
+	// actor 成功接收 cast 请求，就一定会处理.
 	buf := Buffer{}
 	buf.SetBuf(encodedPayload)
-	request := newContext(ctx, cancel, s, newCastRequest(ph, buf))
-	if err := s.send2Actor(ctxTimeout, to, request); err != nil {
+	request := newContext(s, newCastRequest(ph, buf))
+	if err := s.send2Actor(ctx, to, request); err != nil {
 		request.release()
 		s.monitorCastActionSend2LocalErr(err)
 		return err

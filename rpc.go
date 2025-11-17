@@ -13,8 +13,8 @@ import (
 // ErrRPCTimeout RPC 超时错误.
 var ErrRPCTimeout = errors.New("gactor: rpc timeout")
 
-// ErrRPCCallDuplicate RPC 调用重复错误.
-var ErrRPCCallDuplicate = errors.New("gactor: rpc call duplicate")
+// errRPCCallDuplicate RPC 调用重复错误.
+var errRPCCallDuplicate = errors.New("gactor: rpc call duplicate")
 
 // RPCResp RPC 响应参数.
 type RPCResp struct {
@@ -213,7 +213,7 @@ func (m *rpcManager) rem(call *rpcCall) {
 func (m *rpcManager) addCall(call *rpcCall) {
 	if _, exists := m.callMap[call.reqId]; exists {
 		m.svc.getLogger().ErrorFields("rpc call reqId:%d duplicate", lfdReqId(call.reqId))
-		m.handleCallDone(call, nil, ErrRPCCallDuplicate)
+		m.handleCallDone(call, nil, errRPCCallDuplicate)
 		return
 	}
 	m.add(call)

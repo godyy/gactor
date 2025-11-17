@@ -33,6 +33,9 @@ type request interface {
 	// requestType 请求类型.
 	requestType() RequestType
 
+	// isTimeout 是否超时.
+	isTimeout(nowMs int64) bool
+
 	// decode 解码负载数据到 v 指向的数据结构中.
 	// * 不可重入, 只能调用一次.
 	decode(ctx *Context, v any) error
@@ -63,6 +66,10 @@ type request interface {
 type requestCom struct {
 	replied bool
 	payload Buffer
+}
+
+func (req *requestCom) isTimeout(nowMs int64) bool {
+	return false
 }
 
 func (req *requestCom) decode(ctx *Context, pt PacketType, v any) error {
@@ -98,24 +105,30 @@ func (req *requestCom) beforeHandle(ctx *Context) error {
 // rawRequest 对应 PacketTypeRawReq.
 type rawRequest struct {
 	requestCom
-	fromNodeId string           // 请求来源节点ID.
-	head       rawReqPacketHead // 包头信息.
+	fromNodeId  string           // 请求来源节点ID.
+	head        rawReqPacketHead // 包头信息.
+	timeoutAtMs int64            // 超时时刻, 毫秒级
 }
 
 var poolOfRawRequest = &sync.Pool{New: func() interface{} {
 	return &rawRequest{}
 }}
 
-func newRawRequest(fromNodeId string, head rawReqPacketHead, payload Buffer) *rawRequest {
+func newRawRequest(fromNodeId string, head rawReqPacketHead, payload Buffer, timeoutAtMs int64) *rawRequest {
 	req := poolOfRawRequest.Get().(*rawRequest)
 	req.fromNodeId = fromNodeId
 	req.head = head
 	req.payload = payload
+	req.timeoutAtMs = timeoutAtMs
 	return req
 }
 
 func (req *rawRequest) requestType() RequestType {
 	return RequestTypeReq
+}
+
+func (req *rawRequest) isTimeout(nowMs int64) bool {
+	return nowMs >= req.timeoutAtMs
 }
 
 func (req *rawRequest) decode(ctx *Context, v any) error {
@@ -209,24 +222,30 @@ func (req *rawRequest) beforeHandle(ctx *Context) error {
 // rpcRequest 对应 PacketTypeS2SRpc.
 type rpcRequest struct {
 	requestCom
-	fromNodeId string           // 请求来源节点ID.
-	head       s2sRpcPacketHead // 包头信息.
+	fromNodeId  string           // 请求来源节点ID.
+	head        s2sRpcPacketHead // 包头信息.
+	timeoutAtMs int64            // 超时时刻, 毫秒级.
 }
 
 var poolOfRpcRequest = &sync.Pool{New: func() interface{} {
 	return &rpcRequest{}
 }}
 
-func newRPCRequest(remoteNodeId string, head s2sRpcPacketHead, payload Buffer) *rpcRequest {
+func newRPCRequest(remoteNodeId string, head s2sRpcPacketHead, payload Buffer, timeoutAtMs int64) *rpcRequest {
 	req := poolOfRpcRequest.Get().(*rpcRequest)
 	req.fromNodeId = remoteNodeId
 	req.head = head
 	req.payload = payload
+	req.timeoutAtMs = timeoutAtMs
 	return req
 }
 
 func (req *rpcRequest) requestType() RequestType {
 	return RequestTypeRPC
+}
+
+func (req *rpcRequest) isTimeout(nowMs int64) bool {
+	return nowMs >= req.timeoutAtMs
 }
 
 func (req *rpcRequest) decode(ctx *Context, v any) error {
