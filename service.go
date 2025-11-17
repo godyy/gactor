@@ -322,8 +322,8 @@ func (s *Service) Stop() error {
 
 	s.logger.Info("stopping")
 
-	s.stopTimeWheel()
 	s.stopActors()
+	s.stopTimeWheel()
 
 	s.mtxState.Lock()
 	s.state = serviceStateStopped
