@@ -15,6 +15,11 @@ type ActorConfig struct {
 	// required.
 	ActorDefines []IActorDefine
 
+	// ClientActorCategory 当值非0时, 表示客户端需要通信的actor的分类.
+	// 一般情况下, 客户端都与同一分类的actor通信.
+	// PS: 该分类必须已在 ActorDefines 中定义.
+	ClientActorCategory uint16
+
 	// ActorReceiveCompletedAsyncRPCTimeout Actor 在接收已完成异步 RPC 调用时的
 	// 超时时间. 默认值 1s.
 	ActorReceiveCompletedAsyncRPCTimeout time.Duration
@@ -24,6 +29,21 @@ func (c *ActorConfig) init() {
 	if len(c.ActorDefines) == 0 {
 		panic("gactor: ActorConfig: ActorDefines not specified")
 	}
+
+	// 验证ClientActorCategory是否已定义.
+	if c.ClientActorCategory > 0 {
+		clientCategoryValid := false
+		for _, ad := range c.ActorDefines {
+			if ad.common().Category == c.ClientActorCategory {
+				clientCategoryValid = true
+				break
+			}
+		}
+		if !clientCategoryValid {
+			panic("gactor: ActorConfig: ClientActorCategory not defined in ActorDefines")
+		}
+	}
+
 	if c.ActorReceiveCompletedAsyncRPCTimeout <= 0 {
 		c.ActorReceiveCompletedAsyncRPCTimeout = 1 * time.Second
 	}
@@ -439,6 +459,14 @@ func (s *Service) Cast(ctx context.Context, to ActorUID, payload any) error {
 	}
 	defer s.unlockState(true)
 	return s.cast(ctx, to, payload)
+}
+
+// makeClientActorUID 构造客户端通信的目标ActorUID
+func (s *Service) makeClientActorUID(id int64) ActorUID {
+	return ActorUID{
+		Category: s.getCfg().ClientActorCategory,
+		ID:       id,
+	}
 }
 
 // actorStarter Actor 启动器.

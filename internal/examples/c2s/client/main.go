@@ -89,9 +89,9 @@ func (c *client) PutBytes(b []byte) {
 
 // HandleResponse 处理 ClientResponse.
 func (c *client) HandleResponse(resp gactor.ClientResponse) {
-	u := c.getUser(resp.UID.ID)
+	u := c.getUser(resp.ID)
 	if u == nil {
-		logger.Logger().ErrorFields("user not found", zap.Int64("id", resp.UID.ID))
+		logger.Logger().ErrorFields("user not found", zap.Int64("id", resp.ID))
 		return
 	}
 
@@ -104,9 +104,9 @@ func (c *client) HandleResponse(resp gactor.ClientResponse) {
 
 // HandlePush 处理 ClientPush.
 func (c *client) HandlePush(push gactor.ClientPush) {
-	u := c.getUser(push.UID.ID)
+	u := c.getUser(push.ID)
 	if u == nil {
-		logger.Logger().ErrorFields("user not found", zap.Int64("id", push.UID.ID))
+		logger.Logger().ErrorFields("user not found", zap.Int64("id", push.ID))
 		return
 	}
 
@@ -114,10 +114,10 @@ func (c *client) HandlePush(push gactor.ClientPush) {
 }
 
 // HandleDisconnect 处理 Actor 断开连接.
-func (c *client) HandleDisconnect(uid gactor.ActorUID, sid uint32) {
-	u := c.getUser(uid.ID)
+func (c *client) HandleDisconnect(uid int64, sid uint32) {
+	u := c.getUser(uid)
 	if u == nil {
-		logger.Logger().ErrorFields("user not found", zap.Int64("id", uid.ID))
+		logger.Logger().ErrorFields("user not found", zap.Int64("id", uid))
 		return
 	}
 
@@ -227,7 +227,7 @@ func (u *user) genReqId() uint32 {
 
 func (u *user) login() error {
 	u.sid = cli.cli.GenSessionId()
-	if err := cli.cli.Connect(context.Background(), gactor.ActorUID{consts.CategoryUser, u.uid}, u.sid); err != nil {
+	if err := cli.cli.Connect(context.Background(), u.uid, u.sid); err != nil {
 		return pkgerrors.WithMessage(err, "connect failed")
 	}
 
@@ -244,7 +244,7 @@ func (u *user) login() error {
 	defer cancel()
 
 	return cli.cli.SendRequest(ctx, gactor.ClientRequest{
-		UID:     gactor.ActorUID{consts.CategoryUser, u.uid},
+		ID:      u.uid,
 		SID:     u.sid,
 		Payload: b,
 	})
@@ -263,7 +263,7 @@ func (u *user) heartbeat() error {
 	defer cancel()
 
 	return cli.cli.SendRequest(ctx, gactor.ClientRequest{
-		UID:     gactor.ActorUID{consts.CategoryUser, u.uid},
+		ID:      u.uid,
 		SID:     u.sid,
 		Payload: b,
 	})
@@ -451,7 +451,8 @@ func main() {
 	}
 
 	cli.cli = gactor.NewClient(&gactor.ClientConfig{
-		Handler: cli,
+		ActorCategory: consts.CategoryUser,
+		Handler:       cli,
 	}, gactor.WithClientLogger(logger.Logger()),
 		gactor.WithClientAckManager(&gactor.AckConfig{
 			MaxPacketAmount: 1000,

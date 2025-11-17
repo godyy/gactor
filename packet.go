@@ -129,9 +129,9 @@ func (ph *ackPacketHead) decode(b *Buffer) (err error) {
 
 // connectPacketHead PacketTypeConnect 包头.
 type connectPacketHead struct {
-	seq_ uint32   // 序号.
-	uid  ActorUID // Actor ID.
-	sid  uint32   // 会话ID.
+	seq_ uint32 // 序号.
+	id   int64  // Actor ID
+	sid  uint32 // 会话ID.
 }
 
 const sizeOfConnectPacketHead = sizeOfActorUID + 4
@@ -153,7 +153,7 @@ func (ph *connectPacketHead) encode(b *Buffer) error {
 	if err := b.WriteUint32(ph.seq_); err != nil {
 		return pkgerrors.WithMessage(err, "write seq")
 	}
-	if err := b.writeActorUID(ph.uid); err != nil {
+	if err := b.WriteInt64(ph.id); err != nil {
 		return pkgerrors.WithMessage(err, "write uid")
 	}
 	if err := b.WriteUint32(ph.sid); err != nil {
@@ -168,7 +168,7 @@ func (ph *connectPacketHead) decode(b *Buffer) (err error) {
 	if err != nil {
 		return pkgerrors.WithMessage(err, "read seq")
 	}
-	ph.uid, err = b.readActorUID()
+	ph.id, err = b.ReadInt64()
 	if err != nil {
 		return pkgerrors.WithMessage(err, "read uid")
 	}
@@ -181,9 +181,9 @@ func (ph *connectPacketHead) decode(b *Buffer) (err error) {
 
 // disconnectPacketHead PacketTypeDisconnect 包头.
 type disconnectPacketHead struct {
-	seq_ uint32   // 序号.
-	uid  ActorUID // Actor ID.
-	sid  uint32   // 会话ID.
+	seq_ uint32 // 序号.
+	id   int64  // Actor ID.
+	sid  uint32 // 会话ID.
 }
 
 const sizeOfS2SDisconnectedPacketHead = 4 + sizeOfActorUID + 4
@@ -200,7 +200,7 @@ func (ph *disconnectPacketHead) encode(b *Buffer) error {
 	if err := b.WriteUint32(ph.seq_); err != nil {
 		return pkgerrors.WithMessage(err, "write seq")
 	}
-	if err := b.writeActorUID(ph.uid); err != nil {
+	if err := b.WriteInt64(ph.id); err != nil {
 		return pkgerrors.WithMessage(err, "write toId")
 	}
 	if err := b.WriteUint32(ph.sid); err != nil {
@@ -214,7 +214,7 @@ func (ph *disconnectPacketHead) decode(b *Buffer) (err error) {
 	if err != nil {
 		return pkgerrors.WithMessage(err, "read seq")
 	}
-	ph.uid, err = b.readActorUID()
+	ph.id, err = b.ReadInt64()
 	if err != nil {
 		return pkgerrors.WithMessage(err, "read toId")
 	}
@@ -227,13 +227,13 @@ func (ph *disconnectPacketHead) decode(b *Buffer) (err error) {
 
 // rawReqPacketHead PacketTypeRawReq 包头.
 type rawReqPacketHead struct {
-	seq_    uint32   // 序号.
-	toId    ActorUID // 目标 Actor ID.
-	sid     uint32   // 会话ID.
-	timeout uint32   // 超时.
+	seq_    uint32 // 序号.
+	toId    int64  // 目标 Actor ID.
+	sid     uint32 // 会话ID.
+	timeout uint32 // 超时.
 }
 
-const sizeOfRawReqPacketHead = 4 + sizeOfActorUID + 4 + 4
+const sizeOfRawReqPacketHead = 4 + 8 + 4 + 4
 
 func (ph *rawReqPacketHead) pt() PacketType { return PacketTypeRawReq }
 
@@ -247,7 +247,7 @@ func (ph *rawReqPacketHead) encode(b *Buffer) error {
 	if err := b.WriteUint32(ph.seq_); err != nil {
 		return pkgerrors.WithMessage(err, "write seq")
 	}
-	if err := b.writeActorUID(ph.toId); err != nil {
+	if err := b.WriteInt64(ph.toId); err != nil {
 		return pkgerrors.WithMessage(err, "write toId")
 	}
 	if err := b.WriteUint32(ph.sid); err != nil {
@@ -264,7 +264,7 @@ func (ph *rawReqPacketHead) decode(b *Buffer) (err error) {
 	if err != nil {
 		return pkgerrors.WithMessage(err, "read seq")
 	}
-	ph.toId, err = b.readActorUID()
+	ph.toId, err = b.ReadInt64()
 	if err != nil {
 		return pkgerrors.WithMessage(err, "read toId")
 	}
@@ -281,13 +281,13 @@ func (ph *rawReqPacketHead) decode(b *Buffer) (err error) {
 
 // rawRespPacketHead PacketTypeRawResp 包头.
 type rawRespPacketHead struct {
-	seq_    uint32   // 序号.
-	fromId  ActorUID // 来自 Actor ID.
-	sid     uint32   // 会话ID.
-	errCode errCode  // 错误码.
+	seq_    uint32  // 序号.
+	fromId  int64   // 来自 Actor ID.
+	sid     uint32  // 会话ID.
+	errCode errCode // 错误码.
 }
 
-const sizeOfRawRespPacketHead = 4 + sizeOfActorUID + 4 + sizeOfErrCode
+const sizeOfRawRespPacketHead = 4 + 8 + 4 + sizeOfErrCode
 
 func (ph *rawRespPacketHead) pt() PacketType { return PacketTypeRawResp }
 
@@ -301,8 +301,8 @@ func (ph *rawRespPacketHead) encode(b *Buffer) error {
 	if err := b.WriteUint32(ph.seq_); err != nil {
 		return pkgerrors.WithMessage(err, "write seq")
 	}
-	if err := b.writeActorUID(ph.fromId); err != nil {
-		return pkgerrors.WithMessage(err, "write toId")
+	if err := b.WriteInt64(ph.fromId); err != nil {
+		return pkgerrors.WithMessage(err, "write fromId")
 	}
 	if err := b.WriteUint32(ph.sid); err != nil {
 		return pkgerrors.WithMessage(err, "write sid")
@@ -318,9 +318,9 @@ func (ph *rawRespPacketHead) decode(b *Buffer) (err error) {
 	if err != nil {
 		return pkgerrors.WithMessage(err, "read seq")
 	}
-	ph.fromId, err = b.readActorUID()
+	ph.fromId, err = b.ReadInt64()
 	if err != nil {
-		return pkgerrors.WithMessage(err, "read toId")
+		return pkgerrors.WithMessage(err, "read fromId")
 	}
 	ph.sid, err = b.ReadUint32()
 	if err != nil {
@@ -335,12 +335,12 @@ func (ph *rawRespPacketHead) decode(b *Buffer) (err error) {
 
 // rawPushPacketHead PacketTypeRawPush 包头.
 type rawPushPacketHead struct {
-	seq_   uint32   // 序号.
-	fromId ActorUID // 来自 Actor ID.
-	sid    uint32   // 会话ID.
+	seq_   uint32 // 序号.
+	fromId int64  // 来自 Actor ID.
+	sid    uint32 // 会话ID.
 }
 
-const sizeOfRawPushPacketHead = 4 + sizeOfActorUID + 4
+const sizeOfRawPushPacketHead = 4 + 8 + 4
 
 func (ph *rawPushPacketHead) pt() PacketType { return PacketTypeRawPush }
 
@@ -354,8 +354,8 @@ func (ph *rawPushPacketHead) encode(b *Buffer) error {
 	if err := b.WriteUint32(ph.seq_); err != nil {
 		return pkgerrors.WithMessage(err, "write seq")
 	}
-	if err := b.writeActorUID(ph.fromId); err != nil {
-		return pkgerrors.WithMessage(err, "write toId")
+	if err := b.WriteInt64(ph.fromId); err != nil {
+		return pkgerrors.WithMessage(err, "write fromId")
 	}
 	if err := b.WriteUint32(ph.sid); err != nil {
 		return pkgerrors.WithMessage(err, "write sid")
@@ -368,9 +368,9 @@ func (ph *rawPushPacketHead) decode(b *Buffer) (err error) {
 	if err != nil {
 		return pkgerrors.WithMessage(err, "read seq")
 	}
-	ph.fromId, err = b.readActorUID()
+	ph.fromId, err = b.ReadInt64()
 	if err != nil {
-		return pkgerrors.WithMessage(err, "read toId")
+		return pkgerrors.WithMessage(err, "read fromId")
 	}
 	ph.sid, err = b.ReadUint32()
 	if err != nil {

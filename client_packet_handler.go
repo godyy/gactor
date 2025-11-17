@@ -34,14 +34,14 @@ func cliHandlePacketRawResp(c *Client, nodeId string, b *Buffer) error {
 
 	// 发送 Ack 确认.
 	if err := c.sendAckPacket(nodeId, &head); err != nil {
-		c.getLogger().ErrorFields("cliHandlePacketRawResp: send ack packet failed", lfdActorUID(head.fromId), lfdError(err))
+		c.getLogger().ErrorFields("cliHandlePacketRawResp: send ack packet failed", lfdId(head.fromId), lfdError(err))
 	}
 
 	// 发生错误.
 	if !errors.Is(head.errCode, errCodeOK) {
 		c.freeBuffer(b)
 		c.handleResponse(ClientResponse{
-			UID: head.fromId,
+			ID:  head.fromId,
 			SID: head.sid,
 			Err: head.errCode,
 		})
@@ -50,7 +50,7 @@ func cliHandlePacketRawResp(c *Client, nodeId string, b *Buffer) error {
 
 	// 处理响应.
 	c.handleResponse(ClientResponse{
-		UID:     head.fromId,
+		ID:      head.fromId,
 		SID:     head.sid,
 		Payload: *b,
 	})
@@ -68,12 +68,12 @@ func cliHandlePacketRawPush(c *Client, nodeId string, b *Buffer) error {
 
 	// 发送 Ack 确认.
 	if err := c.sendAckPacket(nodeId, &head); err != nil {
-		c.getLogger().ErrorFields("cliHandlePacketRawPush: send ack packet failed", lfdActorUID(head.fromId), lfdError(err))
+		c.getLogger().ErrorFields("cliHandlePacketRawPush: send ack packet failed", lfdId(head.fromId), lfdError(err))
 	}
 
 	// 处理推送.
 	c.handlePush(ClientPush{
-		UID:     head.fromId,
+		ID:      head.fromId,
 		SID:     head.sid,
 		Payload: *b,
 	})
@@ -91,14 +91,14 @@ func cliHandlePacketDisconnect(c *Client, nodeId string, b *Buffer) error {
 
 	// 发送 Ack 确认.
 	if err := c.sendAckPacket(nodeId, &head); err != nil {
-		c.getLogger().ErrorFields("cliHandlePacketDisconnect: send ack packet failed", lfdActorUID(head.uid), lfdError(err))
+		c.getLogger().ErrorFields("cliHandlePacketDisconnect: send ack packet failed", lfdId(head.id), lfdError(err))
 	}
 
 	// 释放缓冲区.
 	c.freeBuffer(b)
 
 	// 处理断开连接.
-	c.handleDisconnect(head.uid, head.sid)
+	c.handleDisconnect(head.id, head.sid)
 
 	return nil
 }

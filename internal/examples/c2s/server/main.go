@@ -244,7 +244,8 @@ func main() {
 
 	s.svc = gactor.NewService(&gactor.ServiceConfig{
 		ActorConfig: gactor.ActorConfig{
-			ActorDefines: define.Defines,
+			ActorDefines:        define.Defines,
+			ClientActorCategory: consts.CategoryUser,
 		},
 		TimerConfig: gactor.TimerConfig{
 			TimeWheelLevels: []gtimewheel.LevelConfig{

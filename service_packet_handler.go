@@ -34,9 +34,11 @@ func svcHandlePacketConnect(s *Service, nodeId string, b *Buffer) error {
 		return pkgerrors.WithMessage(err, "gactor: svcHandlePacketConnect: decode request Head")
 	}
 
+	uid := s.makeClientActorUID(head.id)
+
 	// 回复确认数据包.
 	if err := s.sendAckPacket(nodeId, &head); err != nil {
-		s.getLogger().ErrorFields("svcHandlePacketConnect: send ack packet failed", lfdActorUID(head.uid), lfdError(err))
+		s.getLogger().ErrorFields("svcHandlePacketConnect: send ack packet failed", lfdActorUID(uid), lfdError(err))
 
 	}
 
@@ -44,8 +46,8 @@ func svcHandlePacketConnect(s *Service, nodeId string, b *Buffer) error {
 	s.freeBuffer(b)
 
 	// 发送消息.
-	if err := s.send2Actor(context.Background(), head.uid, newMessageConnect(nodeId, head.sid)); err != nil {
-		s.getLogger().ErrorFields("svcHandlePacketConnect: send message to actor failed", lfdActorUID(head.uid), lfdError(err))
+	if err := s.send2Actor(context.Background(), uid, newMessageConnect(nodeId, head.sid)); err != nil {
+		s.getLogger().ErrorFields("svcHandlePacketConnect: send message to actor failed", lfdActorUID(uid), lfdError(err))
 	}
 
 	return nil
@@ -59,16 +61,18 @@ func svcHandlePacketDisconnect(s *Service, nodeId string, b *Buffer) error {
 		return pkgerrors.WithMessage(err, "gactor: svcHandlePacketDisconnect: decode request Head")
 	}
 
+	uid := s.makeClientActorUID(head.id)
+
 	// 回复确认数据包.
 	if err := s.sendAckPacket(nodeId, &head); err != nil {
-		s.getLogger().ErrorFields("svcHandlePacketDisconnect: send ack packet failed", lfdActorUID(head.uid), lfdError(err))
+		s.getLogger().ErrorFields("svcHandlePacketDisconnect: send ack packet failed", lfdActorUID(uid), lfdError(err))
 
 	}
 
 	s.freeBuffer(b)
 
-	if err := s.send2Actor(context.Background(), head.uid, newMessageDisconnected(nodeId, head.sid)); err != nil {
-		s.getLogger().ErrorFields("svcHandlePacketDisconnect: send message to actor failed", lfdActorUID(head.uid), lfdError(err))
+	if err := s.send2Actor(context.Background(), uid, newMessageDisconnected(nodeId, head.sid)); err != nil {
+		s.getLogger().ErrorFields("svcHandlePacketDisconnect: send message to actor failed", lfdActorUID(uid), lfdError(err))
 	}
 
 	return nil
@@ -86,25 +90,27 @@ func svcHandlePacketRawReq(s *Service, nodeId string, b *Buffer) error {
 		return pkgerrors.WithMessage(err, "gactor: svcHandlePacketRawReq: decode request Head")
 	}
 
+	uid := s.makeClientActorUID(head.toId)
+
 	// 回复确认数据包.
 	if err := s.sendAckPacket(nodeId, &head); err != nil {
-		s.getLogger().ErrorFields("svcHandlePacketRawReq: send ack packet failed", lfdActorUID(head.toId), lfdError(err))
+		s.getLogger().ErrorFields("svcHandlePacketRawReq: send ack packet failed", lfdActorUID(uid), lfdError(err))
 	}
 
 	// 检查是否已经超时.
 	timeout := time.Duration(int(head.timeout)-s.getCfg().MaxRTT) * time.Millisecond
 	if timeout <= 0 {
 		s.freeBuffer(b)
-		s.getLogger().WarnFields("svcHandlePacketRawReq: already timeout", lfdActorUID(head.toId))
+		s.getLogger().WarnFields("svcHandlePacketRawReq: already timeout", lfdActorUID(uid))
 		return nil
 	}
 
 	// 创建并发送请求.
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	request := newContext(ctx, cancel, s, newRawRequest(nodeId, head, *b))
-	if err := s.send2Actor(ctx, head.toId, request); err != nil {
+	if err := s.send2Actor(ctx, uid, request); err != nil {
 		request.release()
-		s.getLogger().ErrorFields("svcHandlePacketRawReq: send request to actor failed", lfdActorUID(head.toId), lfdError(err))
+		s.getLogger().ErrorFields("svcHandlePacketRawReq: send request to actor failed", lfdActorUID(uid), lfdError(err))
 
 		// 编码发送错误响应数据包
 		var respHead rawRespPacketHead
@@ -115,7 +121,7 @@ func svcHandlePacketRawReq(s *Service, nodeId string, b *Buffer) error {
 			respHead.errCode = errCodeInternalError
 		}
 		if err := s.sendRemotePacket(ctx, nodeId, &respHead, nil); err != nil {
-			s.getLogger().ErrorFields("svcHandlePacketRawReq: send errcode response to actor failed", lfdActorUID(head.toId), lfdError(err))
+			s.getLogger().ErrorFields("svcHandlePacketRawReq: send errcode response to actor failed", lfdActorUID(uid), lfdError(err))
 		}
 	}
 

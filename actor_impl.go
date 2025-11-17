@@ -748,7 +748,7 @@ func (a *cActor) PushRawMessage(ctx context.Context, payload any) error {
 	}
 	ph := rawPushPacketHead{
 		seq_:   a.service().genSeq(),
-		fromId: a.ActorUID(),
+		fromId: a.id,
 		sid:    a.session.SID,
 	}
 	return a.svc.sendRemotePacket(ctx, a.session.NodeId, &ph, payload)
@@ -761,7 +761,7 @@ func (a *cActor) Disconnect(ctx context.Context) {
 	}
 
 	ph := disconnectPacketHead{
-		uid: a.ActorUID(),
+		id:  a.id,
 		sid: a.session.SID,
 	}
 	if err := a.svc.sendRemotePacket(ctx, a.session.NodeId, &ph, nil); err != nil {

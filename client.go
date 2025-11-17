@@ -15,26 +15,26 @@ import (
 
 // ClientRequest 客户端请求.
 type ClientRequest struct {
-	UID     ActorUID // 目标 Actor UID.
-	SID     uint32   // 会话ID.
-	Payload []byte   // 负载数据.
+	ID      int64  // 目标 Actor ID.
+	SID     uint32 // 会话ID.
+	Payload []byte // 负载数据.
 }
 
 // ClientResponse 客户端响应.
 // PS: 需自行回收 Payload 中的字节切片.
 type ClientResponse struct {
-	UID     ActorUID // 来源 Actor UID.
-	SID     uint32   // 会话ID.
-	Payload Buffer   // 负载数据.
-	Err     error    // 错误.
+	ID      int64  // 来源 Actor ID.
+	SID     uint32 // 会话ID.
+	Payload Buffer // 负载数据.
+	Err     error  // 错误.
 }
 
 // ClientPush 客户端推送.
 // PS: 需自行回收 Payload 中的字节切片.
 type ClientPush struct {
-	UID     ActorUID // 来源 Actor UID.
-	SID     uint32   // 会话ID.
-	Payload Buffer   // 负载数据.
+	ID      int64  // 来源 Actor ID.
+	SID     uint32 // 会话ID.
+	Payload Buffer // 负载数据.
 }
 
 // ClientHandler Client 处理器.
@@ -55,16 +55,25 @@ type ClientHandler interface {
 	HandlePush(push ClientPush)
 
 	// HandleDisconnect 处理 Actor 断开连接.
-	HandleDisconnect(uid ActorUID, sid uint32)
+	HandleDisconnect(id int64, sid uint32)
 }
 
 // ClientConfig Client 配置.
 type ClientConfig struct {
+	// ActorCategory 客户端与之通信的默认目标actor分类.
+	// 一般情况下, 用户只会与同一分类的actor通信. 例如Player.
+	// PS: 其值必须大于0.
+	ActorCategory uint16
+
 	// Handler 处理器.
 	Handler ClientHandler
 }
 
 func (c *ClientConfig) init() {
+	if c.ActorCategory == 0 {
+		panic("gactor: ClientConfig: ActorCategory must > 0")
+	}
+
 	if c.Handler == nil {
 		panic("gactor: ClientConfig: Handler not specified")
 	}
@@ -250,7 +259,8 @@ func (c *Client) sendPacket(ctx context.Context, nodeId string, ph packetHead, p
 }
 
 // getNodeIdOfActor 获取 Actor 所在的节点ID.
-func (c *Client) getNodeIdOfActor(uid ActorUID) (string, error) {
+func (c *Client) getNodeIdOfActor(id int64) (string, error) {
+	uid := c.makeActorUID(id)
 	return getNodeIdOfActor(c.cfg.Handler.GetMetaDriver(), uid)
 }
 
@@ -275,10 +285,18 @@ func (c *Client) GenSessionId() uint32 {
 	return atomic.AddUint32(&c.sidIncr, 1)
 }
 
+// makeActorUID 构造Actor唯一ID.
+func (c *Client) makeActorUID(id int64) ActorUID {
+	return ActorUID{
+		Category: c.cfg.ActorCategory,
+		ID:       id,
+	}
+}
+
 // Connnect 连接 uid 指定的 Actor.
-func (c *Client) Connect(ctx context.Context, uid ActorUID, sid uint32) error {
+func (c *Client) Connect(ctx context.Context, id int64, sid uint32) error {
 	// 获取目标节点.
-	nodeId, err := c.getNodeIdOfActor(uid)
+	nodeId, err := c.getNodeIdOfActor(id)
 	if err != nil {
 		return err
 	}
@@ -296,16 +314,16 @@ func (c *Client) Connect(ctx context.Context, uid ActorUID, sid uint32) error {
 
 	// 编码并发送消息.
 	ph := connectPacketHead{
-		uid: uid,
+		id:  id,
 		sid: sid,
 	}
 	return c.sendPacket(ctx, nodeId, &ph, nil)
 }
 
 // Disconnect 通知 uid 指定的 Actor 断开连接.
-func (c *Client) Disconnect(ctx context.Context, uid ActorUID, sid uint32) error {
+func (c *Client) Disconnect(ctx context.Context, id int64, sid uint32) error {
 	// 获取目标节点.
-	nodeId, err := c.getNodeIdOfActor(uid)
+	nodeId, err := c.getNodeIdOfActor(id)
 	if err != nil {
 		return err
 	}
@@ -324,7 +342,7 @@ func (c *Client) Disconnect(ctx context.Context, uid ActorUID, sid uint32) error
 	// 编码并发送消息.
 	ph := disconnectPacketHead{
 		seq_: c.genSeq(),
-		uid:  uid,
+		id:   id,
 		sid:  sid,
 	}
 	return c.sendPacket(ctx, nodeId, &ph, nil)
@@ -333,7 +351,7 @@ func (c *Client) Disconnect(ctx context.Context, uid ActorUID, sid uint32) error
 // SendRequest 发送请求.
 func (c *Client) SendRequest(ctx context.Context, req ClientRequest) error {
 	// 获取目标节点.
-	nodeId, err := c.getNodeIdOfActor(req.UID)
+	nodeId, err := c.getNodeIdOfActor(req.ID)
 	if err != nil {
 		return err
 	}
@@ -358,7 +376,7 @@ func (c *Client) SendRequest(ctx context.Context, req ClientRequest) error {
 	// 编码并发送消息.
 	ph := rawReqPacketHead{
 		seq_:    c.genSeq(),
-		toId:    req.UID,
+		toId:    req.ID,
 		sid:     req.SID,
 		timeout: uint32(time.Until(deadline).Milliseconds()),
 	}
@@ -376,6 +394,6 @@ func (c *Client) handlePush(push ClientPush) {
 }
 
 // handleDisconnect 处理断开连接.
-func (c *Client) handleDisconnect(uid ActorUID, sid uint32) {
-	c.cfg.Handler.HandleDisconnect(uid, sid)
+func (c *Client) handleDisconnect(id int64, sid uint32) {
+	c.cfg.Handler.HandleDisconnect(id, sid)
 }
