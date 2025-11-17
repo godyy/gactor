@@ -62,8 +62,8 @@ func (c *Client) sendAckPacket(nodeId string, ph packetHead) error {
 
 	// 编码数据包.
 	head := ackPacketHead{
-		ackPt:  ph.pt(),
-		ackSeq: ph.seq(),
+		ackPt:  ph.getPt(),
+		ackSeq: ph.getSeq(),
 	}
 	b, err := c.encodePacket(&head, nil)
 	if err != nil {

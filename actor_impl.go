@@ -593,7 +593,7 @@ func (a *actorCore) receiveTriggerdTimer(tid TimerId, args any, cb ActorTimerFun
 
 // RPC 发起同步 RPC 调用.
 func (a *actorCore) RPC(ctx context.Context, to ActorUID, params, reply any) error {
-	return a.svc.rpc(ctx, to, params, reply)
+	return a.svc.rpc(ctx, a.ActorUID(), to, params, reply)
 }
 
 // actorAsyncRPCFunc Actor 异步 RPC 回调封装.
@@ -630,7 +630,7 @@ func (a *actorCore) asyncRPC(ctx context.Context, impl actorImpl, to ActorUID, p
 		cb:  cb,
 	}
 
-	if err := a.svc.asyncRPC(ctx, to, params, asyncFunc.invoke); err != nil {
+	if err := a.svc.asyncRPC(ctx, a.ActorUID(), to, params, asyncFunc.invoke); err != nil {
 		_ = impl.core().deref()
 		return err
 	}
@@ -640,7 +640,7 @@ func (a *actorCore) asyncRPC(ctx context.Context, impl actorImpl, to ActorUID, p
 
 // Cast 投递消息.
 func (a *actorCore) Cast(ctx context.Context, to ActorUID, payload any) error {
-	return a.svc.cast(ctx, to, payload)
+	return a.svc.cast(ctx, a.ActorUID(), to, payload)
 }
 
 // actor Actor 内部实现.
@@ -740,7 +740,7 @@ func (a *cActor) PushRawMessage(ctx context.Context, payload any) error {
 		return ErrActorNotConnected
 	}
 	ph := rawPushPacketHead{
-		seq_:   a.service().genSeq(),
+		seq:    a.service().genSeq(),
 		fromId: a.id,
 		sid:    a.session.SID,
 	}

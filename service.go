@@ -403,7 +403,7 @@ func (s *Service) sendLocalPacket(ctx context.Context, ph packetHead, payload an
 	// 编码数据包.
 	b, err := s.encodePacket(ph, payload)
 	if err != nil {
-		s.logger.ErrorFields("[sendLocalPacket] encode packet failed", lfdPacketType(ph.pt()), lfdError(err))
+		s.logger.ErrorFields("[sendLocalPacket] encode packet failed", lfdPacketType(ph.getPt()), lfdError(err))
 		return errCodeEncodePacketFailed
 	}
 
@@ -419,17 +419,17 @@ func (s *Service) sendRemotePacket(ctx context.Context, nodeId string, ph packet
 	// 编码数据包.
 	b, err := s.encodePacket(ph, payload)
 	if err != nil {
-		s.logger.ErrorFields("[sendRemotePacket] encode packet failed", lfdPacketType(ph.pt()), lfdError(err))
+		s.logger.ErrorFields("[sendRemotePacket] encode packet failed", lfdPacketType(ph.getPt()), lfdError(err))
 		return errCodeEncodePacketFailed
 	}
 
 	// 添加待确认数据包.
-	s.addPacket2Ack(nodeId, ph.pt(), ph.seq(), b)
+	s.addPacket2Ack(nodeId, ph.getPt(), ph.getSeq(), b)
 
 	// 发送数据.
 	if err = s.send(ctx, nodeId, b); err != nil {
 		// 若发送失败, 直接移除待确认数据包.
-		s.remPacket2Ack(ph.pt(), ph.seq())
+		s.remPacket2Ack(ph.getPt(), ph.getSeq())
 		return pkgerrors.WithMessage(err, "send packet")
 	}
 

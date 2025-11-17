@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"time"
 	"unsafe"
+
+	"go.uber.org/zap/zapcore"
 )
 
 // ActorUID 表示 Actor 的唯一标识.
@@ -21,6 +23,12 @@ func (uid ActorUID) String() string {
 
 func (uid ActorUID) IsZero() bool {
 	return uid.Category == 0 && uid.ID == 0
+}
+
+func (uid *ActorUID) MarshalLogObject(enc zapcore.ObjectEncoder) error {
+	enc.AddUint16("category", uid.Category)
+	enc.AddInt64("id", uid.ID)
+	return nil
 }
 
 // ActorBehavior Actor 行为.

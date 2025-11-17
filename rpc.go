@@ -55,7 +55,7 @@ type RPCFunc func(*RPCResp)
 type rpcCall struct {
 	heapIndex   int      // heap index.
 	reqId       uint32   // RPC 调用序列 ID.
-	to          ActorUID // 目标 ActorUID.
+	from, to    ActorUID // 来源, 目标 ActorUID.
 	expiredAt   int64    // 过期时间.
 	respPayload Buffer   // RPC 响应负载数据.
 	err         error    // 错误信息.
@@ -286,15 +286,16 @@ func (m *rpcManager) tick() {
 }
 
 // createCall 创建 Call.
-func (m *rpcManager) createCall(to ActorUID, expiredAt time.Time, cb RPCFunc) (uint32, error) {
+func (m *rpcManager) createCall(from, to ActorUID, expiredAt time.Time, cb RPCFunc) (uint32, error) {
 	call := poolOfRPCCall.Get().(*rpcCall)
 	call.heapIndex = -1
 	call.reqId = m.genReqId()
+	call.from = from
 	call.to = to
 	call.expiredAt = expiredAt.UnixNano()
 	call.cb = cb
 
-	if err := m.enqueueCmd(&rpcCmdAdd{call: call}); err != nil {
+	if err := m.enqueueCmd(newRPCCmdAdd(call)); err != nil {
 		return 0, err
 	}
 	return call.reqId, nil
@@ -302,14 +303,14 @@ func (m *rpcManager) createCall(to ActorUID, expiredAt time.Time, cb RPCFunc) (u
 
 // removeCall 通过 reqId 移除 Call.
 // 通常在出现错误需要直接移除 Call 的情况下调用.
-func (m *rpcManager) removeCall(reqId uint32) {
-	m.enqueueCmd(&rpcCmdRem{reqId: reqId})
+func (m *rpcManager) removeCall(reqId uint32, from, to ActorUID) {
+	m.enqueueCmd(&rpcCmdRem{reqId: reqId, from: from, to: to})
 }
 
 // popCall 移除 reqId 指定的 Call. 并重置定时器.
-func (m *rpcManager) popCall(reqId uint32) *rpcCall {
+func (m *rpcManager) popCall(reqId uint32, from, to ActorUID) *rpcCall {
 	call := m.callMap[reqId]
-	if call == nil {
+	if call == nil || call.from != from || call.to != to {
 		return nil
 	}
 
@@ -342,11 +343,11 @@ func (m *rpcManager) handleCallDone(call *rpcCall, payload *Buffer, err error) {
 }
 
 // handleResponse 处理 RPC Response. 返回对应的 rpcCall 是否存在.
-func (m *rpcManager) handleResponse(reqId uint32, payload *Buffer, err error) {
+func (m *rpcManager) handleResponse(reqId uint32, from, to ActorUID, payload *Buffer, err error) {
 	if errors.Is(err, errCodeOK) {
 		err = nil
 	}
-	m.enqueueCmd(newRPCCmdResp(reqId, payload, err))
+	m.enqueueCmd(newRPCCmdResp(reqId, from, to, payload, err))
 }
 
 // rpcCmd RPC 指令.
@@ -383,11 +384,12 @@ func (c *rpcCmdAdd) release() {
 
 // rpcCmdRem 移除 Call 指令.
 type rpcCmdRem struct {
-	reqId uint32
+	reqId    uint32
+	from, to ActorUID
 }
 
 func (c *rpcCmdRem) exec(rm *rpcManager) {
-	call := rm.popCall(c.reqId)
+	call := rm.popCall(c.reqId, c.from, c.to)
 	if call != nil {
 		call.release()
 	}
@@ -397,9 +399,10 @@ func (c *rpcCmdRem) release() {}
 
 // rpcCmdResp Response 指令.
 type rpcCmdResp struct {
-	reqId   uint32
-	payload Buffer
-	err     error
+	reqId    uint32
+	from, to ActorUID
+	payload  Buffer
+	err      error
 }
 
 var poolOfRPCCmdResp = &sync.Pool{
@@ -408,9 +411,10 @@ var poolOfRPCCmdResp = &sync.Pool{
 	},
 }
 
-func newRPCCmdResp(reqId uint32, payload *Buffer, err error) *rpcCmdResp {
+func newRPCCmdResp(reqId uint32, from, to ActorUID, payload *Buffer, err error) *rpcCmdResp {
 	c := poolOfRPCCmdResp.Get().(*rpcCmdResp)
 	c.reqId = reqId
+	c.from, c.to = from, to
 	if payload != nil {
 		c.payload = *payload
 	}
@@ -419,9 +423,10 @@ func newRPCCmdResp(reqId uint32, payload *Buffer, err error) *rpcCmdResp {
 }
 
 func (c *rpcCmdResp) exec(rm *rpcManager) {
-	call := rm.popCall(c.reqId)
+	call := rm.popCall(c.reqId, c.to, c.from)
 	if call == nil {
-		rm.svc.getLogger().ErrorFields("rpcCall not found", lfdReqId(c.reqId))
+		rm.svc.getLogger().ErrorFields("[HandleRPCResponse] call not found",
+			lfdReqId(c.reqId), rm.svc.lfdActorUID("fromId", c.from), rm.svc.lfdActorUID("toId", c.to))
 		return
 	}
 	rm.handleCallDone(call, &c.payload, c.err)

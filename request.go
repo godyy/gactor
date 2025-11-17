@@ -35,6 +35,9 @@ type request interface {
 	// requestType 请求类型.
 	requestType() RequestType
 
+	// fromActorUID 请求来源Actor ID.
+	fromActorUID() ActorUID
+
 	// isTimeout 是否超时.
 	isTimeout(nowMs int64) bool
 
@@ -69,8 +72,9 @@ type request interface {
 }
 
 type requestCom struct {
-	replied bool
-	payload Buffer
+	fromNodeId string // 请求发起节点ID
+	replied    bool   // 是否已回复
+	payload    Buffer // 负载数据
 }
 
 func (req *requestCom) isTimeout(nowMs int64) bool {
@@ -89,7 +93,7 @@ func (req *requestCom) decode(ctx *Context, pt PacketType, v any) error {
 }
 
 func (req *requestCom) clone(ctx *Context) requestCom {
-	cp := requestCom{}
+	cp := *req
 	if unreadData := req.payload.UnreadData(); len(unreadData) > 0 {
 		b := ctx.service().getBytes(len(unreadData))
 		b = append(b, unreadData...)
@@ -100,6 +104,7 @@ func (req *requestCom) clone(ctx *Context) requestCom {
 
 func (req *requestCom) release(ctx *Context) {
 	ctx.service().freeBuffer(&req.payload)
+	req.fromNodeId = ""
 	req.replied = false
 }
 
@@ -110,26 +115,31 @@ func (req *requestCom) beforeHandle(ctx *Context) error {
 // rawRequest 对应 PacketTypeRawReq.
 type rawRequest struct {
 	requestCom
-	fromNodeId  string           // 请求来源节点ID.
-	head        rawReqPacketHead // 包头信息.
-	timeoutAtMs int64            // 超时时刻, 毫秒级
+	seq         uint32 // 包序
+	sid         uint32 // 会话ID
+	timeoutAtMs int64  // 超时时刻, 毫秒级
 }
 
 var poolOfRawRequest = &sync.Pool{New: func() interface{} {
 	return &rawRequest{}
 }}
 
-func newRawRequest(fromNodeId string, head rawReqPacketHead, payload Buffer, timeoutAtMs int64) *rawRequest {
+func newRawRequest(fromNodeId string, seq, sid uint32, payload Buffer, timeoutAtMs int64) *rawRequest {
 	req := poolOfRawRequest.Get().(*rawRequest)
 	req.fromNodeId = fromNodeId
-	req.head = head
 	req.payload = payload
+	req.seq = seq
+	req.sid = sid
 	req.timeoutAtMs = timeoutAtMs
 	return req
 }
 
 func (req *rawRequest) requestType() RequestType {
 	return RequestTypeReq
+}
+
+func (req *rawRequest) fromActorUID() ActorUID {
+	return ActorUID{}
 }
 
 func (req *rawRequest) isTimeout(nowMs int64) bool {
@@ -146,9 +156,9 @@ func (req *rawRequest) reply(ctx *Context, payload any) error {
 	}
 
 	head := rawRespPacketHead{
-		seq_:    ctx.service().genSeq(),
-		fromId:  req.head.toId,
-		sid:     req.head.sid,
+		seq:     ctx.service().genSeq(),
+		fromId:  ctx.actor.core().id,
+		sid:     req.sid,
 		errCode: errCodeOK,
 	}
 	if err := ctx.service().sendRemotePacket(ctx, req.fromNodeId, &head, payload); err != nil {
@@ -173,9 +183,9 @@ func (req *rawRequest) replyError(ctx *Context, ec errCode) error {
 	}
 
 	head := rawRespPacketHead{
-		seq_:    ctx.service().genSeq(),
-		fromId:  req.head.toId,
-		sid:     req.head.sid,
+		seq:     ctx.service().genSeq(),
+		fromId:  ctx.actor.core().id,
+		sid:     req.sid,
 		errCode: ec,
 	}
 
@@ -191,8 +201,9 @@ func (req *rawRequest) replyError(ctx *Context, ec errCode) error {
 func (req *rawRequest) clone(ctx *Context) request {
 	cp := poolOfRawRequest.Get().(*rawRequest)
 	cp.requestCom = req.requestCom.clone(ctx)
-	cp.fromNodeId = req.fromNodeId
-	cp.head = req.head
+	cp.seq = req.seq
+	cp.sid = req.sid
+	cp.timeoutAtMs = req.timeoutAtMs
 	return cp
 }
 
@@ -214,7 +225,7 @@ func (req *rawRequest) beforeHandle(ctx *Context) error {
 
 	reqSession := ActorSession{
 		NodeId: req.fromNodeId,
-		SID:    req.head.sid,
+		SID:    req.sid,
 	}
 	if reqSession != ca.session {
 		_ = req.replyError(ctx, errCodeActorOtherConnect)
@@ -227,8 +238,8 @@ func (req *rawRequest) beforeHandle(ctx *Context) error {
 func (req *rawRequest) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 	enc.AddString("type", req.requestType().String())
 	enc.AddString("fromNode", req.fromNodeId)
-	enc.AddUint32("seq", req.head.seq_)
-	enc.AddUint32("sid", req.head.sid)
+	enc.AddUint32("seq", req.seq)
+	enc.AddUint32("sid", req.sid)
 	enc.AddInt64("timeoutAtMs", req.timeoutAtMs)
 	return nil
 }
@@ -236,26 +247,33 @@ func (req *rawRequest) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 // rpcRequest 对应 PacketTypeS2SRpc.
 type rpcRequest struct {
 	requestCom
-	fromNodeId  string           // 请求来源节点ID.
-	head        s2sRpcPacketHead // 包头信息.
-	timeoutAtMs int64            // 超时时刻, 毫秒级.
+	seq         uint32   // 包序
+	reqId       uint32   // 请求ID
+	fromId      ActorUID // 来源 Actor ID.
+	timeoutAtMs int64    // 超时时刻, 毫秒级.
 }
 
 var poolOfRpcRequest = &sync.Pool{New: func() interface{} {
 	return &rpcRequest{}
 }}
 
-func newRPCRequest(remoteNodeId string, head s2sRpcPacketHead, payload Buffer, timeoutAtMs int64) *rpcRequest {
+func newRPCRequest(remoteNodeId string, seq, reqId uint32, fromId ActorUID, payload Buffer, timeoutAtMs int64) *rpcRequest {
 	req := poolOfRpcRequest.Get().(*rpcRequest)
 	req.fromNodeId = remoteNodeId
-	req.head = head
 	req.payload = payload
+	req.seq = seq
+	req.reqId = reqId
+	req.fromId = fromId
 	req.timeoutAtMs = timeoutAtMs
 	return req
 }
 
 func (req *rpcRequest) requestType() RequestType {
 	return RequestTypeRPC
+}
+
+func (req *rpcRequest) fromActorUID() ActorUID {
+	return req.fromId
 }
 
 func (req *rpcRequest) isTimeout(nowMs int64) bool {
@@ -272,9 +290,10 @@ func (req *rpcRequest) reply(ctx *Context, payload any) error {
 	}
 
 	head := s2sRpcRespPacketHead{
-		seq_:    ctx.service().genSeq(),
-		reqId:   req.head.reqId,
-		fromId:  req.head.toId,
+		seq:     ctx.service().genSeq(),
+		reqId:   req.reqId,
+		fromId:  ctx.actor.ActorUID(),
+		toId:    req.fromId,
 		errCode: errCodeOK,
 	}
 	if err := ctx.service().sendPacket(ctx, req.fromNodeId, &head, payload); err != nil {
@@ -299,9 +318,10 @@ func (req *rpcRequest) replyError(ctx *Context, ec errCode) error {
 	}
 
 	head := s2sRpcRespPacketHead{
-		seq_:    ctx.service().genSeq(),
-		reqId:   req.head.reqId,
-		fromId:  req.head.toId,
+		seq:     ctx.service().genSeq(),
+		reqId:   req.reqId,
+		fromId:  ctx.actor.ActorUID(),
+		toId:    req.fromId,
 		errCode: ec,
 	}
 	if err := ctx.service().sendPacket(ctx, req.fromNodeId, &head, nil); err != nil {
@@ -316,8 +336,10 @@ func (req *rpcRequest) replyError(ctx *Context, ec errCode) error {
 func (req *rpcRequest) clone(ctx *Context) request {
 	cp := poolOfRpcRequest.Get().(*rpcRequest)
 	cp.requestCom = req.requestCom.clone(ctx)
-	cp.fromNodeId = req.fromNodeId
-	cp.head = req.head
+	cp.seq = req.seq
+	cp.reqId = req.reqId
+	cp.fromId = req.fromId
+	cp.timeoutAtMs = req.timeoutAtMs
 	return cp
 }
 
@@ -329,8 +351,9 @@ func (req *rpcRequest) release(ctx *Context) {
 func (req *rpcRequest) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 	enc.AddString("type", req.requestType().String())
 	enc.AddString("fromNode", req.fromNodeId)
-	enc.AddUint32("seq", req.head.seq_)
-	enc.AddUint32("reqId", req.head.reqId)
+	enc.AddUint32("seq", req.seq)
+	enc.AddUint32("reqId", req.reqId)
+	enc.AddObject("fromId", &req.fromId)
 	enc.AddInt64("timeoutAtMs", req.timeoutAtMs)
 	return nil
 }
@@ -338,22 +361,29 @@ func (req *rpcRequest) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 // castRequest 对应 PacketTypeS2SCast.
 type castRequest struct {
 	requestCom
-	head s2sCastPacketHead // 包头信息.
+	seq    uint32
+	fromId ActorUID
 }
 
 var poolOfCastRequest = &sync.Pool{New: func() interface{} {
 	return &castRequest{}
 }}
 
-func newCastRequest(head s2sCastPacketHead, payload Buffer) *castRequest {
+func newCastRequest(fromNodeId string, seq uint32, fromId ActorUID, payload Buffer) *castRequest {
 	req := poolOfCastRequest.Get().(*castRequest)
-	req.head = head
+	req.fromNodeId = fromNodeId
 	req.payload = payload
+	req.seq = seq
+	req.fromId = fromId
 	return req
 }
 
 func (req *castRequest) requestType() RequestType {
 	return RequestTypeCast
+}
+
+func (req *castRequest) fromActorUID() ActorUID {
+	return req.fromId
 }
 
 func (req *castRequest) decode(ctx *Context, v any) error {
@@ -375,7 +405,7 @@ func (req *castRequest) replyError(ctx *Context, _ errCode) error {
 func (req *castRequest) clone(ctx *Context) request {
 	cp := poolOfCastRequest.Get().(*castRequest)
 	cp.requestCom = req.requestCom.clone(ctx)
-	cp.head = req.head
+	cp.seq = req.seq
 	return cp
 }
 
@@ -386,6 +416,7 @@ func (req *castRequest) release(ctx *Context) {
 
 func (req *castRequest) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 	enc.AddString("type", req.requestType().String())
-	enc.AddUint32("seq", req.head.seq_)
+	enc.AddUint32("seq", req.seq)
+	enc.AddObject("fromId", &req.fromId)
 	return nil
 }

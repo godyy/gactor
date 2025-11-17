@@ -36,12 +36,12 @@ func cliHandlePacketRawResp(c *Client, nodeId string, b *Buffer) error {
 	}
 
 	c.getLogger().DebugFields("[HandlePacketRawResp]",
-		lfdRemoteNodeId(nodeId), lfdSeq(head.seq()), lfdId(head.fromId), lfdErrCode(head.errCode))
+		lfdRemoteNodeId(nodeId), lfdSeq(head.getSeq()), lfdId(head.fromId), lfdErrCode(head.errCode))
 
 	// 发送 Ack 确认.
 	if err := c.sendAckPacket(nodeId, &head); err != nil {
 		c.getLogger().ErrorFields("[HandlePacketRawResp] send ack packet failed",
-			lfdRemoteNodeId(nodeId), lfdSeq(head.seq()), lfdId(head.fromId), lfdErrCode(head.errCode), lfdError(err))
+			lfdRemoteNodeId(nodeId), lfdSeq(head.getSeq()), lfdId(head.fromId), lfdErrCode(head.errCode), lfdError(err))
 	}
 
 	// 发生错误.
@@ -74,12 +74,12 @@ func cliHandlePacketRawPush(c *Client, nodeId string, b *Buffer) error {
 	}
 
 	c.getLogger().DebugFields("[HandlePacketRawPush]",
-		lfdRemoteNodeId(nodeId), lfdSeq(head.seq()), lfdId(head.fromId))
+		lfdRemoteNodeId(nodeId), lfdSeq(head.getSeq()), lfdId(head.fromId))
 
 	// 发送 Ack 确认.
 	if err := c.sendAckPacket(nodeId, &head); err != nil {
 		c.getLogger().ErrorFields("[HandlePacketRawPush] send ack packet failed",
-			lfdRemoteNodeId(nodeId), lfdSeq(head.seq()), lfdId(head.fromId), lfdError(err))
+			lfdRemoteNodeId(nodeId), lfdSeq(head.getSeq()), lfdId(head.fromId), lfdError(err))
 	}
 
 	// 处理推送.
@@ -101,12 +101,12 @@ func cliHandlePacketDisconnect(c *Client, nodeId string, b *Buffer) error {
 	}
 
 	c.getLogger().DebugFields("[HandlePacketDisconnect]",
-		lfdRemoteNodeId(nodeId), lfdSeq(head.seq()), lfdId(head.id), lfdSid(head.sid))
+		lfdRemoteNodeId(nodeId), lfdSeq(head.getSeq()), lfdId(head.id), lfdSid(head.sid))
 
 	// 发送 Ack 确认.
 	if err := c.sendAckPacket(nodeId, &head); err != nil {
 		c.getLogger().ErrorFields("[HandlePacketDisconnect] send ack packet failed",
-			lfdRemoteNodeId(nodeId), lfdSeq(head.seq()), lfdId(head.id), lfdSid(head.sid), lfdError(err))
+			lfdRemoteNodeId(nodeId), lfdSeq(head.getSeq()), lfdId(head.id), lfdSid(head.sid), lfdError(err))
 	}
 
 	// 释放缓冲区.

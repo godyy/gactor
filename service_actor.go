@@ -383,10 +383,10 @@ func (s *Service) onActorStopped(actor actorImpl) {
 	}
 }
 
-// cast 向 to 指向的目标 Actor 投递消息.
+// cast 代理 from, 向 to 指向的目标 Actor 投递消息.
 // ctx 若未设置deadline, 底层会设置默认的超时时间.
 // ctx 只会影响消息的投送, 不会涉及请求的处理.
-func (s *Service) cast(ctx context.Context, to ActorUID, payload any) error {
+func (s *Service) cast(ctx context.Context, from, to ActorUID, payload any) error {
 	var (
 		toNodeId string
 		err      error
@@ -411,15 +411,17 @@ func (s *Service) cast(ctx context.Context, to ActorUID, payload any) error {
 		defer cancel()
 	}
 
-	// 包头.
-	ph := s2sCastPacketHead{
-		seq_: s.genSeq(),
-		toId: to,
-	}
+	// 生成包序号.
+	seq := s.genSeq()
 
 	// 如果 Actor 位于其它节点.
 	// 编码数据并发送到远端.
 	if toNodeId != s.nodeId() {
+		ph := s2sCastPacketHead{
+			seq:    seq,
+			fromId: from,
+			toId:   to,
+		}
 		if err := s.sendRemotePacket(ctx, toNodeId, &ph, payload); err != nil {
 			s.monitorCastActionSend2RemoteErr(err)
 			return err
@@ -437,7 +439,7 @@ func (s *Service) cast(ctx context.Context, to ActorUID, payload any) error {
 	// actor 成功接收 cast 请求，就一定会处理.
 	buf := Buffer{}
 	buf.SetBuf(encodedPayload)
-	request := newContext(s, newCastRequest(ph, buf))
+	request := newContext(s, newCastRequest(s.nodeId(), seq, from, buf))
 	if err := s.send2Actor(ctx, to, request); err != nil {
 		request.release()
 		s.monitorCastActionSend2LocalErr(err)
@@ -454,7 +456,7 @@ func (s *Service) Cast(ctx context.Context, to ActorUID, payload any) error {
 		return err
 	}
 	defer s.unlockState(true)
-	return s.cast(ctx, to, payload)
+	return s.cast(ctx, ActorUID{}, to, payload)
 }
 
 // makeClientActorUID 构造客户端通信的目标ActorUID

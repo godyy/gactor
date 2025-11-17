@@ -72,6 +72,11 @@ func (c *Context) RequestType() RequestType {
 	return c.req.requestType()
 }
 
+// FromActorUID 返回请求来源 Actor ID.
+func (c *Context) FromActorUID() ActorUID {
+	return c.req.fromActorUID()
+}
+
 // Decode 解码请求负载数据到 v 指向的数据结构中.
 // * 不可重复调用.
 func (c *Context) Decode(v any) error {
@@ -116,7 +121,7 @@ func (c *Context) RPC(to ActorUID, params any, reply any) error {
 
 // RPCWithContext Service.rpc 的快捷方式, 可提供其它 context.
 func (c *Context) RPCWithContext(ctx context.Context, to ActorUID, params any, reply any) error {
-	return c.svc.rpc(ctx, to, params, reply)
+	return c.svc.rpc(ctx, c.actor.ActorUID(), to, params, reply)
 }
 
 // ContextRPCFunc 基于 Context 的 RPC 回调.
@@ -167,7 +172,7 @@ func (c *Context) Cast(to ActorUID, payload any) error {
 
 // CastWithContext Service.cast 的快捷方式, 可提供其它 context.
 func (c *Context) CastWithContext(ctx context.Context, to ActorUID, payload any) error {
-	return c.svc.cast(ctx, to, payload)
+	return c.svc.cast(ctx, c.actor.ActorUID(), to, payload)
 }
 
 // Clone 复制 Context.

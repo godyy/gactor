@@ -214,10 +214,10 @@ func (c *Client) genSeq() uint32 {
 func (c *Client) encodePacket(ph packetHead, payload []byte) ([]byte, error) {
 	// 分配缓冲区.
 	var buf Buffer
-	c.allocBuffer(&buf, sizeOfPacketType+ph.size()+len(payload))
+	c.allocBuffer(&buf, sizeOfPacketType+ph.getSize()+len(payload))
 
 	// 编码填充数据.
-	if err := buf.writePacketType(ph.pt()); err != nil {
+	if err := buf.writePacketType(ph.getPt()); err != nil {
 		return nil, err
 	}
 	if err := ph.encode(&buf); err != nil {
@@ -246,12 +246,12 @@ func (c *Client) sendPacket(ctx context.Context, nodeId string, ph packetHead, p
 	}
 
 	// 添加待确认数据包.
-	c.addPacket2Ack(nodeId, ph.pt(), ph.seq(), b)
+	c.addPacket2Ack(nodeId, ph.getPt(), ph.getSeq(), b)
 
 	// 发送数据.
 	if err = c.send(ctx, nodeId, b); err != nil {
 		// 若发送失败, 直接移除待确认数据包.
-		c.remPacket2Ack(ph.pt(), ph.seq())
+		c.remPacket2Ack(ph.getPt(), ph.getSeq())
 		return pkgerrors.WithMessage(err, "send packet")
 	}
 
@@ -341,9 +341,9 @@ func (c *Client) Disconnect(ctx context.Context, id int64, sid uint32) error {
 
 	// 编码并发送消息.
 	ph := disconnectPacketHead{
-		seq_: c.genSeq(),
-		id:   id,
-		sid:  sid,
+		seq: c.genSeq(),
+		id:  id,
+		sid: sid,
 	}
 	return c.sendPacket(ctx, nodeId, &ph, nil)
 }
@@ -375,7 +375,7 @@ func (c *Client) SendRequest(ctx context.Context, req ClientRequest) error {
 
 	// 编码并发送消息.
 	ph := rawReqPacketHead{
-		seq_:    c.genSeq(),
+		seq:     c.genSeq(),
 		toId:    req.ID,
 		sid:     req.SID,
 		timeout: uint32(time.Until(deadline).Milliseconds()),

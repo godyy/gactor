@@ -31,11 +31,11 @@ func (s *Service) startRpcManager() {
 	s.rpcManager.start()
 }
 
-// doRPC 向 to 请求的目标 Actor 发起 RPC 调用.
+// doRPC 代理 from, 向 to 请求的目标 Actor 发起 RPC 调用.
 // ctx 若未设置dealine, 底层会设置默认的超时时间. ctx 的 deadline 会通过超时传递到
 // 远端, 用于简单的超时协同控制.
 // async 表示是否采用异步模式. 非异步模式下, ctx 会被传递给请求上下文.
-func (s *Service) doRPC(ctx context.Context, to ActorUID, params any, cb RPCFunc, async bool) error {
+func (s *Service) doRPC(ctx context.Context, from ActorUID, to ActorUID, params any, cb RPCFunc, async bool) error {
 	var (
 		toNodeId string
 		b        []byte
@@ -65,23 +65,24 @@ func (s *Service) doRPC(ctx context.Context, to ActorUID, params any, cb RPCFunc
 	}
 
 	// 创建 RPC 调用实例.
-	callReqId, err := s.rpcManager.createCall(to, deadline, cb)
+	callReqId, err := s.rpcManager.createCall(from, to, deadline, cb)
 	if err != nil {
 		return err
 	}
 
-	// 包头.
-	ph := s2sRpcPacketHead{
-		seq_:    s.genSeq(),
-		reqId:   callReqId,
-		toId:    to,
-		timeout: uint32(time.Until(deadline).Milliseconds()),
-	}
+	// 生成数据包序号.
+	seq := s.genSeq()
 
 	if toNodeId != s.nodeId() {
 		// 目标节点非本地.
 		// 编码数据包并发送到远端节点.
-
+		ph := s2sRpcPacketHead{
+			seq:     seq,
+			reqId:   callReqId,
+			fromId:  from,
+			toId:    to,
+			timeout: uint32(time.Until(deadline).Milliseconds()),
+		}
 		if err = s.sendRemotePacket(ctx, toNodeId, &ph, params); err != nil {
 			s.monitorRPCActionSend2RemoteErr(err)
 		}
@@ -100,9 +101,9 @@ func (s *Service) doRPC(ctx context.Context, to ActorUID, params any, cb RPCFunc
 			// 并发送给目标actor.
 			var req *Context
 			if async {
-				req = newContext(s, newRPCRequest(toNodeId, ph, buf, deadline.UnixMilli()))
+				req = newContext(s, newRPCRequest(toNodeId, seq, callReqId, from, buf, deadline.UnixMilli()))
 			} else {
-				req = newContextWithCtx(ctx, s, newRPCRequest(toNodeId, ph, buf, deadline.UnixMilli()))
+				req = newContextWithCtx(ctx, s, newRPCRequest(toNodeId, seq, callReqId, from, buf, deadline.UnixMilli()))
 			}
 			if err = s.send2Actor(ctx, to, req); err != nil {
 				req.release()
@@ -112,7 +113,7 @@ func (s *Service) doRPC(ctx context.Context, to ActorUID, params any, cb RPCFunc
 	}
 
 	if err != nil {
-		s.rpcManager.removeCall(callReqId)
+		s.rpcManager.removeCall(callReqId, from, to)
 	}
 
 	return err
@@ -140,13 +141,13 @@ func (cb *rpcDoneFunc) invoke(resp *RPCResp) {
 }
 
 // rpc 向 to 指向的 Actor 发起 RPC 调用.
-func (s *Service) rpc(ctx context.Context, to ActorUID, params any, reply any) error {
+func (s *Service) rpc(ctx context.Context, from, to ActorUID, params any, reply any) error {
 	// 执行同步RPC 调用.
 	doneFunc := rpcDoneFunc{
 		done:  make(chan struct{}),
 		reply: reply,
 	}
-	if err := s.doRPC(ctx, to, params, doneFunc.invoke, false); err != nil {
+	if err := s.doRPC(ctx, from, to, params, doneFunc.invoke, false); err != nil {
 		return err
 	}
 
@@ -162,12 +163,12 @@ func (s *Service) RPC(ctx context.Context, to ActorUID, params any, reply any) e
 		return err
 	}
 	defer s.unlockState(true)
-	return s.rpc(ctx, to, params, reply)
+	return s.rpc(ctx, ActorUID{}, to, params, reply)
 }
 
 // asyncRPC 向 to 指向的 Actor 发起异步 RPC 调用.
-func (s *Service) asyncRPC(ctx context.Context, to ActorUID, params any, cb RPCFunc) error {
-	return s.doRPC(ctx, to, params, cb, true)
+func (s *Service) asyncRPC(ctx context.Context, from, to ActorUID, params any, cb RPCFunc) error {
+	return s.doRPC(ctx, from, to, params, cb, true)
 }
 
 // AsyncRPC 向 to 指向的 Actor 发起异步 RPC 调用. 若 Service 未启动或停机, 返回错误.
@@ -176,5 +177,5 @@ func (s *Service) AsyncRPC(ctx context.Context, to ActorUID, params any, cb RPCF
 		return err
 	}
 	defer s.unlockState(true)
-	return s.asyncRPC(ctx, to, params, cb)
+	return s.asyncRPC(ctx, ActorUID{}, to, params, cb)
 }
