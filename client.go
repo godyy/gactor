@@ -15,9 +15,10 @@ import (
 
 // ClientRequest 客户端请求.
 type ClientRequest struct {
-	ID      int64  // 目标 Actor ID.
-	SID     uint32 // 会话ID.
-	Payload []byte // 负载数据.
+	ID      int64         // 目标 Actor ID.
+	SID     uint32        // 会话ID.
+	Timeout time.Duration // 超时. 精度为毫秒, 向下取证.
+	Payload []byte        // 负载数据.
 }
 
 // ClientResponse 客户端响应.
@@ -69,6 +70,10 @@ type ClientConfig struct {
 	// 默认值 5s.
 	DefCtxTimeout time.Duration
 
+	// DefRequestTimeout 默认请求超时时间.
+	// 默认值 5s.
+	DefRequestTimeout time.Duration
+
 	// Handler 处理器.
 	Handler ClientHandler
 }
@@ -80,6 +85,10 @@ func (c *ClientConfig) init() {
 
 	if c.DefCtxTimeout <= 0 {
 		c.DefCtxTimeout = 5 * time.Second
+	}
+
+	if c.DefRequestTimeout <= 0 {
+		c.DefRequestTimeout = 5 * time.Second
 	}
 
 	if c.Handler == nil {
@@ -362,7 +371,13 @@ func (c *Client) Disconnect(ctx context.Context, id int64, sid uint32) error {
 }
 
 // SendRequest 发送请求.
+// ctx 只协同到请求的发送, 请求超时独立设置.
 func (c *Client) SendRequest(ctx context.Context, req ClientRequest) error {
+	// 若未设置超时, 采用默认值
+	if req.Timeout <= 0 {
+		req.Timeout = c.cfg.DefRequestTimeout
+	}
+
 	// 获取目标节点.
 	nodeId, err := c.getNodeIdOfActor(req.ID)
 	if err != nil {
@@ -380,18 +395,12 @@ func (c *Client) SendRequest(ctx context.Context, req ClientRequest) error {
 		return err
 	}
 
-	// 获取deadline.
-	deadline, ok := ctx.Deadline()
-	if !ok {
-		return errors.New("context deadline not set")
-	}
-
 	// 编码并发送消息.
 	ph := rawReqPacketHead{
 		seq:     c.genSeq(),
 		toId:    req.ID,
 		sid:     req.SID,
-		timeout: uint32(time.Until(deadline).Milliseconds()),
+		timeout: uint32(req.Timeout.Milliseconds()),
 	}
 	return c.sendPacket(ctx, nodeId, &ph, req.Payload)
 }
