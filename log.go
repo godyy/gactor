@@ -83,6 +83,10 @@ func lfdCategory(category uint16) zap.Field {
 	return zap.Uint16("category", category)
 }
 
+func lfdCategoryName(name string) zap.Field {
+	return zap.String("category", name)
+}
+
 func lfdId(id int64) zap.Field {
 	return zap.Int64("id", id)
 }
