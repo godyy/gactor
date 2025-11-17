@@ -96,6 +96,9 @@ func lfdError(err error) zap.Field {
 }
 
 func (s *Service) lfdActor(uid ActorUID) zap.Field {
-	ad := s.actorDefineSet.getDefine(uid.Category)
-	return lfdActor(ad.common().Name, uid.ID)
+	if ad := s.actorDefineSet.getDefine(uid.Category); ad != nil {
+		return lfdActor(ad.common().Name, uid.ID)
+	} else {
+		return lfdActor("unkown", uid.ID)
+	}
 }

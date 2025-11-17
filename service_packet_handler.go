@@ -38,7 +38,7 @@ func svcHandlePacketConnect(s *Service, nodeId string, b *Buffer) error {
 
 	// 回复确认数据包.
 	if err := s.sendAckPacket(nodeId, &head); err != nil {
-		s.getLogger().ErrorFields("svcHandlePacketConnect: send ack packet failed", lfdActorUID(uid), lfdError(err))
+		s.getLogger().ErrorFields("svcHandlePacketConnect: send ack packet failed", s.lfdActor(uid), lfdError(err))
 
 	}
 
@@ -47,7 +47,7 @@ func svcHandlePacketConnect(s *Service, nodeId string, b *Buffer) error {
 
 	// 发送消息.
 	if err := s.send2Actor(context.Background(), uid, newMessageConnect(nodeId, head.sid)); err != nil {
-		s.getLogger().ErrorFields("svcHandlePacketConnect: send message to actor failed", lfdActorUID(uid), lfdError(err))
+		s.getLogger().ErrorFields("svcHandlePacketConnect: send message to actor failed", s.lfdActor(uid), lfdError(err))
 	}
 
 	return nil
@@ -65,14 +65,14 @@ func svcHandlePacketDisconnect(s *Service, nodeId string, b *Buffer) error {
 
 	// 回复确认数据包.
 	if err := s.sendAckPacket(nodeId, &head); err != nil {
-		s.getLogger().ErrorFields("svcHandlePacketDisconnect: send ack packet failed", lfdActorUID(uid), lfdError(err))
+		s.getLogger().ErrorFields("svcHandlePacketDisconnect: send ack packet failed", s.lfdActor(uid), lfdError(err))
 
 	}
 
 	s.freeBuffer(b)
 
 	if err := s.send2Actor(context.Background(), uid, newMessageDisconnected(nodeId, head.sid)); err != nil {
-		s.getLogger().ErrorFields("svcHandlePacketDisconnect: send message to actor failed", lfdActorUID(uid), lfdError(err))
+		s.getLogger().ErrorFields("svcHandlePacketDisconnect: send message to actor failed", s.lfdActor(uid), lfdError(err))
 	}
 
 	return nil
@@ -94,14 +94,14 @@ func svcHandlePacketRawReq(s *Service, nodeId string, b *Buffer) error {
 
 	// 回复确认数据包.
 	if err := s.sendAckPacket(nodeId, &head); err != nil {
-		s.getLogger().ErrorFields("svcHandlePacketRawReq: send ack packet failed", lfdActorUID(uid), lfdError(err))
+		s.getLogger().ErrorFields("svcHandlePacketRawReq: send ack packet failed", s.lfdActor(uid), lfdError(err))
 	}
 
 	// 检查是否已经超时.
 	timeout := time.Duration(int(head.timeout)-s.getCfg().MaxRTT) * time.Millisecond
 	if timeout <= 0 {
 		s.freeBuffer(b)
-		s.getLogger().WarnFields("svcHandlePacketRawReq: already timeout", lfdActorUID(uid))
+		s.getLogger().WarnFields("svcHandlePacketRawReq: already timeout", s.lfdActor(uid))
 		return nil
 	}
 
@@ -110,7 +110,7 @@ func svcHandlePacketRawReq(s *Service, nodeId string, b *Buffer) error {
 	request := newContext(ctx, cancel, s, newRawRequest(nodeId, head, *b))
 	if err := s.send2Actor(ctx, uid, request); err != nil {
 		request.release()
-		s.getLogger().ErrorFields("svcHandlePacketRawReq: send request to actor failed", lfdActorUID(uid), lfdError(err))
+		s.getLogger().ErrorFields("svcHandlePacketRawReq: send request to actor failed", s.lfdActor(uid), lfdError(err))
 
 		// 编码发送错误响应数据包
 		var respHead rawRespPacketHead
@@ -121,7 +121,7 @@ func svcHandlePacketRawReq(s *Service, nodeId string, b *Buffer) error {
 			respHead.errCode = errCodeInternalError
 		}
 		if err := s.sendRemotePacket(ctx, nodeId, &respHead, nil); err != nil {
-			s.getLogger().ErrorFields("svcHandlePacketRawReq: send errcode response to actor failed", lfdActorUID(uid), lfdError(err))
+			s.getLogger().ErrorFields("svcHandlePacketRawReq: send errcode response to actor failed", s.lfdActor(uid), lfdError(err))
 		}
 	}
 
@@ -142,14 +142,14 @@ func svcHandlePacketS2SRpc(s *Service, nodeId string, b *Buffer) error {
 
 	// 回复确认数据包.
 	if err := s.sendAckPacket(nodeId, &head); err != nil {
-		s.getLogger().ErrorFields("svcHandlePacketS2SRpc: send ack packet failed", lfdActorUID(head.toId), lfdError(err))
+		s.getLogger().ErrorFields("svcHandlePacketS2SRpc: send ack packet failed", s.lfdActor(head.toId), lfdError(err))
 	}
 
 	// 检查是否已经超时.
 	timeout := time.Duration(int(head.timeout)-s.getCfg().MaxRTT) * time.Millisecond
 	if timeout <= 0 {
 		s.freeBuffer(b)
-		s.getLogger().WarnFields("svcHandlePacketS2SRpc: already timeout", lfdActorUID(head.toId))
+		s.getLogger().WarnFields("svcHandlePacketS2SRpc: already timeout", s.lfdActor(head.toId))
 		return nil
 	}
 
@@ -159,7 +159,7 @@ func svcHandlePacketS2SRpc(s *Service, nodeId string, b *Buffer) error {
 	request := newContext(ctx, cancel, s, newRPCRequest(nodeId, head, *b))
 	if err := s.send2Actor(ctx, head.toId, request); err != nil {
 		request.release()
-		s.getLogger().ErrorFields("svcHandlePacketS2SRpc: send request to actor failed", lfdActorUID(head.toId), lfdError(err))
+		s.getLogger().ErrorFields("svcHandlePacketS2SRpc: send request to actor failed", s.lfdActor(head.toId), lfdError(err))
 
 		// 编码发送错误响应数据包.
 		var respHead s2sRpcRespPacketHead
@@ -170,7 +170,7 @@ func svcHandlePacketS2SRpc(s *Service, nodeId string, b *Buffer) error {
 			respHead.errCode = errCodeInternalError
 		}
 		if err := s.sendRemotePacket(ctx, nodeId, &respHead, nil); err != nil {
-			s.getLogger().ErrorFields("svcHandlePacketS2SRpc: send errcode response to actor failed", lfdActorUID(head.toId), lfdError(err))
+			s.getLogger().ErrorFields("svcHandlePacketS2SRpc: send errcode response to actor failed", s.lfdActor(head.toId), lfdError(err))
 		}
 	}
 
@@ -188,7 +188,7 @@ func svcHandlePacketS2SRpcResp(s *Service, nodeId string, b *Buffer) error {
 	// 远程调用回复, 回复确认数据包.
 	if nodeId != s.nodeId() {
 		if err := s.sendAckPacket(nodeId, &head); err != nil {
-			s.getLogger().ErrorFields("svcHandlePacketS2SRpcResp: send ack packet failed", lfdActorUID(head.fromId), lfdError(err))
+			s.getLogger().ErrorFields("svcHandlePacketS2SRpcResp: send ack packet failed", s.lfdActor(head.fromId), lfdError(err))
 		}
 	}
 
@@ -207,7 +207,7 @@ func svcHandlePacketS2SCast(s *Service, nodeId string, b *Buffer) error {
 
 	// 回复确认数据包.
 	if err := s.sendAckPacket(nodeId, &head); err != nil {
-		s.getLogger().ErrorFields("svcHandlePacketS2SCast: send ack packet failed", lfdActorUID(head.toId), lfdError(err))
+		s.getLogger().ErrorFields("svcHandlePacketS2SCast: send ack packet failed", s.lfdActor(head.toId), lfdError(err))
 	}
 
 	// 创建并发送请求.
@@ -215,7 +215,7 @@ func svcHandlePacketS2SCast(s *Service, nodeId string, b *Buffer) error {
 	request := newContext(ctx, nil, s, newCastRequest(head, *b))
 	if err := s.send2Actor(ctx, head.toId, request); err != nil {
 		request.release()
-		s.getLogger().ErrorFields("svcHandlePacketS2SCast: send request to actor failed", lfdActorUID(head.toId), lfdError(err))
+		s.getLogger().ErrorFields("svcHandlePacketS2SCast: send request to actor failed", s.lfdActor(head.toId), lfdError(err))
 	}
 
 	return nil

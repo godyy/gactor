@@ -612,9 +612,9 @@ type actorAsyncRPCFunc struct {
 
 func (f *actorAsyncRPCFunc) invoke(resp *RPCResp) {
 	if actor, err := f.svc.getActor(f.uid); err != nil {
-		f.svc.getLogger().ErrorFields("get actor failed inside actorAsyncRPCFunc", lfdActorUID(f.uid), lfdError(err))
+		f.svc.getLogger().ErrorFields("get actor failed inside actorAsyncRPCFunc", f.svc.lfdActor(f.uid), lfdError(err))
 	} else if actor == nil {
-		f.svc.getLogger().WarnFields("actor not found inside actorAsyncRPCFunc", lfdActorUID(f.uid))
+		f.svc.getLogger().WarnFields("actor not found inside actorAsyncRPCFunc", f.svc.lfdActor(f.uid))
 	} else {
 		defer actor.core().deref()
 		ctx, cancel := context.WithTimeout(context.Background(), f.svc.getCfg().ActorReceiveCompletedAsyncRPCTimeout)

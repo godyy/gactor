@@ -11,8 +11,8 @@ func Init() error {
 		Level:        glog.InfoLevel,
 		EnableCaller: true,
 		CallerSkip:   0,
-		Development:  true,
-		Cores:        []glog.CoreConfig{glog.NewStdCoreConfig()},
+		// Development:  true,
+		Cores: []glog.CoreConfig{glog.NewStdCoreConfig()},
 	})
 	logger = l
 	return nil
