@@ -65,6 +65,10 @@ type ClientConfig struct {
 	// PS: 其值必须大于0.
 	ActorCategory uint16
 
+	// DefCtxTimeout 默认上下文超时时间.
+	// 默认值 5s.
+	DefCtxTimeout time.Duration
+
 	// Handler 处理器.
 	Handler ClientHandler
 }
@@ -72,6 +76,10 @@ type ClientConfig struct {
 func (c *ClientConfig) init() {
 	if c.ActorCategory == 0 {
 		panic("gactor: ClientConfig: ActorCategory must > 0")
+	}
+
+	if c.DefCtxTimeout <= 0 {
+		c.DefCtxTimeout = 5 * time.Second
 	}
 
 	if c.Handler == nil {
@@ -234,6 +242,11 @@ func (c *Client) encodePacket(ph packetHead, payload []byte) ([]byte, error) {
 
 // send 发送字节数据.
 func (c *Client) send(ctx context.Context, nodeId string, b []byte) error {
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, c.cfg.DefCtxTimeout)
+		defer cancel()
+	}
 	return c.cfg.Handler.GetNetAgent().Send(ctx, nodeId, b)
 }
 
