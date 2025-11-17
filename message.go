@@ -2,7 +2,6 @@ package gactor
 
 import (
 	"context"
-	"time"
 )
 
 // message 封装 Actor 消息.
@@ -30,8 +29,6 @@ func newMessageConnect(nodeId string, sid uint32) *messageConnect {
 	}
 }
 
-const disconnectTimeout = 3 * time.Second
-
 // handle 处理消息.
 func (m *messageConnect) handle(a actorImpl) error {
 	ca, ok := a.(*cActor)
@@ -39,9 +36,7 @@ func (m *messageConnect) handle(a actorImpl) error {
 		return ErrNotCActor
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), disconnectTimeout)
-	defer cancel()
-	ca.updateSession(ctx, ActorSession{
+	ca.updateSession(context.Background(), ActorSession{
 		NodeId: m.nodeId,
 		SID:    m.sid,
 	})

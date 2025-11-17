@@ -19,10 +19,6 @@ type ActorConfig struct {
 	// 一般情况下, 客户端都与同一分类的actor通信.
 	// PS: 该分类必须已在 ActorDefines 中定义.
 	ClientActorCategory uint16
-
-	// ActorReceiveCompletedAsyncRPCTimeout Actor 在接收已完成异步 RPC 调用时的
-	// 超时时间. 默认值 1s.
-	ActorReceiveCompletedAsyncRPCTimeout time.Duration
 }
 
 func (c *ActorConfig) init() {
@@ -42,10 +38,6 @@ func (c *ActorConfig) init() {
 		if !clientCategoryValid {
 			panic("gactor: ActorConfig: ClientActorCategory not defined in ActorDefines")
 		}
-	}
-
-	if c.ActorReceiveCompletedAsyncRPCTimeout <= 0 {
-		c.ActorReceiveCompletedAsyncRPCTimeout = 1 * time.Second
 	}
 }
 
@@ -352,6 +344,13 @@ func (s *Service) send2Actor(ctx context.Context, uid ActorUID, msg message) err
 	// 若 ctx 已超时, 中断后续逻辑.
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+
+	// 若ctx未设置deadline, 设置默认超时.
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, s.cfg.DefCtxTimeout)
+		defer cancel()
 	}
 
 	// 启动 Actor.

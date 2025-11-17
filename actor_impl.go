@@ -617,7 +617,7 @@ func (f *actorAsyncRPCFunc) invoke(resp *RPCResp) {
 		f.svc.getLogger().WarnFields("actor not found inside actorAsyncRPCFunc", f.svc.lfdActor(f.uid))
 	} else {
 		defer actor.core().deref()
-		ctx, cancel := context.WithTimeout(context.Background(), f.svc.getCfg().ActorReceiveCompletedAsyncRPCTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), f.svc.cfg.DefRPCTimeout/2)
 		defer cancel()
 		if err := actor.core().receiveCompletedAsyncRPC(ctx, resp, f.cb); err != nil {
 			actor.core().getLogger().ErrorFields("receive async rpc call failed", lfdError(err))

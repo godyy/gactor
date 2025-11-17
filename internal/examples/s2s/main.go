@@ -164,8 +164,7 @@ func main() {
 	}
 	s1.Service = gactor.NewService(&gactor.ServiceConfig{
 		ActorConfig: gactor.ActorConfig{
-			ActorDefines:                         actorDefines,
-			ActorReceiveCompletedAsyncRPCTimeout: 0,
+			ActorDefines: actorDefines,
 		},
 		TimerConfig: gactor.TimerConfig{
 			TimeWheelLevels: []gtimewheel.LevelConfig{
@@ -214,8 +213,7 @@ func main() {
 	}
 	s2.Service = gactor.NewService(&gactor.ServiceConfig{
 		ActorConfig: gactor.ActorConfig{
-			ActorDefines:                         actorDefines,
-			ActorReceiveCompletedAsyncRPCTimeout: 0,
+			ActorDefines: actorDefines,
 		},
 		TimerConfig: gactor.TimerConfig{
 			TimeWheelLevels: []gtimewheel.LevelConfig{

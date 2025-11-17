@@ -50,6 +50,10 @@ type ServiceConfig struct {
 	// 默认值 50ms.
 	MaxRTT int
 
+	// DefCtxTimeout 默认上下文超时时间.
+	// 默认值 5s.
+	DefCtxTimeout time.Duration
+
 	// Handler Service 处理器.
 	// required.
 	Handler ServiceHandler
@@ -62,6 +66,10 @@ func (c *ServiceConfig) init() {
 
 	if c.MaxRTT <= 0 {
 		c.MaxRTT = 50
+	}
+
+	if c.DefCtxTimeout <= 0 {
+		c.DefCtxTimeout = 5 * time.Second
 	}
 
 	if c.Handler == nil {
@@ -377,6 +385,12 @@ func (s *Service) freeBuffer(buf *Buffer) {
 
 // send 发送字节数据.
 func (s *Service) send(ctx context.Context, nodeId string, b []byte) error {
+	// 若ctx未设置deadline, 设置默认超时.
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, s.cfg.DefCtxTimeout)
+		defer cancel()
+	}
 	return s.cfg.Handler.GetNetAgent().Send(ctx, nodeId, b)
 }
 
