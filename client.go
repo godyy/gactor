@@ -251,16 +251,16 @@ func (c *Client) encodePacket(ph packetHead, payload []byte) ([]byte, error) {
 
 // send 发送字节数据.
 func (c *Client) send(ctx context.Context, nodeId string, b []byte) error {
-	if _, ok := ctx.Deadline(); !ok {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, c.cfg.DefCtxTimeout)
-		defer cancel()
-	}
 	return c.cfg.Handler.GetNetAgent().Send(ctx, nodeId, b)
 }
 
 // sendPacket 编码数据包并发送到 nodeId 指定的节点. payload 为已编码的自定义负载数据.
 func (c *Client) sendPacket(ctx context.Context, nodeId string, ph packetHead, payload []byte) error {
+	// 优先检查 ctx 是否已取消.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	// 编码数据.
 	b, err := c.encodePacket(ph, payload)
 	if err != nil {
@@ -317,6 +317,13 @@ func (c *Client) makeActorUID(id int64) ActorUID {
 
 // Connnect 连接 uid 指定的 Actor.
 func (c *Client) Connect(ctx context.Context, id int64, sid uint32) error {
+	// 若 ctx 未设置deadline, 附加默认超时.
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, c.cfg.DefCtxTimeout)
+		defer cancel()
+	}
+
 	// 获取目标节点.
 	nodeId, err := c.getNodeIdOfActor(id)
 	if err != nil {
@@ -328,11 +335,6 @@ func (c *Client) Connect(ctx context.Context, id int64, sid uint32) error {
 		return err
 	}
 	defer c.unlockState(true)
-
-	// 优先检查 ctx 是否done.
-	if err := ctx.Err(); err != nil {
-		return err
-	}
 
 	// 编码并发送消息.
 	ph := connectPacketHead{
@@ -344,6 +346,13 @@ func (c *Client) Connect(ctx context.Context, id int64, sid uint32) error {
 
 // Disconnect 通知 uid 指定的 Actor 断开连接.
 func (c *Client) Disconnect(ctx context.Context, id int64, sid uint32) error {
+	// 若 ctx 未设置deadline, 附加默认超时.
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, c.cfg.DefCtxTimeout)
+		defer cancel()
+	}
+
 	// 获取目标节点.
 	nodeId, err := c.getNodeIdOfActor(id)
 	if err != nil {
@@ -355,11 +364,6 @@ func (c *Client) Disconnect(ctx context.Context, id int64, sid uint32) error {
 		return err
 	}
 	defer c.unlockState(true)
-
-	// 优先检查 ctx 是否done.
-	if err := ctx.Err(); err != nil {
-		return err
-	}
 
 	// 编码并发送消息.
 	ph := disconnectPacketHead{
@@ -373,6 +377,13 @@ func (c *Client) Disconnect(ctx context.Context, id int64, sid uint32) error {
 // SendRequest 发送请求.
 // ctx 只协同到请求的发送, 请求超时独立设置.
 func (c *Client) SendRequest(ctx context.Context, req ClientRequest) error {
+	// 若 ctx 未设置deadline, 附加默认超时.
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, c.cfg.DefCtxTimeout)
+		defer cancel()
+	}
+
 	// 若未设置超时, 采用默认值
 	if req.Timeout <= 0 {
 		req.Timeout = c.cfg.DefRequestTimeout
@@ -389,11 +400,6 @@ func (c *Client) SendRequest(ctx context.Context, req ClientRequest) error {
 		return err
 	}
 	defer c.unlockState(true)
-
-	// 优先检查 ctx 是否done.
-	if err := ctx.Err(); err != nil {
-		return err
-	}
 
 	// 编码并发送消息.
 	ph := rawReqPacketHead{

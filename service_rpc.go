@@ -42,13 +42,6 @@ func (s *Service) doRPC(ctx context.Context, from ActorUID, to ActorUID, params 
 		err      error
 	)
 
-	// 获取目标 Actor 所在节点信息.
-	toNodeId, err = s.getNodeIdOfActor(to)
-	if err != nil {
-		s.monitorRPCAction(MonitorCANodeInfoErr)
-		return err
-	}
-
 	// 检查 ctx 是否已经取消.
 	if err := ctx.Err(); err != nil {
 		s.monitorRPCActionContextErr(err)
@@ -62,6 +55,13 @@ func (s *Service) doRPC(ctx context.Context, from ActorUID, to ActorUID, params 
 		deadline = time.Now().Add(s.cfg.DefRPCTimeout)
 		ctx, cancel = context.WithDeadline(ctx, deadline)
 		defer cancel()
+	}
+
+	// 获取目标 Actor 所在节点信息.
+	toNodeId, err = s.getNodeIdOfActor(to)
+	if err != nil {
+		s.monitorRPCAction(MonitorCANodeInfoErr)
+		return err
 	}
 
 	// 创建 RPC 调用实例.

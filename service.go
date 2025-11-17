@@ -385,12 +385,6 @@ func (s *Service) freeBuffer(buf *Buffer) {
 
 // send 发送字节数据.
 func (s *Service) send(ctx context.Context, nodeId string, b []byte) error {
-	// 若ctx未设置deadline, 设置默认超时.
-	if _, ok := ctx.Deadline(); !ok {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, s.cfg.DefCtxTimeout)
-		defer cancel()
-	}
 	return s.cfg.Handler.GetNetAgent().Send(ctx, nodeId, b)
 }
 
@@ -412,8 +406,16 @@ func (s *Service) sendLocalPacket(ctx context.Context, ph packetHead, payload an
 
 // sendRemotePacket 发送远程数据包.
 func (s *Service) sendRemotePacket(ctx context.Context, nodeId string, ph packetHead, payload any) error {
+	// 优先检查ctx是否已取消.
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+
+	// 若ctx未设置dealine, 附加默认超时
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, s.cfg.DefCtxTimeout)
+		defer cancel()
 	}
 
 	// 编码数据包.

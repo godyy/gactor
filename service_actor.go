@@ -114,6 +114,18 @@ var ErrActorDeployedOnOtherNode = errors.New("gactor: actor deployed on other no
 // PS: 即使 Actor 已经被启动, 仍会向其投递消息, 并检查处理结果.
 // PS: 开始停机后, 不能再通过 StartActor 启动 Actor.
 func (s *Service) StartActor(ctx context.Context, uid ActorUID) error {
+	// 优先检查ctx是否已取消
+	if err := ctx.Err(); err != nil {
+		return ctx.Err()
+	}
+
+	// 若 ctx 未设置deadline, 附加默认超时.
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, s.cfg.DefCtxTimeout)
+		defer cancel()
+	}
+
 	if err := s.lockState(serviceStateStarted, true); err != nil {
 		return err
 	}
@@ -128,10 +140,6 @@ func (s *Service) StartActor(ctx context.Context, uid ActorUID) error {
 	// 判断 Actor 是否部署在其它节点上.
 	if nodeId != s.nodeId() {
 		return ErrActorDeployedOnOtherNode
-	}
-
-	if err := ctx.Err(); err != nil {
-		return err
 	}
 
 	// 投递消息.
@@ -392,23 +400,24 @@ func (s *Service) cast(ctx context.Context, from, to ActorUID, payload any) erro
 		err      error
 	)
 
+	// 优先检查 ctx 是否已取消.
+	if err := ctx.Err(); err != nil {
+		s.monitorCastActionContextErr(err)
+		return err
+	}
+
+	// 若 ctx 未设置deadline, 附加默认超时.
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, s.cfg.DefCtxTimeout)
+		defer cancel()
+	}
+
 	// 获取目标 Actor 所在节点信息.
 	toNodeId, err = s.getNodeIdOfActor(to)
 	if err != nil {
 		s.monitorCastAction(MonitorCANodeInfoErr)
 		return err
-	}
-
-	// 优先检查 ctx 是否done.
-	// 如果 ctx 未设置 deadline, 设置默认超时.
-	if err := ctx.Err(); err != nil {
-		s.monitorCastActionContextErr(err)
-		return err
-	}
-	if _, ok := ctx.Deadline(); !ok {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, s.cfg.DefRPCTimeout)
-		defer cancel()
 	}
 
 	// 生成包序号.
