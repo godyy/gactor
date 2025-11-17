@@ -30,30 +30,28 @@ func (h *handler) registerHandlers() {
 	h.RegisterHandler(message.MsgIdGetNameReq, h.wrapHandler(handlers.WrapRpcMessageHandler(h.handleServerName)))
 }
 
-func (h *handler) Handle(ctx *gactor.Context) error {
+func (h *handler) Handle(ctx *gactor.Context) {
 	switch ctx.RequestType() {
 	case gactor.RequestTypeRPC:
-		return h.RpcHandler.Handle(ctx)
+		h.RpcHandler.Handle(ctx)
 	default:
-		return fmt.Errorf("user handle unknown request type: %s", ctx.RequestType())
+		panic(fmt.Errorf("server handle unknown request type: %s", ctx.RequestType()))
 	}
 }
 
-func (h *handler) begin(ctx *gactor.Context) error {
+func (h *handler) begin(ctx *gactor.Context) {
 	logger.Logger().DebugFields("server handler begin", zap.Int64("id", ctx.Actor().ActorUID().ID))
-	return nil
 }
 
-func (h *handler) end(ctx *gactor.Context) error {
+func (h *handler) end(ctx *gactor.Context) {
 	logger.Logger().DebugFields("server handler end", zap.Int64("id", ctx.Actor().ActorUID().ID))
-	return nil
 }
 
 func (h *handler) wrapHandler(handlers ...gactor.HandlerFunc) gactor.HandlersChain {
 	return gactor.NewHandlersChain(h.begin).Append(handlers...).Append(h.end)
 }
 
-func (h *handler) handleServerName(ctx *gactor.Context, msg *message.GetNameReq) error {
+func (h *handler) handleServerName(ctx *gactor.Context, msg *message.GetNameReq) {
 	logger.Logger().DebugFields("server handle serverName", zap.Int64("id", ctx.Actor().ActorUID().ID))
 	if err := actors.ContextAsyncRPC(
 		ctx,
@@ -62,9 +60,6 @@ func (h *handler) handleServerName(ctx *gactor.Context, msg *message.GetNameReq)
 		h.rpcGetUserNameCallback); err != nil {
 		logger.Logger().ErrorFields("server async rpc call user name failed", zap.Int64("id", ctx.Actor().ActorUID().ID), zap.Error(err))
 		ctx.Abort()
-		return nil
-	} else {
-		return gactor.ErrSuspendNextHandlers
 	}
 }
 

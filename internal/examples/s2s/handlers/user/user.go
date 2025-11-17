@@ -2,6 +2,5 @@ package user
 
 import "github.com/godyy/gactor"
 
-func Handler(ctx *gactor.Context) error {
-	return nil
+func Handler(ctx *gactor.Context) {
 }

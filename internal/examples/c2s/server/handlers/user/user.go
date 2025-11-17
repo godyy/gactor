@@ -36,25 +36,23 @@ func (h *handler) registerHandlers() {
 	h.RpcHandler.RegisterHandler(message.MsgIdGetNameReq, h.wrapHandler(handlers.WrapRpcMessageHandler(h.handleGetName)))
 }
 
-func (h *handler) Handle(ctx *gactor.Context) error {
+func (h *handler) Handle(ctx *gactor.Context) {
 	switch ctx.RequestType() {
 	case gactor.RequestTypeReq:
-		return h.RawHandler.Handle(ctx)
+		h.RawHandler.Handle(ctx)
 	case gactor.RequestTypeRPC:
-		return h.RpcHandler.Handle(ctx)
+		h.RpcHandler.Handle(ctx)
 	default:
-		return fmt.Errorf("user handle unknown request type: %s", ctx.RequestType())
+		panic(fmt.Errorf("user handle unknown request type: %s", ctx.RequestType()))
 	}
 }
 
-func (h *handler) begin(ctx *gactor.Context) error {
+func (h *handler) begin(ctx *gactor.Context) {
 	logger.Logger().DebugFields("user handler begin", zap.Int64("id", ctx.Actor().ActorUID().ID))
-	return nil
 }
 
-func (h *handler) end(ctx *gactor.Context) error {
+func (h *handler) end(ctx *gactor.Context) {
 	logger.Logger().DebugFields("user handler end", zap.Int64("id", ctx.Actor().ActorUID().ID))
-	return nil
 }
 
 func (h *handler) wrapHandler(handlers ...gactor.HandlerFunc) gactor.HandlersChain {
@@ -65,24 +63,23 @@ func (h *handler) wrapHandlerWithCheckLogin(handlers ...gactor.HandlerFunc) gact
 	return gactor.NewHandlersChain(h.begin, h.checkLogin).Append(handlers...).Append(h.end)
 }
 
-func (h *handler) checkLogin(ctx *gactor.Context) error {
+func (h *handler) checkLogin(ctx *gactor.Context) {
 	u := h.user(ctx)
 	if !u.IsLogin {
 		ctx.Abort()
-		err := h.RawHandler.ReplyError(ctx, common.ErrCodeNotLogin)
+		h.RawHandler.ReplyError(ctx, common.ErrCodeNotLogin)
 		u.Disconnect(ctx)
-		return err
 	}
-	return nil
 }
 
-func (h *handler) handleLogin(ctx *gactor.Context, params *message.LoginReq) error {
+func (h *handler) handleLogin(ctx *gactor.Context, params *message.LoginReq) {
 	logger.Logger().DebugFields("user handle login", zap.Int64("id", ctx.Actor().ActorUID().ID))
 	if params.Password != fmt.Sprintf("password%d", ctx.Actor().ActorUID().ID) {
 		respMsg := message.LoginResp{
 			Err: "password error",
 		}
-		return h.RawHandler.Reply(ctx, &respMsg)
+		h.RawHandler.Reply(ctx, &respMsg)
+		return
 	}
 
 	u := h.user(ctx)
@@ -91,10 +88,10 @@ func (h *handler) handleLogin(ctx *gactor.Context, params *message.LoginReq) err
 	u.IsLogin = true
 
 	respMsg := message.LoginResp{}
-	return h.RawHandler.Reply(ctx, &respMsg)
+	h.RawHandler.Reply(ctx, &respMsg)
 }
 
-func (h *handler) handleHeartbeat(ctx *gactor.Context, params *message.HeartbeatReq) error {
+func (h *handler) handleHeartbeat(ctx *gactor.Context, params *message.HeartbeatReq) {
 	logger.Logger().DebugFields("user handle heartbeat", zap.Int64("id", ctx.Actor().ActorUID().ID))
 	if err := actors.ContextAsyncRPC(
 		ctx,
@@ -103,16 +100,13 @@ func (h *handler) handleHeartbeat(ctx *gactor.Context, params *message.Heartbeat
 		h.rpcGetServerNameCallback); err != nil {
 		logger.Logger().ErrorFields("user async rpc call server name failed", zap.Int64("id", ctx.Actor().ActorUID().ID), zap.Error(err))
 		ctx.Abort()
-		return nil
-	} else {
-		return gactor.ErrSuspendNextHandlers
 	}
 }
 
-func (h *handler) handleGetName(ctx *gactor.Context, params *message.GetNameReq) error {
+func (h *handler) handleGetName(ctx *gactor.Context, params *message.GetNameReq) {
 	logger.Logger().DebugFields("user handle get name", zap.Int64("id", ctx.Actor().ActorUID().ID))
 	u := h.user(ctx)
-	return h.RpcHandler.Reply(ctx, &message.GetNameResp{Name: u.GetName()})
+	h.RpcHandler.Reply(ctx, &message.GetNameResp{Name: u.GetName()})
 }
 
 func (h *handler) rpcServerNameCallback(ctx *gactor.Context, resp *message.GetNameResp, err error) {

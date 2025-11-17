@@ -1,15 +1,11 @@
 package gactor
 
 import (
-	"errors"
 	"math"
 )
 
-// ErrSuspendNextHandlers 表示暂停执行后续的 HandlerFunc.
-var ErrSuspendNextHandlers = errors.New("gactor: suspend next handlers")
-
 // HandlerFunc Actor 请求处理器函数.
-type HandlerFunc func(*Context) error
+type HandlerFunc func(*Context)
 
 // maxHandlers 最大 HandlerFunc 数量.
 const maxHandlers = math.MaxInt8 >> 1
@@ -34,7 +30,7 @@ func (h HandlersChain) Append(handlers ...HandlerFunc) HandlersChain {
 }
 
 // Handle 执行 HandlersChain.
-func (hc HandlersChain) Handle(ctx *Context) error {
+func (hc HandlersChain) Handle(ctx *Context) {
 	ctx.handlers = hc.handlers
-	return ctx.Next()
+	ctx.Next()
 }

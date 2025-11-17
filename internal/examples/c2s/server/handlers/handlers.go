@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"errors"
 	"fmt"
 
 	"github.com/godyy/gactor"
@@ -24,20 +23,21 @@ func (h *RawHandler) RegisterHandler(mgdId uint16, handler gactor.HandlersChain)
 	h.messageHandlers[mgdId] = handler
 }
 
-func (h *RawHandler) Handle(ctx *gactor.Context) error {
+func (h *RawHandler) Handle(ctx *gactor.Context) {
 	var msg message.ReqMessage
 	if err := ctx.Decode(&msg); err != nil {
 		logger.Logger().Errorf("actor %s decode [%s]Request payload, %v", ctx.Actor().ActorUID(), ctx.RequestType(), err)
-		return ctx.ReplyDecodeError()
+		ctx.ReplyDecodeError()
+		return
 	}
 
 	messageHandler, ok := h.messageHandlers[msg.MsgId]
 	if !ok {
-		return fmt.Errorf("actor %s, msgId %d handler not found", ctx.Actor().ActorUID(), msg.MsgId)
+		panic(fmt.Errorf("actor %s, msgId %d handler not found", ctx.Actor().ActorUID(), msg.MsgId))
 	}
 
 	setReqMsg(ctx, &msg)
-	return messageHandler.Handle(ctx)
+	messageHandler.Handle(ctx)
 }
 
 func (h *RawHandler) Reply(ctx *gactor.Context, v any) error {
@@ -62,20 +62,21 @@ func getReqMsg(ctx *gactor.Context) *message.ReqMessage {
 	return val.(*message.ReqMessage)
 }
 
-func WrapRawMessageHandler[MM any](h func(ctx *gactor.Context, msg *MM) error) gactor.HandlerFunc {
-	return func(ctx *gactor.Context) error {
+func WrapRawMessageHandler[MM any](h func(ctx *gactor.Context, msg *MM)) gactor.HandlerFunc {
+	return func(ctx *gactor.Context) {
 		m := getReqMsg(ctx)
 		if m == nil {
-			return errors.New("msg not found")
+			panic("msg not found")
 		}
 
 		var mm MM
 		if err := m.DecodePayload(&mm); err != nil {
 			ctx.Abort()
-			return ctx.ReplyDecodeError()
+			ctx.ReplyDecodeError()
+			return
 		}
 
-		return h(ctx, &mm)
+		h(ctx, &mm)
 	}
 }
 
@@ -93,20 +94,21 @@ func (h *RpcHandler) RegisterHandler(msgId uint16, handler gactor.HandlersChain)
 	h.messageHandlers[msgId] = handler
 }
 
-func (h *RpcHandler) Handle(ctx *gactor.Context) error {
+func (h *RpcHandler) Handle(ctx *gactor.Context) {
 	var msg message.RpcMessage
 	if err := ctx.Decode(&msg); err != nil {
 		logger.Logger().Errorf("actor %s decode [%s]Request payload, %v", ctx.Actor().ActorUID(), ctx.RequestType(), err)
-		return ctx.ReplyDecodeError()
+		ctx.ReplyDecodeError()
+		return
 	}
 
 	messageHandler, ok := h.messageHandlers[msg.MsgId]
 	if !ok {
-		return fmt.Errorf("actor %s, msgId %d handler not found", ctx.Actor().ActorUID(), msg.MsgId)
+		panic(fmt.Errorf("actor %s, msgId %d handler not found", ctx.Actor().ActorUID(), msg.MsgId))
 	}
 
 	setRpcMsg(ctx, &msg)
-	return messageHandler.Handle(ctx)
+	messageHandler.Handle(ctx)
 }
 
 func (h *RpcHandler) Reply(ctx *gactor.Context, v any) error {
@@ -130,19 +132,20 @@ func getRpcMsg(ctx *gactor.Context) *message.RpcMessage {
 	return val.(*message.RpcMessage)
 }
 
-func WrapRpcMessageHandler[MM any](h func(ctx *gactor.Context, msg *MM) error) gactor.HandlerFunc {
-	return func(ctx *gactor.Context) error {
+func WrapRpcMessageHandler[MM any](h func(ctx *gactor.Context, msg *MM)) gactor.HandlerFunc {
+	return func(ctx *gactor.Context) {
 		m := getRpcMsg(ctx)
 		if m == nil {
-			return errors.New("msg not found")
+			panic("msg not found")
 		}
 
 		var mm MM
 		if err := m.DecodePayload(&mm); err != nil {
 			ctx.Abort()
-			return ctx.ReplyDecodeError()
+			ctx.ReplyDecodeError()
+			return
 		}
 
-		return h(ctx, &mm)
+		h(ctx, &mm)
 	}
 }

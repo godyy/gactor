@@ -13,14 +13,14 @@ type Context struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	svc      *Service       // Service.
-	req      request        // request.
-	actor    actorImpl      // actor.
-	kv       map[string]any // kv mapping.
-	refCount int            // 引用计数.
+	svc   *Service       // Service.
+	req   request        // request.
+	actor actorImpl      // actor.
+	kv    map[string]any // kv mapping.
 
 	handlers   []HandlerFunc // handlers.
 	handlerIdx int8          // handler index.
+	suspend    bool          // 是否挂起.
 }
 
 var poolOfContext = &sync.Pool{
@@ -38,7 +38,7 @@ func newContext(ctx context.Context, cancel context.CancelFunc, svc *Service, re
 	cp.svc = svc
 	cp.req = req
 	cp.kv = make(map[string]any)
-	cp.refCount = 1
+	cp.suspend = false
 	return cp
 }
 
@@ -61,18 +61,6 @@ func (c *Context) Set(k string, v any) {
 func (c *Context) Get(k string) (v any, exists bool) {
 	v, exists = c.kv[k]
 	return
-}
-
-// ref 增加引用计数.
-func (c *Context) ref() {
-	c.refCount++
-}
-
-// deref 减少引用计数.
-func (c *Context) deref() {
-	if c.refCount > 0 {
-		c.refCount--
-	}
 }
 
 // RequestType 返回请求类型.
@@ -102,24 +90,21 @@ func (c *Context) Abort() {
 }
 
 // Next 执行下一个 Handler.
-func (c *Context) Next() error {
-	if c.handlerIdx >= int8(len(c.handlers)-1) {
-		return nil
+func (c *Context) Next() {
+	if c.suspend || c.handlerIdx >= int8(len(c.handlers)-1) {
+		return
 	}
 
 	c.handlerIdx++
 	for c.handlerIdx < int8(len(c.handlers)) {
-		if err := c.handlers[c.handlerIdx](c); err != nil {
-			if errors.Is(err, ErrSuspendNextHandlers) {
-				return nil
-			}
-			c.Abort()
-			return err
+		c.handlers[c.handlerIdx](c)
+		if c.suspend {
+			return
 		}
 		c.handlerIdx++
 	}
 
-	return nil
+	return
 }
 
 // RPC Service.rpc 的快捷方式.
@@ -145,9 +130,8 @@ func (f *contextAsyncRPCFunc) invoke(_ Actor, resp *RPCResp) {
 	// 优先执行回调.
 	f.cb(f.ctx, resp)
 	// 继续执行 Handler.
-	if err := f.ctx.Next(); err != nil {
-		f.ctx.actor.core().getLogger().ErrorFields("continue handle request failed inside async rpc func", lfdRequestType(f.ctx.req.requestType()), lfdError(err))
-	}
+	f.ctx.suspend = false
+	f.ctx.Next()
 	// 回收.
 	f.ctx.release()
 }
@@ -162,13 +146,13 @@ func (c *Context) AsyncRPCWithContext(ctx context.Context, to ActorUID, params a
 	if c.actor == nil {
 		return errors.New("gactor: context is not bound to actor")
 	}
-	c.ref()
+	c.suspend = true
 	asyncFunc := &contextAsyncRPCFunc{
 		ctx: c,
 		cb:  cb,
 	}
 	if err := c.actor.AsyncRPC(c, to, params, asyncFunc.invoke); err != nil {
-		c.deref()
+		c.suspend = false
 		return err
 	}
 	return nil
@@ -196,9 +180,9 @@ func (c *Context) Clone() *Context {
 	cp.actor = c.actor
 	cp.req = c.req.clone(c)
 	cp.kv = c.cloneKV()
-	cp.refCount = 1
 	cp.handlers = c.handlers
 	cp.handlerIdx = c.handlerIdx
+	cp.suspend = false
 
 	return cp
 }
@@ -224,11 +208,7 @@ func (c *Context) cloneKV() map[string]any {
 
 // release 回收.
 func (c *Context) release() {
-	if c.refCount <= 0 {
-		return
-	}
-	c.refCount--
-	if c.refCount > 0 {
+	if c.suspend {
 		return
 	}
 	c.req.release(c)
@@ -262,9 +242,7 @@ func (c *Context) handle(a actorImpl) error {
 	}
 
 	core := a.core()
-	if err := core.Handler(c); err != nil {
-		core.getLogger().ErrorFields("handle request failed", lfdRequestType(c.req.requestType()), lfdError(err))
-	}
+	core.Handler(c)
 
 	return nil
 }
