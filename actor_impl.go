@@ -78,7 +78,7 @@ func actorBeforeLoop(a actorImpl) error {
 
 // actorLoop Actor 主循环逻辑.
 func actorLoop(a actorImpl) {
-	defer recoverAndLog("loop panic", a.core().getLogger(), func() {
+	defer recoverAndLog("actor loop panic", a.core().getLogger(), func() {
 		a.core().service().monitorActorPanic(a.core().Category)
 		actorStopWithErr(a, errCodeActorLoopError)
 	})

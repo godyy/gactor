@@ -282,6 +282,8 @@ func (a *testActor) GetActor() Actor {
 }
 
 func (a *testActor) OnStart() error {
+	var aa *testActor
+	aa.name = "123"
 	a.name = "test:" + a.ActorUID().String()
 	a.StartTimer(100*time.Millisecond, true, nil, func(args *ActorTimerArgs) {
 		ta := args.Actor.Behavior().(*testActor)
