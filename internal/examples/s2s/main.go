@@ -163,6 +163,7 @@ func main() {
 		s1.netAgent = &netAgent{agent}
 	}
 	s1.Service = gactor.NewService(&gactor.ServiceConfig{
+		NodeId: s1NodeId,
 		ActorConfig: gactor.ActorConfig{
 			ActorDefines: actorDefines,
 		},
@@ -212,6 +213,7 @@ func main() {
 		s2.netAgent = &netAgent{agent}
 	}
 	s2.Service = gactor.NewService(&gactor.ServiceConfig{
+		NodeId: s2NodeId,
 		ActorConfig: gactor.ActorConfig{
 			ActorDefines: actorDefines,
 		},
@@ -296,10 +298,6 @@ func (d *metaDriver) GetMeta(uid gactor.ActorUID) (*gactor.Meta, error) {
 
 type netAgent struct {
 	*gcluster.Agent
-}
-
-func (a *netAgent) NodeId() string {
-	return a.Agent.NodeId()
 }
 
 func (a *netAgent) Send(ctx context.Context, nodeId string, b []byte) error {

@@ -61,6 +61,9 @@ type ClientHandler interface {
 
 // ClientConfig Client 配置.
 type ClientConfig struct {
+	// NodeId 客户端所处节点ID.
+	NodeId string
+
 	// ActorCategory 客户端与之通信的默认目标actor分类.
 	// 一般情况下, 用户只会与同一分类的actor通信. 例如Player.
 	// PS: 其值必须大于0.
@@ -79,6 +82,10 @@ type ClientConfig struct {
 }
 
 func (c *ClientConfig) init() {
+	if c.NodeId == "" {
+		panic("gactor: ClientConfig: NodeId not specified")
+	}
+
 	if c.ActorCategory == 0 {
 		panic("gactor: ClientConfig: ActorCategory must > 0")
 	}
@@ -174,7 +181,7 @@ func (c *Client) unlockState(read bool) {
 
 // nodeId 获取节点ID.
 func (c *Client) nodeId() string {
-	return c.cfg.Handler.GetNetAgent().NodeId()
+	return c.cfg.NodeId
 }
 
 // initLogger 初始化日志工具.

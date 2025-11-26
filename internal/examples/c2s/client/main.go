@@ -451,6 +451,7 @@ func main() {
 	}
 
 	cli.cli = gactor.NewClient(&gactor.ClientConfig{
+		NodeId:        *nodeId,
 		ActorCategory: consts.CategoryUser,
 		Handler:       cli,
 	}, gactor.WithClientLogger(logger.Logger()),

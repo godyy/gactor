@@ -243,6 +243,7 @@ func main() {
 	}
 
 	s.svc = gactor.NewService(&gactor.ServiceConfig{
+		NodeId: consts.ServerNodeId,
 		ActorConfig: gactor.ActorConfig{
 			ActorDefines:        define.Defines,
 			ClientActorCategory: consts.CategoryUser,

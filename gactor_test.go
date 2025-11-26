@@ -77,12 +77,13 @@ func TestService(t *testing.T) {
 	}
 	svcHandler := &testServiceHandler{
 		testMetaDriver:  metaDriver,
-		testNetAgent:    &testNetAgent{nodeId: "test"},
+		testNetAgent:    &testNetAgent{},
 		testPacketCodec: &testPacketCodec{},
 		TimeSystem:      DefTimeSystem,
 	}
 
 	svcConfig := &ServiceConfig{
+		NodeId: "test",
 		ActorConfig: ActorConfig{
 			ActorDefines: actorDefines,
 		},
@@ -138,11 +139,6 @@ func (md *testMetaDriver) GetMeta(uid ActorUID) (*Meta, error) {
 }
 
 type testNetAgent struct {
-	nodeId string
-}
-
-func (na *testNetAgent) NodeId() string {
-	return na.nodeId
 }
 
 func (na *testNetAgent) Send(ctx context.Context, nodeId string, b []byte) error {
@@ -282,8 +278,6 @@ func (a *testActor) GetActor() Actor {
 }
 
 func (a *testActor) OnStart() error {
-	var aa *testActor
-	aa.name = "123"
 	a.name = "test:" + a.ActorUID().String()
 	a.StartTimer(100*time.Millisecond, true, nil, func(args *ActorTimerArgs) {
 		ta := args.Actor.Behavior().(*testActor)

@@ -37,6 +37,9 @@ type ServiceHandler interface {
 
 // ServiceConfig Service 配置.
 type ServiceConfig struct {
+	// NodeId 服务所处节点ID.
+	NodeId string
+
 	// ActorConfig Actor 配置.
 	ActorConfig
 
@@ -60,6 +63,10 @@ type ServiceConfig struct {
 }
 
 func (c *ServiceConfig) init() {
+	if c.NodeId == "" {
+		panic("gactor: ServiceConfig: NodeId not specified")
+	}
+
 	c.ActorConfig.init()
 	c.TimerConfig.init()
 	c.RPCConfig.init()
@@ -197,7 +204,7 @@ func NewService(cfg *ServiceConfig, option ...ServiceOption) *Service {
 
 // nodeId 返回本地节点ID.
 func (s *Service) nodeId() string {
-	return s.cfg.Handler.GetNetAgent().NodeId()
+	return s.cfg.NodeId
 }
 
 // initLogger 初始化日志工具.
