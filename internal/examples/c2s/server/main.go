@@ -83,7 +83,7 @@ func (s *server) NodeId() string {
 }
 
 // SendPacket 发送数据包 p 到 nodeId 指定的节点.
-func (s *server) Send(ctx context.Context, nodeId string, b []byte) error {
+func (s *server) Send2Node(ctx context.Context, nodeId string, b []byte) error {
 	return s.agent.Send2Node(ctx, nodeId, b)
 }
 

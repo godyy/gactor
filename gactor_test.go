@@ -141,7 +141,7 @@ func (md *testMetaDriver) GetMeta(uid ActorUID) (*Meta, error) {
 type testNetAgent struct {
 }
 
-func (na *testNetAgent) Send(ctx context.Context, nodeId string, b []byte) error {
+func (na *testNetAgent) Send2Node(ctx context.Context, nodeId string, b []byte) error {
 	return nil
 }
 

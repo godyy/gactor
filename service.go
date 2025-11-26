@@ -392,7 +392,7 @@ func (s *Service) freeBuffer(buf *Buffer) {
 
 // send 发送字节数据.
 func (s *Service) send(ctx context.Context, nodeId string, b []byte) error {
-	return s.cfg.Handler.GetNetAgent().Send(ctx, nodeId, b)
+	return s.cfg.Handler.GetNetAgent().Send2Node(ctx, nodeId, b)
 }
 
 // sendLocalPacket 发送本地数据包.

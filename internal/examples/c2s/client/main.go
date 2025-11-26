@@ -74,7 +74,7 @@ func (c *client) NodeId() string {
 }
 
 // SendBytes 发送字节流到 nodeId 指定的节点.
-func (c *client) Send(ctx context.Context, nodeId string, b []byte) error {
+func (c *client) Send2Node(ctx context.Context, nodeId string, b []byte) error {
 	return c.agent.Send2Node(ctx, nodeId, b)
 }
 
