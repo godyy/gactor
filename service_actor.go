@@ -131,22 +131,11 @@ func (s *Service) StartActor(ctx context.Context, uid ActorUID) error {
 	}
 	defer s.unlockState(true)
 
-	// 获取 Actor 所在节点信息.
-	nodeId, err := s.getNodeIdOfActor(uid)
-	if err != nil {
-		return err
-	}
-
-	// 判断 Actor 是否部署在其它节点上.
-	if nodeId != s.nodeId() {
-		return ErrActorDeployedOnOtherNode
-	}
-
 	// 投递消息.
 	msg := &messageCheckAlive{
 		done: make(chan error, 1),
 	}
-	if err := s.send2Actor(ctx, uid, msg); err != nil {
+	if err := s.send2LocalActor(ctx, uid, msg, true); err != nil {
 		return err
 	}
 
@@ -347,8 +336,19 @@ func (s *Service) getNodeIdOfActor(uid ActorUID) (string, error) {
 	return getNodeIdOfActor(s.cfg.Handler.GetMetaDriver(), uid)
 }
 
-// send2Actor 发送消息 msg 到 uid 指定的 Actor.
-func (s *Service) send2Actor(ctx context.Context, uid ActorUID, msg message) error {
+// send2LocalActor 发送消息 msg 到 uid 指定的本地 Actor.
+func (s *Service) send2LocalActor(ctx context.Context, uid ActorUID, msg message, checkNode bool) error {
+	if checkNode {
+		// 检查 Actor 是否位于当前节点.
+		nodeId, err := s.getNodeIdOfActor(uid)
+		if err != nil {
+			return err
+		}
+		if nodeId != s.nodeId() {
+			return ErrActorDeployedOnOtherNode
+		}
+	}
+
 	// 若 ctx 已超时, 中断后续逻辑.
 	if err := ctx.Err(); err != nil {
 		return err
@@ -449,7 +449,7 @@ func (s *Service) cast(ctx context.Context, from, to ActorUID, payload any) erro
 	buf := Buffer{}
 	buf.SetBuf(encodedPayload)
 	request := newContext(s, newCastRequest(s.nodeId(), seq, from, buf))
-	if err := s.send2Actor(ctx, to, request); err != nil {
+	if err := s.send2LocalActor(ctx, to, request, false); err != nil {
 		request.release()
 		s.monitorCastActionSend2LocalErr(err)
 		return err

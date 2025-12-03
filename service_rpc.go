@@ -105,7 +105,7 @@ func (s *Service) doRPC(ctx context.Context, from ActorUID, to ActorUID, params 
 			} else {
 				req = newContextWithCtx(ctx, s, newRPCRequest(toNodeId, seq, callReqId, from, buf, deadline.UnixMilli()))
 			}
-			if err = s.send2Actor(ctx, to, req); err != nil {
+			if err = s.send2LocalActor(ctx, to, req, false); err != nil {
 				req.release()
 				s.monitorRPCActionSend2LocalErr(err)
 			}
