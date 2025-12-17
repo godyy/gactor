@@ -399,10 +399,9 @@ func main() {
 	}
 
 	metaDriver := common.NewMetaDriver()
-	metaDriver.AddMeta(gactor.ActorUID{consts.CategoryUser, 1}, &gactor.Meta{
-		Category:   consts.CategoryUser,
-		ID:         1,
-		Deployment: gactor.NewDeploymentOnNode(consts.ServerNodeId),
+	metaDriver.AddMeta(gactor.ActorUID{consts.CategoryUser, 1}, &common.Meta{
+		UID:    gactor.ActorUID{Category: consts.CategoryUser, ID: 1},
+		NodeId: consts.ServerNodeId,
 	})
 
 	u := newUser(1, "user1", "password1")

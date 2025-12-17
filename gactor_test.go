@@ -66,13 +66,12 @@ func TestService(t *testing.T) {
 	}
 
 	metaDriver := &testMetaDriver{
-		metaMap: make(map[ActorUID]*Meta, len(actorUIDs)),
+		metaMap: make(map[ActorUID]*testMeta, len(actorUIDs)),
 	}
 	for _, uid := range actorUIDs {
-		metaDriver.metaMap[uid] = &Meta{
-			Category:   uid.Category,
-			ID:         uid.ID,
-			Deployment: NewDeploymentOnNode("test"),
+		metaDriver.metaMap[uid] = &testMeta{
+			uid:    uid,
+			nodeId: "test",
 		}
 	}
 	svcHandler := &testServiceHandler{
@@ -126,11 +125,24 @@ func TestService(t *testing.T) {
 	}
 }
 
-type testMetaDriver struct {
-	metaMap map[ActorUID]*Meta
+type testMeta struct {
+	uid    ActorUID
+	nodeId string
 }
 
-func (md *testMetaDriver) GetMeta(uid ActorUID) (*Meta, error) {
+func (m *testMeta) GetActorUID() ActorUID {
+	return m.uid
+}
+
+func (m *testMeta) GetNodeId() string {
+	return m.nodeId
+}
+
+type testMetaDriver struct {
+	metaMap map[ActorUID]*testMeta
+}
+
+func (md *testMetaDriver) GetMeta(uid ActorUID) (Meta, error) {
 	meta, ok := md.metaMap[uid]
 	if !ok {
 		return nil, ErrMetaNotExists

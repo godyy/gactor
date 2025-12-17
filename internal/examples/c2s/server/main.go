@@ -181,15 +181,13 @@ func main() {
 	}
 
 	metaDriver := common.NewMetaDriver()
-	metaDriver.AddMeta(gactor.ActorUID{consts.CategoryServer, actors.ServerId}, &gactor.Meta{
-		Category:   consts.CategoryServer,
-		ID:         actors.ServerId,
-		Deployment: gactor.NewDeploymentOnNode(consts.ServerNodeId),
+	metaDriver.AddMeta(gactor.ActorUID{consts.CategoryServer, actors.ServerId}, &common.Meta{
+		UID:    gactor.ActorUID{Category: consts.CategoryServer, ID: actors.ServerId},
+		NodeId: consts.ServerNodeId,
 	})
-	metaDriver.AddMeta(gactor.ActorUID{consts.CategoryUser, 1}, &gactor.Meta{
-		Category:   consts.CategoryUser,
-		ID:         1,
-		Deployment: gactor.NewDeploymentOnNode(consts.ServerNodeId),
+	metaDriver.AddMeta(gactor.ActorUID{consts.CategoryUser, 1}, &common.Meta{
+		UID:    gactor.ActorUID{Category: consts.CategoryUser, ID: 1},
+		NodeId: consts.ServerNodeId,
 	})
 
 	s := &server{

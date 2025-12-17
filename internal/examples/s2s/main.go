@@ -8,24 +8,17 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/godyy/gactor/internal/examples/s2s/handlers/server"
-	"github.com/godyy/gactor/internal/examples/s2s/handlers/user"
-	"github.com/godyy/gtimewheel"
-
-	"github.com/godyy/gcluster/center"
-
-	pkgerrors "github.com/pkg/errors"
-
-	"github.com/godyy/gactor/internal/examples/s2s/logger"
-
-	"github.com/godyy/gactor/internal/examples/s2s/message"
-
-	"github.com/godyy/gcluster/net"
-
-	"github.com/godyy/gcluster"
-
 	"github.com/godyy/gactor"
 	"github.com/godyy/gactor/internal/examples/s2s/actors"
+	"github.com/godyy/gactor/internal/examples/s2s/handlers/server"
+	"github.com/godyy/gactor/internal/examples/s2s/handlers/user"
+	"github.com/godyy/gactor/internal/examples/s2s/logger"
+	"github.com/godyy/gactor/internal/examples/s2s/message"
+	"github.com/godyy/gcluster"
+	"github.com/godyy/gcluster/center"
+	"github.com/godyy/gcluster/net"
+	"github.com/godyy/gtimewheel"
+	pkgerrors "github.com/pkg/errors"
 )
 
 const (
@@ -67,23 +60,38 @@ var (
 	}
 
 	s1, s2  *service
-	metaMap map[gactor.ActorUID]*gactor.Meta
+	metaMap map[gactor.ActorUID]*s2sMeta
 	userIds []gactor.ActorUID
 )
+
+type s2sMeta struct {
+	uid    gactor.ActorUID
+	nodeId string
+}
+
+func (m *s2sMeta) GetActorUID() gactor.ActorUID {
+	return m.uid
+}
+
+func (m *s2sMeta) GetNodeId() string {
+	return m.nodeId
+}
 
 func main() {
 	if err := logger.Init(); err != nil {
 		panic(pkgerrors.WithMessage(err, "init logger"))
 	}
 
-	metaMap = make(map[gactor.ActorUID]*gactor.Meta)
+	metaMap = make(map[gactor.ActorUID]*s2sMeta)
 	metaMap[gactor.ActorUID{
 		Category: actors.CategoryServer,
 		ID:       1,
-	}] = &gactor.Meta{
-		Category:   actors.CategoryServer,
-		ID:         1,
-		Deployment: gactor.NewDeploymentOnNode(s2NodeId),
+	}] = &s2sMeta{
+		uid: gactor.ActorUID{
+			Category: actors.CategoryServer,
+			ID:       1,
+		},
+		nodeId: s2NodeId,
 	}
 	userIds = make([]gactor.ActorUID, 8000)
 	for i := 0; i < 8000; i++ {
@@ -92,10 +100,9 @@ func main() {
 			ID:       int64(i),
 		}
 		userIds[i] = uid
-		metaMap[uid] = &gactor.Meta{
-			Category:   uid.Category,
-			ID:         uid.ID,
-			Deployment: gactor.NewDeploymentOnNode(s1NodeId),
+		metaMap[uid] = &s2sMeta{
+			uid:    uid,
+			nodeId: s1NodeId,
 		}
 	}
 
@@ -285,10 +292,10 @@ func (c *nodeCenter) GetNode(nodeId string) (center.Node, error) {
 }
 
 type metaDriver struct {
-	metaMap map[gactor.ActorUID]*gactor.Meta
+	metaMap map[gactor.ActorUID]*s2sMeta
 }
 
-func (d *metaDriver) GetMeta(uid gactor.ActorUID) (*gactor.Meta, error) {
+func (d *metaDriver) GetMeta(uid gactor.ActorUID) (gactor.Meta, error) {
 	meta, ok := d.metaMap[uid]
 	if !ok {
 		return nil, gactor.ErrMetaNotExists
