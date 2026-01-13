@@ -19,8 +19,11 @@ var ErrBytesEscape = errors.New("gactor: bytes escape")
 
 // ServiceHandler 封装 Service 处理器需要实现的功能.
 type ServiceHandler interface {
-	// GetMetaDriver 获取 Meta 数据驱动.
-	GetMetaDriver() MetaDriver
+	// GetActorRegistry 获取 Actor 注册表.
+	GetActorRegistry() ActorRegistry
+
+	// GetActorRouter 获取 Actor 路由.
+	GetActorRouter() ActorRouter
 
 	// GetNetAgent 获取网络代理.
 	GetNetAgent() NetAgent
@@ -83,8 +86,11 @@ func (c *ServiceConfig) init() {
 		panic("gactor: ServiceConfig: Handler not specified")
 	}
 
-	if c.Handler.GetMetaDriver() == nil {
-		panic("gactor: ServiceConfig: Handler has no MetaDriver")
+	if c.Handler.GetActorRegistry() == nil {
+		panic("gactor: ServiceConfig: Handler has no ActorRegistry")
+	}
+	if c.Handler.GetActorRouter() == nil {
+		panic("gactor: ServiceConfig: Handler has no ActorRouter")
 	}
 
 	if c.Handler.GetNetAgent() == nil {

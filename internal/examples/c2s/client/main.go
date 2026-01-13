@@ -21,7 +21,7 @@ import (
 )
 
 type client struct {
-	*common.MetaDriver
+	*common.ActorRegistry
 	agent *gcluster.Agent
 	cli   *gactor.Client
 	users map[int64]*user
@@ -56,8 +56,8 @@ func (c *client) OnNodeBytes(nodeId string, b []byte) error {
 	return c.cli.HandlePacket(nodeId, b)
 }
 
-func (c *client) GetMetaDriver() gactor.MetaDriver {
-	return c.MetaDriver
+func (c *client) GetActorRegistry() gactor.ActorRegistry {
+	return c.ActorRegistry
 }
 
 func (c *client) GetNetAgent() gactor.NetAgent {
@@ -398,16 +398,17 @@ func main() {
 		panic(err)
 	}
 
-	metaDriver := common.NewMetaDriver()
-	metaDriver.AddMeta(gactor.ActorUID{consts.CategoryUser, 1}, &common.Meta{
-		UID:    gactor.ActorUID{Category: consts.CategoryUser, ID: 1},
-		NodeId: consts.ServerNodeId,
-	})
-
 	u := newUser(1, "user1", "password1")
 
+	actorRegistry := common.NewActorRegistry()
+	actorRegistry.RegisterActor(context.Background(), gactor.ActorRegisterParams{
+		UID:     gactor.ActorUID{Category: consts.CategoryUser, ID: u.uid},
+		NodeId:  consts.ServerNodeId,
+		LeaseId: "",
+	})
+
 	cli = &client{
-		MetaDriver: metaDriver,
+		ActorRegistry: actorRegistry,
 		users: map[int64]*user{
 			u.uid: u,
 		},

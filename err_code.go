@@ -14,8 +14,9 @@ const (
 	errCodeOK            = errCode(0) // OK.
 	errCodeInternalError = errCode(1) // 内部错误.
 
-	errCodeEncodePacketFailed = errCode(101) // 编码数据包失败.
-	errCodeDecodePacketFailed = errCode(102) // 解码数据包失败.
+	errCodeEncodePacketFailed   = errCode(101) // 编码数据包失败.
+	errCodeDecodePacketFailed   = errCode(102) // 解码数据包失败.
+	errCodeActorRegisterByOther = errCode(103) // Actor 被其它节点注册.
 
 	errCodeStartActorFailed  = errCode(201) // 启动 Actor 失败.
 	errCodeActorLoopError    = errCode(202) // Actor 循环错误.
@@ -25,14 +26,15 @@ const (
 
 // errCodeStrings 错误码文本.
 var errCodeStrings = map[errCode]string{
-	errCodeOK:                 "ok",
-	errCodeInternalError:      "internal error",
-	errCodeEncodePacketFailed: "encode packet failed",
-	errCodeDecodePacketFailed: "decode packet failed",
-	errCodeStartActorFailed:   "start actor failed",
-	errCodeActorLoopError:     "actor loop error",
-	errCodeActorNotConnect:    "actor not connect",
-	errCodeActorOtherConnect:  "actor other connect",
+	errCodeOK:                   "ok",
+	errCodeInternalError:        "internal error",
+	errCodeActorRegisterByOther: "actor register by other",
+	errCodeEncodePacketFailed:   "encode packet failed",
+	errCodeDecodePacketFailed:   "decode packet failed",
+	errCodeStartActorFailed:     "start actor failed",
+	errCodeActorLoopError:       "actor loop error",
+	errCodeActorNotConnect:      "actor not connect",
+	errCodeActorOtherConnect:    "actor other connect",
 }
 
 func (ec errCode) String() string {

@@ -21,7 +21,7 @@ type IActorDefine interface {
 	common() *ActorDefineCommon
 
 	// createActor 创建 Actor.
-	createActor(svc *Service, id int64) actorImpl
+	createActor(svc *Service, id int64, leaseId string) actorImpl
 }
 
 // actorDefineSet Actor 定义集合.
@@ -103,7 +103,9 @@ type ActorDefineCommon struct {
 	// 后才能继续排队. 默认值 1.
 	MaxCompletedAsyncRPCAmount int
 
-	// RecycleTime 表示 Actor 的回收时间. Actor 空闲超过该时间后会被系统回收.
+	// RecycleTime 表示 Actor 的回收时间.
+	// 若大于0, Actor 空闲超过该时间后会被系统回收.
+	// 否则, 不会被系统回收.(适用于静态 Actor)
 	RecycleTime time.Duration
 
 	// Handler Actor 请求处理器.
@@ -134,6 +136,11 @@ func (ad *ActorDefineCommon) init() error {
 	return nil
 }
 
+// needRecycle 是否需要回收.
+func (ad *ActorDefineCommon) needRecycle() bool {
+	return ad.RecycleTime > 0
+}
+
 // ActorDefine Actor 定义.
 type ActorDefine struct {
 	*ActorDefineCommon
@@ -162,9 +169,9 @@ func (ad *ActorDefine) common() *ActorDefineCommon {
 	return ad.ActorDefineCommon
 }
 
-func (ad *ActorDefine) createActor(svc *Service, id int64) actorImpl {
+func (ad *ActorDefine) createActor(svc *Service, id int64, leaseId string) actorImpl {
 	a := &actor{
-		actorCore: newActorCore(ad.ActorDefineCommon, id, svc),
+		actorCore: newActorCore(ad.ActorDefineCommon, id, leaseId, svc),
 	}
 	a.behavior = ad.BehaviorCreator(a)
 	return a
@@ -198,9 +205,9 @@ func (ad *CActorDefine) common() *ActorDefineCommon {
 	return ad.ActorDefineCommon
 }
 
-func (ad *CActorDefine) createActor(svc *Service, id int64) actorImpl {
+func (ad *CActorDefine) createActor(svc *Service, id int64, leaseId string) actorImpl {
 	a := &cActor{
-		actorCore: newActorCore(ad.ActorDefineCommon, id, svc),
+		actorCore: newActorCore(ad.ActorDefineCommon, id, leaseId, svc),
 	}
 	a.behavior = ad.BehaviorCreator(a)
 	return a

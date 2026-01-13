@@ -38,6 +38,7 @@ func (s *Service) startRpcManager() {
 func (s *Service) doRPC(ctx context.Context, from ActorUID, to ActorUID, params any, cb RPCFunc, async bool) error {
 	var (
 		toNodeId string
+		leaseId  string
 		b        []byte
 		err      error
 	)
@@ -58,7 +59,7 @@ func (s *Service) doRPC(ctx context.Context, from ActorUID, to ActorUID, params 
 	}
 
 	// 获取目标 Actor 所在节点信息.
-	toNodeId, err = s.getNodeIdOfActor(to)
+	toNodeId, leaseId, err = s.resolveNodeOfActor(ctx, actorNodeModeRouter, to)
 	if err != nil {
 		s.monitorRPCAction(MonitorCANodeInfoErr)
 		return err
@@ -105,7 +106,7 @@ func (s *Service) doRPC(ctx context.Context, from ActorUID, to ActorUID, params 
 			} else {
 				req = newContextWithCtx(ctx, s, newRPCRequest(toNodeId, seq, callReqId, from, buf, deadline.UnixMilli()))
 			}
-			if err = s.send2LocalActor(ctx, to, req, false); err != nil {
+			if err = s.send2LocalActor(ctx, to, req, leaseId); err != nil {
 				req.release()
 				s.monitorRPCActionSend2LocalErr(err)
 			}

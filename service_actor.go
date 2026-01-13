@@ -3,6 +3,7 @@ package gactor
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -19,6 +20,15 @@ type ActorConfig struct {
 	// 一般情况下, 客户端都与同一分类的actor通信.
 	// PS: 该分类必须已在 ActorDefines 中定义.
 	ClientActorCategory uint16
+
+	// RegistryTTL 注册表存续时间, 秒级.
+	// 默认值 60s.
+	RegistryTTL int64
+
+	// KeepAliveInterval 保活间隔.
+	// 不能 >= RegistryTTL(s).
+	// 默认值 (RegistryTTL / 3)(s).
+	KeepAliveInterval time.Duration
 }
 
 func (c *ActorConfig) init() {
@@ -38,6 +48,16 @@ func (c *ActorConfig) init() {
 		if !clientCategoryValid {
 			panic("gactor: ActorConfig: ClientActorCategory not defined in ActorDefines")
 		}
+	}
+
+	if c.RegistryTTL <= 0 {
+		c.RegistryTTL = 60
+	}
+
+	if c.KeepAliveInterval <= 0 {
+		c.KeepAliveInterval = time.Duration(c.RegistryTTL/3) * time.Second
+	} else if c.KeepAliveInterval >= time.Duration(c.RegistryTTL)*time.Second {
+		panic("gactor: ActorConfig: KeepAliveInterval must be less than RegistryTTL")
 	}
 }
 
@@ -95,7 +115,7 @@ func (s *Service) stopPriorityActors(priorityIndex int) bool {
 func (s *Service) stopCategoryActors(categoryActors *categoryActors) bool {
 	stopped := true
 	categoryActors.actors.Traverse(func(id int64, actor actorImpl) bool {
-		_ = actor.stop()
+		_ = actor.stop(true)
 		stopped = false
 		return true
 	})
@@ -135,7 +155,7 @@ func (s *Service) StartActor(ctx context.Context, uid ActorUID) error {
 	msg := &messageCheckAlive{
 		done: make(chan error, 1),
 	}
-	if err := s.send2LocalActor(ctx, uid, msg, true); err != nil {
+	if err := s.send2LocalActor(ctx, uid, msg, ""); err != nil {
 		return err
 	}
 
@@ -178,7 +198,8 @@ func (s *Service) getCategoryActorsByCategory(category uint16) *categoryActors {
 }
 
 // startActor 启动 uid 指定的 Actor.
-func (s *Service) startActor(ctx context.Context, uid ActorUID) (actorImpl, error) {
+// 如果 leaseId 为空, 需要同时注册 Actor.
+func (s *Service) startActor(ctx context.Context, uid ActorUID, leaeId string) (actorImpl, error) {
 	// 获取 Actor 定义.
 	define := s.getDefine(uid.Category)
 	if define == nil {
@@ -213,8 +234,9 @@ func (s *Service) startActor(ctx context.Context, uid ActorUID) (actorImpl, erro
 			// 若添加成功, 执行启动逻辑.
 
 			starter = &actorStarter{
-				uid:  uid,
-				done: make(chan struct{}, 1),
+				uid:     uid,
+				leaseId: leaeId,
+				done:    make(chan struct{}, 1),
 			}
 			actual, loaded := categoryActors.addStarter(uid.ID, starter)
 			if loaded {
@@ -326,29 +348,95 @@ func (s *Service) getActor(uid ActorUID) (actorImpl, error) {
 }
 
 // newActorCore 创建 Actor.
-func (s *Service) createActor(uid ActorUID) actorImpl {
+func (s *Service) createActor(uid ActorUID, leaseId string) actorImpl {
 	actorDefine := s.defineMap[uid.Category]
-	return actorDefine.createActor(s, uid.ID)
+	return actorDefine.createActor(s, uid.ID, leaseId)
 }
 
-// getNodeIdOfActor 获取 Actor 所在节点ID.
-func (s *Service) getNodeIdOfActor(uid ActorUID) (string, error) {
-	return getNodeIdOfActor(s.cfg.Handler.GetMetaDriver(), uid)
+const (
+	// actorNodeModeLocal actor应该启动在本地，无需路由，直接注册，注册失败直接返回错误.
+	// 适用于静态类actor和远端通过路由访问本地的动态类actor.
+	actorNodeModeLocal = 1
+
+	// actorNodeModeRouter 优先查询actor是否已注册，若未注册，查询路由，并预注册.
+	// 适用于本地访问动态类actor.
+	actorNodeModeRouter = 2
+)
+
+// resolveNodeOfActor 解析 Actor 所在节点ID.
+func (s *Service) resolveNodeOfActor(ctx context.Context, mode int, uid ActorUID) (nodeId string, leaseId string, err error) {
+	define := s.getDefine(uid.Category)
+	if define == nil {
+		return "", "", ErrActorDefineNotExists
+	}
+
+	registry := s.cfg.Handler.GetActorRegistry()
+	router := s.cfg.Handler.GetActorRouter()
+
+	switch mode {
+	case actorNodeModeLocal:
+		var params ActorRegisterParams
+		var result ActorRegisterResult
+		leaseId = registry.MakeLeaseID()
+		params.UID = uid
+		params.NodeId = s.nodeId()
+		params.LeaseId = leaseId
+		if define.common().needRecycle() {
+			params.TTL = s.cfg.RegistryTTL
+		}
+		if result, err = registry.RegisterActor(ctx, params); err != nil {
+			if errors.Is(err, ErrActorAlreadyRegistered) {
+				err = errCodeActorRegisterByOther
+			}
+			return "", "", err
+		}
+		nodeId = result.NodeId
+
+	case actorNodeModeRouter:
+		location, err := registry.GetActorLocation(ctx, uid)
+		if location.ExpireAt <= 0 {
+			return location.NodeId, "", nil
+		}
+		if err == nil && location.ExpireAt-time.Now().Unix() > actorExpireThreshold {
+			return location.NodeId, "", nil
+		}
+		if err != nil && !errors.Is(err, ErrActorNotExists) {
+			return "", "", err
+		}
+		nodeId = location.NodeId
+		if err != nil || location.ExpireAt <= time.Now().Unix() {
+			nodeId, err = router.PickActorNode(uid)
+			if err != nil {
+				return "", "", err
+			}
+		}
+		var params ActorRegisterParams
+		var result ActorRegisterResult
+		leaseId = registry.MakeLeaseID()
+		params.UID = uid
+		params.NodeId = s.nodeId()
+		params.LeaseId = leaseId
+		if define.common().needRecycle() {
+			params.TTL = s.cfg.RegistryTTL
+		}
+		result, err = registry.RegisterActor(ctx, params)
+		if err != nil {
+			if errors.Is(err, ErrActorAlreadyRegistered) {
+				return result.NodeId, "", nil
+			}
+			return "", "", err
+		}
+	default:
+		err = fmt.Errorf("unknown actor node mode: %d", mode)
+	}
+
+	return
 }
 
 // send2LocalActor 发送消息 msg 到 uid 指定的本地 Actor.
-func (s *Service) send2LocalActor(ctx context.Context, uid ActorUID, msg message, checkNode bool) error {
-	if checkNode {
-		// 检查 Actor 是否位于当前节点.
-		nodeId, err := s.getNodeIdOfActor(uid)
-		if err != nil {
-			return err
-		}
-		if nodeId != s.nodeId() {
-			return ErrActorDeployedOnOtherNode
-		}
-	}
-
+// leaseId 表示 actor 当前的租约ID. 若 leaseId 为空, 并且 actor 未启动,
+// 则需要先注册 actor, 注册成功方可启动 actor.
+func (s *Service) send2LocalActor(ctx context.Context, uid ActorUID, msg message, leaseId string) error {
 	// 若 ctx 已超时, 中断后续逻辑.
 	if err := ctx.Err(); err != nil {
 		return err
@@ -361,10 +449,18 @@ func (s *Service) send2LocalActor(ctx context.Context, uid ActorUID, msg message
 		defer cancel()
 	}
 
-	// 启动 Actor.
-	actor, err := s.startActor(ctx, uid)
+	// 尝试引用本地的actor.
+	actor, err := s.refActor(uid)
 	if err != nil {
 		return err
+	}
+
+	// 若 Actor 不存在, 尝试启动 Actor.
+	if actor == nil {
+		actor, err = s.startActor(ctx, uid, leaseId)
+		if err != nil {
+			return err
+		}
 	}
 
 	// 解除引用.
@@ -397,6 +493,7 @@ func (s *Service) onActorStopped(actor actorImpl) {
 func (s *Service) cast(ctx context.Context, from, to ActorUID, payload any) error {
 	var (
 		toNodeId string
+		leaseId  string
 		err      error
 	)
 
@@ -414,7 +511,7 @@ func (s *Service) cast(ctx context.Context, from, to ActorUID, payload any) erro
 	}
 
 	// 获取目标 Actor 所在节点信息.
-	toNodeId, err = s.getNodeIdOfActor(to)
+	toNodeId, leaseId, err = s.resolveNodeOfActor(ctx, actorNodeModeRouter, to)
 	if err != nil {
 		s.monitorCastAction(MonitorCANodeInfoErr)
 		return err
@@ -449,7 +546,7 @@ func (s *Service) cast(ctx context.Context, from, to ActorUID, payload any) erro
 	buf := Buffer{}
 	buf.SetBuf(encodedPayload)
 	request := newContext(s, newCastRequest(s.nodeId(), seq, from, buf))
-	if err := s.send2LocalActor(ctx, to, request, false); err != nil {
+	if err := s.send2LocalActor(ctx, to, request, leaseId); err != nil {
 		request.release()
 		s.monitorCastActionSend2LocalErr(err)
 		return err
@@ -482,6 +579,7 @@ type actorStarter struct {
 	state    int32         // 状态, 0:初始化 1:启动
 	refCount int           // 引用计数.
 	uid      ActorUID      // Actor 唯一ID
+	leaseId  string        // 租约ID.
 	done     chan struct{} // 结束信号.
 	actor    actorImpl     // Actor.
 	err      error         // Error.
@@ -530,11 +628,18 @@ func (s *actorStarter) start(svc *Service) {
 
 	svc.getLogger().DebugFields("actorStarter start", svc.lfdActorUID("uid", s.uid))
 
+	// 注册 Actor.
+	if err := s.registerActor(svc); err != nil {
+		svc.getLogger().ErrorFields("reigster local actor failed", svc.lfdActorUID("uid", s.uid), lfdError(err))
+		s.complete(nil, err)
+		return
+	}
+
 	categoryActors := svc.getCategoryActorsByCategory(s.uid.Category)
 	defer categoryActors.delStarter(s.uid.ID)
 
 	// 创建并启动 Actor.
-	actor := svc.createActor(s.uid)
+	actor := svc.createActor(s.uid, s.leaseId)
 	if err := actor.start(); err != nil {
 		svc.getLogger().ErrorFields("actor start failed", svc.lfdActorUID("uid", s.uid), lfdError(err))
 		s.complete(nil, err)
@@ -557,6 +662,22 @@ func (s *actorStarter) start(svc *Service) {
 	}
 
 	s.complete(actor, err)
+}
+
+// registerActor 注册 Actor.
+func (s *actorStarter) registerActor(svc *Service) error {
+	if s.leaseId != "" {
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), actorReigsterTimeout)
+	defer cancel()
+	_, leasId, err := svc.resolveNodeOfActor(ctx, actorNodeModeLocal, s.uid)
+	if err != nil {
+		return err
+	}
+	s.leaseId = leasId
+	return nil
 }
 
 // doStop

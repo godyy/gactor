@@ -23,7 +23,9 @@ import (
 )
 
 type server struct {
-	*common.MetaDriver
+	*common.ActorRegistry
+	*common.ActorRouter
+
 	agent   *gcluster.Agent
 	svc     *gactor.Service
 	timeSys gactor.TimeSystem
@@ -33,6 +35,8 @@ func (s *server) start() error {
 	if err := s.svc.Start(); err != nil {
 		return err
 	}
+
+	s.svc.StartActor(context.Background(), gactor.ActorUID{Category: consts.CategoryServer, ID: actors.ServerId})
 
 	if err := s.agent.Start(); err != nil {
 		return err
@@ -57,8 +61,12 @@ func (s *server) OnNodeBytes(remoteNodeId string, b []byte) error {
 	return s.svc.HandlePacket(remoteNodeId, b)
 }
 
-func (s *server) GetMetaDriver() gactor.MetaDriver {
-	return s.MetaDriver
+func (s *server) GetActorRegistry() gactor.ActorRegistry {
+	return s.ActorRegistry
+}
+
+func (s *server) GetActorRouter() gactor.ActorRouter {
+	return s.ActorRouter
 }
 
 func (s *server) GetNetAgent() gactor.NetAgent {
@@ -180,19 +188,15 @@ func main() {
 		panic(err)
 	}
 
-	metaDriver := common.NewMetaDriver()
-	metaDriver.AddMeta(gactor.ActorUID{consts.CategoryServer, actors.ServerId}, &common.Meta{
-		UID:    gactor.ActorUID{Category: consts.CategoryServer, ID: actors.ServerId},
-		NodeId: consts.ServerNodeId,
-	})
-	metaDriver.AddMeta(gactor.ActorUID{consts.CategoryUser, 1}, &common.Meta{
-		UID:    gactor.ActorUID{Category: consts.CategoryUser, ID: 1},
-		NodeId: consts.ServerNodeId,
-	})
+	actorRouter := common.NewActorRouter()
+	actorRouter.AddNode(gactor.ActorUID{Category: consts.CategoryServer, ID: actors.ServerId}, consts.ServerNodeId)
+	actorRouter.AddNode(gactor.ActorUID{Category: consts.CategoryUser, ID: 1}, consts.ServerNodeId)
+	actorRegistry := common.NewActorRegistry()
 
 	s := &server{
-		MetaDriver: metaDriver,
-		timeSys:    gactor.DefTimeSystem,
+		ActorRegistry: actorRegistry,
+		ActorRouter:   actorRouter,
+		timeSys:       gactor.DefTimeSystem,
 	}
 
 	center := common.NewCenter()
@@ -245,6 +249,7 @@ func main() {
 		ActorConfig: gactor.ActorConfig{
 			ActorDefines:        define.Defines,
 			ClientActorCategory: consts.CategoryUser,
+			RegistryTTL:         10,
 		},
 		TimerConfig: gactor.TimerConfig{
 			TimeWheelLevels: []gtimewheel.LevelConfig{

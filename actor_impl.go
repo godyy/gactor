@@ -16,7 +16,7 @@ type actorImpl interface {
 	Actor
 	core() *actorCore
 	start() error
-	stop() error
+	stop(shutdown bool) error
 	stopped()
 }
 
@@ -34,32 +34,15 @@ func actorStart(a actorImpl) error {
 	return nil
 }
 
-// actorStopWithErr 因为错误 err 停机.
-func actorStopWithErr(a actorImpl, err error) {
-	core := a.core()
-
-	if err := core.stopWithErr(); err != nil {
-		core.getLogger().ErrorFields("stopWithErr failed", lfdError(err))
-		return
-	}
-
-	// 清空信箱.
-	actorDrain(a, err)
-
-	actorStopped(a)
-}
-
-// actorStopped Actor 最终停机逻辑.
-func actorStopped(a actorImpl) {
-	core := a.core()
-	svc := core.service()
-	a.stopped()
-	svc.onActorStopped(a)
-}
-
 // actorBeforeLoop 主循环前置逻辑.
 func actorBeforeLoop(a actorImpl) error {
 	core := a.core()
+	svc := core.service()
+
+	// 启动存续定时器.
+	if core.needRecycle() {
+		core.keepAliveTimerId = a.StartTimer(svc.getCfg().KeepAliveInterval, true, nil, actorOnKeepAlive)
+	}
 
 	// 启动行为.
 	if err := a.Behavior().OnStart(); err != nil {
@@ -99,8 +82,7 @@ func actorLoop(a actorImpl) {
 			core.resetRecycleTimer(true)
 
 			// 处理消息.
-			msg.handle(a)
-			msg.release()
+			actorHandleMsg(a, msg)
 
 			// 若信箱已清空, 重置回收定时器.
 			if len(core.messageBox) == 0 {
@@ -134,15 +116,68 @@ func actorLoop(a actorImpl) {
 	}
 }
 
-// actorOnRecycle Actor 回收定时器回调.
-func actorOnRecycle(args *ActorTimerArgs) {
-	a := args.Actor.(actorImpl)
-	if args.TID != a.core().recycleTimerId {
+// actorStopWithErr 因为错误 err 停机.
+func actorStopWithErr(a actorImpl, err error) {
+	core := a.core()
+
+	if err := core.stopWithErr(); err != nil {
+		core.getLogger().ErrorFields("stopWithErr failed", lfdError(err))
 		return
 	}
 
-	if err := a.stop(); err != nil {
-		a.core().getLogger().ErrorFields("stop failed on recycle", lfdError(err))
+	// 清空信箱.
+	actorDrain(a, err)
+
+	actorStopped(a)
+}
+
+// actorStopped Actor 最终停机逻辑.
+func actorStopped(a actorImpl) {
+	core := a.core()
+	svc := core.service()
+
+	// 注销 Actor.
+	actorUnregister(a)
+
+	// 注销存续定时器.
+	if core.keepAliveTimerId != TimerIdNone {
+		core.StopTimer(core.keepAliveTimerId)
+		core.keepAliveTimerId = TimerIdNone
+	}
+
+	a.stopped()
+	svc.onActorStopped(a)
+}
+
+// actorUnregister 注销 Actor.
+func actorUnregister(a actorImpl) {
+	core := a.core()
+	svc := core.service()
+	reg := svc.getCfg().Handler.GetActorRegistry()
+
+	// 若设置 actorFlagShutdown 标志, 直接注销.
+	// 否则, 使其在注册表中再存续一小段时间, 方便再次唤醒.
+	if core.hasFlag(actorFlagShutdown) {
+		ctx, cancel := context.WithTimeout(context.Background(), actorReigsterTimeout)
+		defer cancel()
+		if err := reg.UnregisterActor(ctx, ActorUnregisterParams{
+			UID:     core.ActorUID(),
+			NodeId:  svc.nodeId(),
+			LeaseId: core.leaseID,
+		}); err != nil {
+			core.getLogger().ErrorFields("unregister actor failed", lfdError(err))
+		}
+	} else {
+		ctx, cancel := context.WithTimeout(context.Background(), actorReigsterTimeout)
+		defer cancel()
+		if err := reg.KeepActorAlive(ctx, ActorKeepAliveParams{
+			UID:     core.ActorUID(),
+			NodeId:  svc.nodeId(),
+			LeaseId: core.leaseID,
+			TTL:     actorUnregisterThreshold,
+		}); err != nil {
+			core.getLogger().ErrorFields("unregister actor by keep alive failed", lfdError(err))
+		}
 	}
 }
 
@@ -154,11 +189,10 @@ func actorDrain(a actorImpl, err error) {
 		select {
 		case msg := <-core.messageBox:
 			if err == nil {
-				msg.handle(a)
+				actorHandleMsg(a, msg)
 			} else {
-				msg.handleError(a, err)
+				actorHandleMsgErr(a, msg, err)
 			}
-			msg.release()
 		case call := <-core.completedAsyncRPC:
 			actorInvokeAsyncRPCFunc(a, &call)
 		default:
@@ -167,12 +201,33 @@ func actorDrain(a actorImpl, err error) {
 	}
 }
 
+// actorHandleMsg Actor 处理消息.
+func actorHandleMsg(a actorImpl, msg message) {
+	defer recoverAndLog("actor handle msg panic", a.core().getLogger(), func() {
+		a.core().service().monitorActorPanic(a.core().Category)
+	})
+	msg.handle(a)
+	msg.release()
+}
+
+// actorHandleMsgErr Actor 处理消息错误.
+func actorHandleMsgErr(a actorImpl, msg message, err error) {
+	defer recoverAndLog("actor handle msg err panic", a.core().getLogger(), func() {
+		a.core().service().monitorActorPanic(a.core().Category)
+	})
+	msg.handleError(a, err)
+	msg.release()
+}
+
 // actorExecTimer Actor 执行定时器.
 func actorExecTimer(a actorImpl, timer *actorTriggeredTimer) {
 	core := a.core()
 	if !core.isRunning() || !core.service().isRunning() {
 		return
 	}
+	defer recoverAndLog("actor exec timer panic", core.getLogger(), func() {
+		core.service().monitorActorPanic(core.Category)
+	})
 	args := ActorTimerArgs{
 		Actor: a,
 		TID:   timer.tid,
@@ -183,6 +238,9 @@ func actorExecTimer(a actorImpl, timer *actorTriggeredTimer) {
 
 // actorInvokeAsyncRPCFunc 调用异步 RPC 回调.
 func actorInvokeAsyncRPCFunc(a actorImpl, call *actorCompletedAsyncRPC) {
+	defer recoverAndLog("actor invoke async rpc panic", a.core().getLogger(), func() {
+		a.core().service().monitorActorPanic(a.core().Category)
+	})
 	resp := RPCResp{
 		svc:     a.core().service(),
 		payload: call.payload,
@@ -190,6 +248,36 @@ func actorInvokeAsyncRPCFunc(a actorImpl, call *actorCompletedAsyncRPC) {
 	}
 	call.cb(a, &resp)
 	resp.release()
+}
+
+// actorOnRecycle Actor 回收定时器回调.
+func actorOnRecycle(args *ActorTimerArgs) {
+	a := args.Actor.(actorImpl)
+	if args.TID != a.core().recycleTimerId {
+		return
+	}
+
+	if err := a.stop(false); err != nil {
+		a.core().getLogger().ErrorFields("stop failed on recycle", lfdError(err))
+	}
+}
+
+// actorOnKeepAlive Actor 存续定时器回调.
+func actorOnKeepAlive(args *ActorTimerArgs) {
+	a := args.Actor.(actorImpl)
+	core := a.core()
+	svc := core.service()
+	reg := svc.getCfg().Handler.GetActorRegistry()
+	ctx, cancel := context.WithTimeout(context.Background(), actorReigsterTimeout)
+	defer cancel()
+	if err := reg.KeepActorAlive(ctx, ActorKeepAliveParams{
+		UID:     core.ActorUID(),
+		NodeId:  svc.nodeId(),
+		TTL:     svc.getCfg().RegistryTTL,
+		LeaseId: core.leaseID,
+	}); err != nil {
+		core.getLogger().ErrorFields("keepalive actor failed", lfdError(err))
+	}
 }
 
 var (
@@ -250,6 +338,12 @@ func actorStateErr(state int8) error {
 	return err
 }
 
+const (
+	// actorFlagShutdown 表示 Actor 停止时, 直接注销 Actor, 否则, 刷新 Actor TTL, 确保
+	// 在一小段时间内, 其还能在当前实例上被唤醒.
+	actorFlagShutdown = int8(1 << 0)
+)
+
 // actorTriggeredTimer Actor 已触发定时器.
 type actorTriggeredTimer struct {
 	tid  TimerId        // 定时器ID.
@@ -268,6 +362,7 @@ type actorCompletedAsyncRPC struct {
 type actorCore struct {
 	*ActorDefineCommon                             // 集成 ActorDefineCommon.
 	id                 int64                       // Actor 分类实例ID.
+	leaseID            string                      // 租约ID.
 	svc                *Service                    // 隶属的 Service.
 	messageBox         chan message                // 信箱.
 	triggeredTimer     chan actorTriggeredTimer    // 已触发的定时器.
@@ -275,17 +370,20 @@ type actorCore struct {
 	sigPrepareStop     chan struct{}               // 准备停机信号.
 	logger             glog.Logger                 // 日志工具.
 
-	mtx            sync.RWMutex // 读写锁.
-	state          int8         // 状态.
-	refCount       int          // 引用计数. 当引用计数大于 0 时，Actor 不会被回收.
-	recycleTimerId TimerId      // 回收定时器ID.
+	mtx              sync.RWMutex // 读写锁.
+	state            int8         // 状态.
+	flag             int8         // 标志.
+	refCount         int          // 引用计数. 当引用计数大于 0 时，Actor 不会被回收.
+	recycleTimerId   TimerId      // 回收定时器ID.
+	keepAliveTimerId TimerId      // 存续定时器ID.
 }
 
 // newActorCore 构造 actorCore.
-func newActorCore(ad *ActorDefineCommon, id int64, svc *Service) *actorCore {
+func newActorCore(ad *ActorDefineCommon, id int64, leaseId string, svc *Service) *actorCore {
 	a := &actorCore{
 		ActorDefineCommon: ad,
 		id:                id,
+		leaseID:           leaseId,
 		svc:               svc,
 		messageBox:        make(chan message, ad.MessageBoxSize),
 		triggeredTimer:    make(chan actorTriggeredTimer, ad.MaxTriggeredTimerAmount),
@@ -348,6 +446,20 @@ func (a *actorCore) isRunning() bool {
 	return a.state == actorStateStarted
 }
 
+// updateFlag 更新标志
+func (a *actorCore) updateFlag(flag int8, set bool) {
+	if set {
+		a.flag |= flag
+	} else {
+		a.flag &= ^flag
+	}
+}
+
+// hasFlag 返回是否有标志.
+func (a *actorCore) hasFlag(flag int8) bool {
+	return a.flag&flag != 0
+}
+
 // getLogger 返回 getLogger.
 func (a *actorCore) getLogger() glog.Logger {
 	return a.logger
@@ -372,7 +484,7 @@ func (a *actorCore) start() error {
 }
 
 // stop 开始停机逻辑.
-func (a *actorCore) stop() error {
+func (a *actorCore) stop(shutdown bool) error {
 	if err := a.lockState(actorStateStarted, false); err != nil {
 		return err
 	}
@@ -386,6 +498,9 @@ func (a *actorCore) stop() error {
 
 	// 进入停机状态.
 	a.state = actorStatePrepareStop
+	if shutdown {
+		a.updateFlag(actorFlagShutdown, true)
+	}
 	close(a.sigPrepareStop)
 	return nil
 }
@@ -542,7 +657,7 @@ func (a *actorCore) receiveCompletedAsyncRPC(ctx context.Context, resp *RPCResp,
 
 // resetRecycleTimer 重置回收定时器.
 func (a *actorCore) resetRecycleTimer(stop bool) {
-	if a.RecycleTime == 0 {
+	if !a.needRecycle() {
 		return
 	}
 

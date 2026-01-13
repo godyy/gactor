@@ -40,8 +40,8 @@ type ClientPush struct {
 
 // ClientHandler Client 处理器.
 type ClientHandler interface {
-	// GetMetaDriver 获取 Meta 数据驱动.
-	GetMetaDriver() MetaDriver
+	// GetActorRegistry 获取 Actor 注册表.
+	GetActorRegistry() ActorRegistry
 
 	// GetNetAgent 获取网络代理.
 	GetNetAgent() NetAgent
@@ -102,8 +102,8 @@ func (c *ClientConfig) init() {
 		panic("gactor: ClientConfig: Handler not specified")
 	}
 
-	if c.Handler.GetMetaDriver() == nil {
-		panic("gactor: ClientConfig: Handler has no MetaDriver")
+	if c.Handler.GetActorRegistry() == nil {
+		panic("gactor: ClientConfig: Handler has no ActorRegistry")
 	}
 
 	if c.Handler.GetNetAgent() == nil {
@@ -288,9 +288,14 @@ func (c *Client) sendPacket(ctx context.Context, nodeId string, ph packetHead, p
 }
 
 // getNodeIdOfActor 获取 Actor 所在的节点ID.
-func (c *Client) getNodeIdOfActor(id int64) (string, error) {
+func (c *Client) getNodeIdOfActor(ctx context.Context, id int64) (string, error) {
 	uid := c.makeActorUID(id)
-	return getNodeIdOfActor(c.cfg.Handler.GetMetaDriver(), uid)
+	reg := c.cfg.Handler.GetActorRegistry()
+	location, err := reg.GetActorLocation(ctx, uid)
+	if err != nil {
+		return "", err
+	}
+	return location.NodeId, nil
 }
 
 // start 内部启动逻辑.
@@ -332,7 +337,7 @@ func (c *Client) Connect(ctx context.Context, id int64, sid uint32) error {
 	}
 
 	// 获取目标节点.
-	nodeId, err := c.getNodeIdOfActor(id)
+	nodeId, err := c.getNodeIdOfActor(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -361,7 +366,7 @@ func (c *Client) Disconnect(ctx context.Context, id int64, sid uint32) error {
 	}
 
 	// 获取目标节点.
-	nodeId, err := c.getNodeIdOfActor(id)
+	nodeId, err := c.getNodeIdOfActor(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -397,7 +402,7 @@ func (c *Client) SendRequest(ctx context.Context, req ClientRequest) error {
 	}
 
 	// 获取目标节点.
-	nodeId, err := c.getNodeIdOfActor(req.ID)
+	nodeId, err := c.getNodeIdOfActor(ctx, req.ID)
 	if err != nil {
 		return err
 	}

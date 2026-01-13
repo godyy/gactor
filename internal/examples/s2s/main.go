@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"errors"
 	stdnet "net"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -19,6 +21,7 @@ import (
 	"github.com/godyy/gcluster/net"
 	"github.com/godyy/gtimewheel"
 	pkgerrors "github.com/pkg/errors"
+	"github.com/rs/xid"
 )
 
 const (
@@ -59,9 +62,10 @@ var (
 		},
 	}
 
-	s1, s2  *service
-	metaMap map[gactor.ActorUID]*s2sMeta
+	s1, s2 *service
+
 	userIds []gactor.ActorUID
+	nodeMap map[gactor.ActorUID]string
 )
 
 type s2sMeta struct {
@@ -82,28 +86,19 @@ func main() {
 		panic(pkgerrors.WithMessage(err, "init logger"))
 	}
 
-	metaMap = make(map[gactor.ActorUID]*s2sMeta)
-	metaMap[gactor.ActorUID{
+	nodeMap = make(map[gactor.ActorUID]string)
+	nodeMap[gactor.ActorUID{
 		Category: actors.CategoryServer,
 		ID:       1,
-	}] = &s2sMeta{
-		uid: gactor.ActorUID{
-			Category: actors.CategoryServer,
-			ID:       1,
-		},
-		nodeId: s2NodeId,
-	}
+	}] = s2NodeId
 	userIds = make([]gactor.ActorUID, 8000)
 	for i := 0; i < 8000; i++ {
 		uid := gactor.ActorUID{
 			Category: actors.CategoryUser,
 			ID:       int64(i),
 		}
+		nodeMap[uid] = s1NodeId
 		userIds[i] = uid
-		metaMap[uid] = &s2sMeta{
-			uid:    uid,
-			nodeId: s1NodeId,
-		}
 	}
 
 	center := &nodeCenter{
@@ -118,6 +113,9 @@ func main() {
 			},
 		},
 	}
+
+	actorRegistry := &actorRegistry{actorMap: make(map[gactor.ActorUID]*actorLocation)}
+	actorRouter := &actorRouter{nodes: nodeMap}
 
 	handshakeConfig := net.HandshakeConfig{
 		Token:   "123",
@@ -148,9 +146,10 @@ func main() {
 	}
 
 	s1 = &service{
-		metaDriver:  &metaDriver{metaMap},
-		packetCodec: &packetCodec{},
-		TimeSystem:  gactor.DefTimeSystem,
+		actorRegistry: actorRegistry,
+		actorRouter:   actorRouter,
+		packetCodec:   &packetCodec{},
+		TimeSystem:    gactor.DefTimeSystem,
 	}
 	if agent, err := gcluster.CreateAgent(&gcluster.AgentConfig{
 		Center: center,
@@ -198,9 +197,10 @@ func main() {
 	}
 
 	s2 = &service{
-		metaDriver:  &metaDriver{metaMap},
-		packetCodec: &packetCodec{},
-		TimeSystem:  gactor.DefTimeSystem,
+		actorRegistry: actorRegistry,
+		actorRouter:   actorRouter,
+		packetCodec:   &packetCodec{},
+		TimeSystem:    gactor.DefTimeSystem,
 	}
 	if agent, err := gcluster.CreateAgent(&gcluster.AgentConfig{
 		Center: center,
@@ -291,16 +291,127 @@ func (c *nodeCenter) GetNode(nodeId string) (center.Node, error) {
 	return node, nil
 }
 
-type metaDriver struct {
-	metaMap map[gactor.ActorUID]*s2sMeta
+type actorLocation struct {
+	nodeId   string
+	leaseId  string
+	expireAt int64
 }
 
-func (d *metaDriver) GetMeta(uid gactor.ActorUID) (gactor.Meta, error) {
-	meta, ok := d.metaMap[uid]
-	if !ok {
-		return nil, gactor.ErrMetaNotExists
+type actorRegistry struct {
+	mtx      sync.RWMutex
+	actorMap map[gactor.ActorUID]*actorLocation
+}
+
+// MakeLeaseID 生成全剧唯一租约ID.
+func (r *actorRegistry) MakeLeaseID() string {
+	return xid.New().String()
+}
+
+// Register 注册 Actor.
+// 若 Actor 已注册, 不论是否当前节点注册, 均通过 ActorRegisterResult 返回所在节点和过期
+// 时间.
+// 若 Actor 已注册, 且所在节点ID与当前节点ID不同, 返回 ErrActorAlreadyRegistered 错误,
+// 否则, 使用当前租约覆盖旧租约, 并更新存续时间.
+func (r *actorRegistry) RegisterActor(ctx context.Context, params gactor.ActorRegisterParams) (gactor.ActorRegisterResult, error) {
+	r.mtx.Lock()
+	defer r.mtx.Unlock()
+	location := r.actorMap[params.UID]
+	if location == nil {
+		location = &actorLocation{
+			nodeId:  params.NodeId,
+			leaseId: params.LeaseId,
+		}
+		if params.TTL > 0 {
+			location.expireAt = time.Now().Unix() + params.TTL
+		}
+		r.actorMap[params.UID] = location
+		return gactor.ActorRegisterResult{
+			NodeId:   params.NodeId,
+			ExpireAt: location.expireAt,
+		}, nil
 	}
-	return meta, nil
+	if params.NodeId != location.nodeId {
+		return gactor.ActorRegisterResult{
+			NodeId:   location.nodeId,
+			ExpireAt: location.expireAt,
+		}, gactor.ErrActorAlreadyRegistered
+	}
+	location.leaseId = params.LeaseId
+	if params.TTL > 0 {
+		location.expireAt = time.Now().Unix() + params.TTL
+	}
+	return gactor.ActorRegisterResult{
+		NodeId:   location.nodeId,
+		ExpireAt: location.expireAt,
+	}, nil
+}
+
+// UnregisterActor 注销 Actor.
+// 若 Actor 未注册, 返回 ErrActorNotExists 错误.
+// 若节点ID和租约ID匹配, 则注销 Actor, 否则返回 ErrLeaseMismatch 错误.
+func (r *actorRegistry) UnregisterActor(ctx context.Context, params gactor.ActorUnregisterParams) error {
+	r.mtx.Lock()
+	defer r.mtx.Unlock()
+	location := r.actorMap[params.UID]
+	if location == nil {
+		return gactor.ErrActorNotExists
+	}
+	if params.NodeId != location.nodeId {
+		return gactor.ErrLeaseMismatch
+	}
+	if params.LeaseId != location.leaseId {
+		return gactor.ErrLeaseMismatch
+	}
+	delete(r.actorMap, params.UID)
+	return nil
+}
+
+// KeepActorAlive 保持 Actor 存续.
+// 若 Actor 未注册, 返回 ErrActorNotExists 错误,
+// 否则, 若节点ID和租约ID匹配, 则更新 Actor 存续时间, 否则返回 ErrLeaseMismatch 错误.
+func (r *actorRegistry) KeepActorAlive(ctx context.Context, params gactor.ActorKeepAliveParams) error {
+	r.mtx.Lock()
+	defer r.mtx.Unlock()
+	location := r.actorMap[params.UID]
+	if location == nil {
+		return gactor.ErrActorNotExists
+	}
+	if params.NodeId != location.nodeId {
+		return gactor.ErrLeaseMismatch
+	}
+	if params.LeaseId != location.leaseId {
+		return gactor.ErrLeaseMismatch
+	}
+	location.expireAt = time.Now().Unix() + params.TTL
+	return nil
+}
+
+// GetActorLocation 获取 Actor 位置信息.
+// 若 Actor 未注册, 返回 ErrActorNotExists 错误.
+func (r *actorRegistry) GetActorLocation(ctx context.Context, uid gactor.ActorUID) (gactor.ActorLocation, error) {
+	r.mtx.RLock()
+	defer r.mtx.RUnlock()
+	location := r.actorMap[uid]
+	if location == nil {
+		return gactor.ActorLocation{}, gactor.ErrActorNotExists
+	}
+	return gactor.ActorLocation{
+		NodeId:   location.nodeId,
+		ExpireAt: location.expireAt,
+	}, nil
+}
+
+type actorRouter struct {
+	nodes map[gactor.ActorUID]string
+}
+
+// PickActorNode 选择节点.
+func (r *actorRouter) PickActorNode(uid gactor.ActorUID) (string, error) {
+	nodeId, ok := r.nodes[uid]
+	if !ok {
+		return "", errors.New("no node")
+	}
+	return nodeId, nil
 }
 
 type netAgent struct {
@@ -334,15 +445,20 @@ func (c *packetCodec) DecodePayload(pt gactor.PacketType, b *gactor.Buffer, v an
 }
 
 type service struct {
-	*metaDriver
+	*actorRegistry
+	*actorRouter
 	*netAgent
 	*packetCodec
 	*gactor.Service
 	gactor.TimeSystem
 }
 
-func (s *service) GetMetaDriver() gactor.MetaDriver {
-	return s.metaDriver
+func (s *service) GetActorRegistry() gactor.ActorRegistry {
+	return s.actorRegistry
+}
+
+func (s *service) GetActorRouter() gactor.ActorRouter {
+	return s.actorRouter
 }
 
 func (s *service) GetNetAgent() gactor.NetAgent {

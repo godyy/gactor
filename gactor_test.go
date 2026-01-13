@@ -6,11 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/godyy/glog"
 	"github.com/godyy/gtimewheel"
+	"github.com/rs/xid"
 
 	pkgerrors "github.com/pkg/errors"
 )
@@ -47,8 +49,8 @@ func TestService(t *testing.T) {
 				Priority:                   1,
 				MessageBoxSize:             1000,
 				MaxCompletedAsyncRPCAmount: 1,
-				RecycleTime:                0,
-				Handler:                    testHandlerChain.Handle,
+				// RecycleTime:                1 * time.Minute,
+				Handler: testHandlerChain.Handle,
 			},
 			BehaviorCreator: func(a Actor) ActorBehavior {
 				return &testActor{Actor: a}
@@ -65,26 +67,25 @@ func TestService(t *testing.T) {
 		}
 	}
 
-	metaDriver := &testMetaDriver{
-		metaMap: make(map[ActorUID]*testMeta, len(actorUIDs)),
+	actorRegistry := &testActorRegistry{
+		actorMap: make(map[ActorUID]*testActorLocation),
 	}
-	for _, uid := range actorUIDs {
-		metaDriver.metaMap[uid] = &testMeta{
-			uid:    uid,
-			nodeId: "test",
-		}
+	actorRouter := &testActorRouter{
+		nodes: []string{"test"},
 	}
 	svcHandler := &testServiceHandler{
-		testMetaDriver:  metaDriver,
-		testNetAgent:    &testNetAgent{},
-		testPacketCodec: &testPacketCodec{},
-		TimeSystem:      DefTimeSystem,
+		testActorRegistry: actorRegistry,
+		testActorRouter:   actorRouter,
+		testNetAgent:      &testNetAgent{},
+		testPacketCodec:   &testPacketCodec{},
+		TimeSystem:        DefTimeSystem,
 	}
 
 	svcConfig := &ServiceConfig{
 		NodeId: "test",
 		ActorConfig: ActorConfig{
 			ActorDefines: actorDefines,
+			RegistryTTL:  6,
 		},
 		TimerConfig: TimerConfig{
 			TimeWheelLevels: []gtimewheel.LevelConfig{
@@ -110,7 +111,7 @@ func TestService(t *testing.T) {
 	defer cancel()
 
 	for _, uid := range actorUIDs {
-		ta, err := svc.startActor(ctx, uid)
+		ta, err := svc.startActor(ctx, uid, "")
 		if err != nil {
 			t.Fatalf("start actor %s, %v", uid, err)
 		}
@@ -125,29 +126,128 @@ func TestService(t *testing.T) {
 	}
 }
 
-type testMeta struct {
-	uid    ActorUID
-	nodeId string
+type testActorLocation struct {
+	nodeId   string
+	leaseId  string
+	expireAt int64
 }
 
-func (m *testMeta) GetActorUID() ActorUID {
-	return m.uid
+type testActorRegistry struct {
+	mtx      sync.RWMutex
+	actorMap map[ActorUID]*testActorLocation
 }
 
-func (m *testMeta) GetNodeId() string {
-	return m.nodeId
+// MakeLeaseID 生成全剧唯一租约ID.
+func (r *testActorRegistry) MakeLeaseID() string {
+	return xid.New().String()
 }
 
-type testMetaDriver struct {
-	metaMap map[ActorUID]*testMeta
-}
-
-func (md *testMetaDriver) GetMeta(uid ActorUID) (Meta, error) {
-	meta, ok := md.metaMap[uid]
-	if !ok {
-		return nil, ErrMetaNotExists
+// Register 注册 Actor.
+// 若 Actor 已注册, 不论是否当前节点注册, 均通过 ActorRegisterResult 返回所在节点和过期
+// 时间.
+// 若 Actor 已注册, 且所在节点ID与当前节点ID不同, 返回 ErrActorAlreadyRegistered 错误,
+// 否则, 使用当前租约覆盖旧租约, 并更新存续时间.
+func (r *testActorRegistry) RegisterActor(ctx context.Context, params ActorRegisterParams) (ActorRegisterResult, error) {
+	r.mtx.Lock()
+	defer r.mtx.Unlock()
+	// fmt.Printf("registe %+v\n", params)
+	location := r.actorMap[params.UID]
+	if location == nil {
+		location = &testActorLocation{
+			nodeId:  params.NodeId,
+			leaseId: params.LeaseId,
+		}
+		if params.TTL > 0 {
+			location.expireAt = time.Now().Unix() + params.TTL
+		}
+		r.actorMap[params.UID] = location
+		return ActorRegisterResult{
+			NodeId:   params.NodeId,
+			ExpireAt: location.expireAt,
+		}, nil
 	}
-	return meta, nil
+	if params.NodeId != location.nodeId {
+		return ActorRegisterResult{
+			NodeId:   location.nodeId,
+			ExpireAt: location.expireAt,
+		}, ErrActorAlreadyRegistered
+	}
+	location.leaseId = params.LeaseId
+	if params.TTL > 0 {
+		location.expireAt = time.Now().Unix() + params.TTL
+	}
+	return ActorRegisterResult{
+		NodeId:   location.nodeId,
+		ExpireAt: location.expireAt,
+	}, nil
+}
+
+// UnregisterActor 注销 Actor.
+// 若 Actor 未注册, 返回 ErrActorNotExists 错误.
+// 若节点ID和租约ID匹配, 则注销 Actor, 否则返回 ErrLeaseMismatch 错误.
+func (r *testActorRegistry) UnregisterActor(ctx context.Context, params ActorUnregisterParams) error {
+	r.mtx.Lock()
+	defer r.mtx.Unlock()
+	location := r.actorMap[params.UID]
+	if location == nil {
+		return ErrActorNotExists
+	}
+	if params.NodeId != location.nodeId {
+		return ErrLeaseMismatch
+	}
+	if params.LeaseId != location.leaseId {
+		// fmt.Println(456, params.LeaseId, location.leaseId)
+		return ErrLeaseMismatch
+	}
+	delete(r.actorMap, params.UID)
+	return nil
+}
+
+// KeepActorAlive 保持 Actor 存续.
+// 若 Actor 未注册, 返回 ErrActorNotExists 错误,
+// 否则, 若节点ID和租约ID匹配, 则更新 Actor 存续时间, 否则返回 ErrLeaseMismatch 错误.
+func (r *testActorRegistry) KeepActorAlive(ctx context.Context, params ActorKeepAliveParams) error {
+	r.mtx.Lock()
+	defer r.mtx.Unlock()
+	location := r.actorMap[params.UID]
+	if location == nil {
+		return ErrActorNotExists
+	}
+	if params.NodeId != location.nodeId {
+		return ErrLeaseMismatch
+	}
+	if params.LeaseId != location.leaseId {
+		return ErrLeaseMismatch
+	}
+	location.expireAt = time.Now().Unix() + params.TTL
+	return nil
+}
+
+// GetActorLocation 获取 Actor 位置信息.
+// 若 Actor 未注册, 返回 ErrActorNotExists 错误.
+func (r *testActorRegistry) GetActorLocation(ctx context.Context, uid ActorUID) (ActorLocation, error) {
+	r.mtx.RLock()
+	defer r.mtx.RUnlock()
+	location := r.actorMap[uid]
+	if location == nil {
+		return ActorLocation{}, ErrActorNotExists
+	}
+	return ActorLocation{
+		NodeId:   location.nodeId,
+		ExpireAt: location.expireAt,
+	}, nil
+}
+
+type testActorRouter struct {
+	nodes []string
+}
+
+// PickActorNode 选择节点.
+func (r *testActorRouter) PickActorNode(uid ActorUID) (string, error) {
+	if len(r.nodes) == 0 {
+		return "", errors.New("no nodes")
+	}
+	return r.nodes[uid.ID%int64(len(r.nodes))], nil
 }
 
 type testNetAgent struct {
@@ -253,14 +353,19 @@ func (pc *testPacketCodec) decodeS2SMessage(b *Buffer, s2sMsg *testS2SMessage) e
 }
 
 type testServiceHandler struct {
-	*testMetaDriver
+	*testActorRegistry
+	*testActorRouter
 	*testNetAgent
 	*testPacketCodec
 	TimeSystem
 }
 
-func (sh *testServiceHandler) GetMetaDriver() MetaDriver {
-	return sh.testMetaDriver
+func (sh *testServiceHandler) GetActorRegistry() ActorRegistry {
+	return sh.testActorRegistry
+}
+
+func (sh *testServiceHandler) GetActorRouter() ActorRouter {
+	return sh.testActorRouter
 }
 
 func (sh *testServiceHandler) GetNetAgent() NetAgent {
