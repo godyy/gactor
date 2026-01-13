@@ -178,7 +178,7 @@ func NewService(cfg *ServiceConfig, option ...ServiceOption) *Service {
 		priorityActors[priority] = newPriorityActors()
 	}
 	for _, actorDefine := range actorDefineSet.defineMap {
-		priorityActors[actorDefine.common().Priority].addCategoryActors(actorDefine.common().Category, newCategoryActors())
+		priorityActors[actorDefine.base().priority].addCategoryActors(actorDefine.base().category, newCategoryActors())
 	}
 
 	s := &Service{

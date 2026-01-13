@@ -41,21 +41,18 @@ func TestService(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	actorDefines := []IActorDefine{
-		&ActorDefine{
-			ActorDefineCommon: &ActorDefineCommon{
-				Name:                       "test",
-				Category:                   1,
-				Priority:                   1,
-				MessageBoxSize:             1000,
-				MaxCompletedAsyncRPCAmount: 1,
-				// RecycleTime:                1 * time.Minute,
-				Handler: testHandlerChain.Handle,
-			},
+	actorDefines := []ActorDefine{
+		NewActorDefine(ActorDefineConfig{
+			Name:           "test",
+			Category:       1,
+			Priority:       1,
+			MessageBoxSize: 1000,
 			BehaviorCreator: func(a Actor) ActorBehavior {
 				return &testActor{Actor: a}
 			},
 		},
+			WithMaxCompletedAsyncRPCAmount(1),
+		),
 	}
 
 	actorAmount := 10
@@ -86,6 +83,7 @@ func TestService(t *testing.T) {
 		ActorConfig: ActorConfig{
 			ActorDefines: actorDefines,
 			RegistryTTL:  6,
+			Handler:      testHandlerChain.Handle,
 		},
 		TimerConfig: TimerConfig{
 			TimeWheelLevels: []gtimewheel.LevelConfig{

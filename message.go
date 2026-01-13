@@ -31,7 +31,7 @@ func newMessageConnect(nodeId string, sid uint32) *messageConnect {
 
 // handle 处理消息.
 func (m *messageConnect) handle(a actorImpl) {
-	ca, ok := a.(*cActor)
+	ca, ok := a.(*cactor)
 	if !ok {
 		a.core().getLogger().Error("[HandleMessageConnect] not cActor")
 		return
@@ -65,7 +65,7 @@ func newMessageDisconnected(nodeId string, sid uint32) *messageDisconnect {
 }
 
 func (m *messageDisconnect) handle(a actorImpl) {
-	ca, ok := a.(*cActor)
+	ca, ok := a.(*cactor)
 	if !ok {
 		a.core().getLogger().Error("[HandleMessageDisconnect] not cActor")
 		return

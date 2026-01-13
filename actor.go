@@ -33,18 +33,12 @@ func (uid *ActorUID) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 
 // ActorBehavior Actor 行为.
 type ActorBehavior interface {
-	// GetActor 获取 Actor.
-	GetActor() Actor
-
 	// OnStart 启动行为.
 	OnStart() error
 
 	// OnStop 停机行为.
 	OnStop() error
 }
-
-// ActorBehaviorCreator Actor 行为构造器.
-type ActorBehaviorCreator func(Actor) ActorBehavior
 
 // ActorTimerArgs Actor 定时器参数.
 type ActorTimerArgs struct {
@@ -61,6 +55,9 @@ type ActorRPCFunc func(a Actor, resp *RPCResp)
 
 // Actor 封装 Actor 接口.
 type Actor interface {
+	// Category 获取 Actor 的分类.
+	Category() uint16
+
 	// ActorUID 获取 Actor 的唯一标识.
 	ActorUID() ActorUID
 
@@ -90,18 +87,12 @@ type Actor interface {
 type CActorBehavior interface {
 	ActorBehavior
 
-	// GetCActor 获取 CActor.
-	GetCActor() CActor
-
 	// OnConnected 已连接行为.
 	OnConnected()
 
 	// OnDisconnected 已断开连接行为.
 	OnDisconnected()
 }
-
-// CActorBehaviorCreator CActor 行为构造器.
-type CActorBehaviorCreator func(c CActor) CActorBehavior
 
 // ActorSession Actor 网络会话信息.
 type ActorSession struct {
@@ -123,9 +114,6 @@ func (as *ActorSession) IsConnected() bool {
 // CActor 面向客户端的 Actor 接口.
 type CActor interface {
 	Actor
-
-	// CBehavior 获取 CActorBehavior.
-	CBehavior() CActorBehavior
 
 	// Session 获取 Actor 网络会话信息.
 	Session() ActorSession

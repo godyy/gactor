@@ -47,7 +47,7 @@ func actorBeforeLoop(a actorImpl) error {
 	// 启动行为.
 	if err := a.Behavior().OnStart(); err != nil {
 		core.getLogger().ErrorFields("OnStart failed", lfdError(err))
-		a.core().service().monitorActorOnStartErr(a.core().Category)
+		a.core().service().monitorActorOnStartErr(a.core().category)
 		return errCodeStartActorFailed
 	}
 
@@ -62,7 +62,7 @@ func actorBeforeLoop(a actorImpl) error {
 // actorLoop Actor 主循环逻辑.
 func actorLoop(a actorImpl) {
 	defer recoverAndLog("actor loop panic", a.core().getLogger(), func() {
-		a.core().service().monitorActorPanic(a.core().Category)
+		a.core().service().monitorActorPanic(a.core().category)
 		actorStopWithErr(a, errCodeActorLoopError)
 	})
 
@@ -204,7 +204,7 @@ func actorDrain(a actorImpl, err error) {
 // actorHandleMsg Actor 处理消息.
 func actorHandleMsg(a actorImpl, msg message) {
 	defer recoverAndLog("actor handle msg panic", a.core().getLogger(), func() {
-		a.core().service().monitorActorPanic(a.core().Category)
+		a.core().service().monitorActorPanic(a.core().category)
 	})
 	msg.handle(a)
 	msg.release()
@@ -213,7 +213,7 @@ func actorHandleMsg(a actorImpl, msg message) {
 // actorHandleMsgErr Actor 处理消息错误.
 func actorHandleMsgErr(a actorImpl, msg message, err error) {
 	defer recoverAndLog("actor handle msg err panic", a.core().getLogger(), func() {
-		a.core().service().monitorActorPanic(a.core().Category)
+		a.core().service().monitorActorPanic(a.core().category)
 	})
 	msg.handleError(a, err)
 	msg.release()
@@ -226,7 +226,7 @@ func actorExecTimer(a actorImpl, timer *actorTriggeredTimer) {
 		return
 	}
 	defer recoverAndLog("actor exec timer panic", core.getLogger(), func() {
-		core.service().monitorActorPanic(core.Category)
+		core.service().monitorActorPanic(core.category)
 	})
 	args := ActorTimerArgs{
 		Actor: a,
@@ -239,7 +239,7 @@ func actorExecTimer(a actorImpl, timer *actorTriggeredTimer) {
 // actorInvokeAsyncRPCFunc 调用异步 RPC 回调.
 func actorInvokeAsyncRPCFunc(a actorImpl, call *actorCompletedAsyncRPC) {
 	defer recoverAndLog("actor invoke async rpc panic", a.core().getLogger(), func() {
-		a.core().service().monitorActorPanic(a.core().Category)
+		a.core().service().monitorActorPanic(a.core().category)
 	})
 	resp := RPCResp{
 		svc:     a.core().service(),
@@ -360,15 +360,15 @@ type actorCompletedAsyncRPC struct {
 
 // actorCore Actor 内部核心实现.
 type actorCore struct {
-	*ActorDefineCommon                             // 集成 ActorDefineCommon.
-	id                 int64                       // Actor 分类实例ID.
-	leaseID            string                      // 租约ID.
-	svc                *Service                    // 隶属的 Service.
-	messageBox         chan message                // 信箱.
-	triggeredTimer     chan actorTriggeredTimer    // 已触发的定时器.
-	completedAsyncRPC  chan actorCompletedAsyncRPC // 已完成的异步 RPC 调用.
-	sigPrepareStop     chan struct{}               // 准备停机信号.
-	logger             glog.Logger                 // 日志工具.
+	*actorDefineBase                              // 集成 actorDefineBase.
+	id                int64                       // Actor 分类实例ID.
+	leaseID           string                      // 租约ID.
+	svc               *Service                    // 隶属的 Service.
+	messageBox        chan message                // 信箱.
+	triggeredTimer    chan actorTriggeredTimer    // 已触发的定时器.
+	completedAsyncRPC chan actorCompletedAsyncRPC // 已完成的异步 RPC 调用.
+	sigPrepareStop    chan struct{}               // 准备停机信号.
+	logger            glog.Logger                 // 日志工具.
 
 	mtx              sync.RWMutex // 读写锁.
 	state            int8         // 状态.
@@ -379,18 +379,18 @@ type actorCore struct {
 }
 
 // newActorCore 构造 actorCore.
-func newActorCore(ad *ActorDefineCommon, id int64, leaseId string, svc *Service) *actorCore {
+func newActorCore(ad *actorDefineBase, id int64, leaseId string, svc *Service) *actorCore {
 	a := &actorCore{
-		ActorDefineCommon: ad,
+		actorDefineBase:   ad,
 		id:                id,
 		leaseID:           leaseId,
 		svc:               svc,
-		messageBox:        make(chan message, ad.MessageBoxSize),
-		triggeredTimer:    make(chan actorTriggeredTimer, ad.MaxTriggeredTimerAmount),
-		completedAsyncRPC: make(chan actorCompletedAsyncRPC, ad.MaxCompletedAsyncRPCAmount),
+		messageBox:        make(chan message, ad.messageBoxSize),
+		triggeredTimer:    make(chan actorTriggeredTimer, ad.maxTriggeredTimerAmount),
+		completedAsyncRPC: make(chan actorCompletedAsyncRPC, ad.maxCompletedAsyncRPCAmount),
 		sigPrepareStop:    make(chan struct{}),
 		logger: svc.oriLogger.Named("actor").
-			WithFields(lfdCategoryName(ad.Name), lfdId(id)),
+			WithFields(lfdCategoryName(ad.name), lfdId(id)),
 		state:    actorStateInit,
 		refCount: 0,
 	}
@@ -401,9 +401,13 @@ func (a *actorCore) core() *actorCore {
 	return a
 }
 
+func (a *actorCore) Category() uint16 {
+	return a.category
+}
+
 func (a *actorCore) ActorUID() ActorUID {
 	return ActorUID{
-		Category: a.Category,
+		Category: a.category,
 		ID:       a.id,
 	}
 }
@@ -667,7 +671,7 @@ func (a *actorCore) resetRecycleTimer(stop bool) {
 	}
 
 	if !stop {
-		a.recycleTimerId = a.StartTimer(a.RecycleTime, false, nil, actorOnRecycle)
+		a.recycleTimerId = a.StartTimer(a.recycleTime, false, nil, actorOnRecycle)
 	}
 }
 
@@ -771,7 +775,7 @@ func (a *actor) start() error {
 func (a *actor) stopped() {
 	if err := a.Behavior().OnStop(); err != nil {
 		a.getLogger().ErrorFields("OnStop failed", lfdError(err))
-		a.service().monitorActorOnStopErr(a.Category)
+		a.service().monitorActorOnStopErr(a.category)
 	} else {
 		a.getLogger().DebugFields("OnStop")
 	}
@@ -792,14 +796,14 @@ func (a *actor) AsyncRPC(ctx context.Context, to ActorUID, params any, cb ActorR
 	return a.asyncRPC(ctx, a, to, params, cb)
 }
 
-// cActor CActor 内部实现.
-type cActor struct {
+// cactor CActor 内部实现.
+type cactor struct {
 	*actorCore
 	behavior CActorBehavior
 	session  ActorSession
 }
 
-func (a *cActor) stopped() {
+func (a *cactor) stopped() {
 	a.Disconnect(context.Background())
 
 	if err := a.Behavior().OnStop(); err != nil {
@@ -811,32 +815,28 @@ func (a *cActor) stopped() {
 	a.actorCore.stopped(a.onStopped)
 }
 
-func (a *cActor) onStopped() {
+func (a *cactor) onStopped() {
 	a.behavior = nil
 }
 
-func (a *cActor) Behavior() ActorBehavior {
+func (a *cactor) Behavior() ActorBehavior {
 	return a.behavior
 }
 
-func (a *cActor) CBehavior() CActorBehavior {
-	return a.behavior
-}
-
-func (a *cActor) Session() ActorSession {
+func (a *cactor) Session() ActorSession {
 	return a.session
 }
 
 // AsyncRPC 发起异步 RPC 调用.
-func (a *cActor) AsyncRPC(ctx context.Context, to ActorUID, params any, cb ActorRPCFunc) error {
+func (a *cactor) AsyncRPC(ctx context.Context, to ActorUID, params any, cb ActorRPCFunc) error {
 	return a.asyncRPC(ctx, a, to, params, cb)
 }
 
-func (a *cActor) start() error {
+func (a *cactor) start() error {
 	return actorStart(a)
 }
 
-func (a *cActor) updateSession(ctx context.Context, session ActorSession) {
+func (a *cactor) updateSession(ctx context.Context, session ActorSession) {
 	if a.session.IsConnected() {
 		if a.session == session {
 			return
@@ -850,7 +850,7 @@ func (a *cActor) updateSession(ctx context.Context, session ActorSession) {
 }
 
 // PushRawMessage 向客户端推送消息.
-func (a *cActor) PushRawMessage(ctx context.Context, payload any) error {
+func (a *cactor) PushRawMessage(ctx context.Context, payload any) error {
 	if a.session.NodeId == "" {
 		return ErrActorNotConnected
 	}
@@ -863,7 +863,7 @@ func (a *cActor) PushRawMessage(ctx context.Context, payload any) error {
 }
 
 // Disconnect 端开与客户端的连接.
-func (a *cActor) Disconnect(ctx context.Context) {
+func (a *cactor) Disconnect(ctx context.Context) {
 	if !a.session.IsConnected() {
 		return
 	}
@@ -883,7 +883,7 @@ func (a *cActor) Disconnect(ctx context.Context) {
 }
 
 // onDisconnect 处理客户端端开链接.
-func (a *cActor) onDisconnect(session ActorSession) {
+func (a *cactor) onDisconnect(session ActorSession) {
 	if session != a.session {
 		return
 	}

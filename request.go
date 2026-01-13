@@ -213,7 +213,7 @@ func (req *rawRequest) release(ctx *Context) {
 }
 
 func (req *rawRequest) beforeHandle(ctx *Context) error {
-	ca, ok := ctx.Actor().(*cActor)
+	ca, ok := ctx.Actor().(*cactor)
 	if !ok {
 		return errors.New("not CActor")
 	}

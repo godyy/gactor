@@ -89,7 +89,7 @@ func (s *Service) lfdActorUID(name string, uid ActorUID) zap.Field {
 	if ad := s.actorDefineSet.getDefine(uid.Category); ad != nil {
 		return zap.Dict(
 			name,
-			zap.String("category", ad.common().Name),
+			zap.String("category", ad.base().name),
 			zap.Int64("id", uid.ID),
 		)
 	} else {

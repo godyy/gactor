@@ -32,34 +32,28 @@ const (
 )
 
 var (
-	actorDefines = []gactor.IActorDefine{
-		&gactor.CActorDefine{
-			ActorDefineCommon: &gactor.ActorDefineCommon{
-				Name:                       "user",
-				Category:                   actors.CategoryUser,
-				Priority:                   10,
-				MessageBoxSize:             10,
-				MaxCompletedAsyncRPCAmount: 1,
-				RecycleTime:                0,
-				Handler:                    user.Handler,
-			},
+	actorDefines = []gactor.ActorDefine{
+		gactor.NewCActorDefine(gactor.CActorDefineConfig{
+			Name:           "user",
+			Category:       actors.CategoryUser,
+			Priority:       10,
+			MessageBoxSize: 10,
+			RecycleTime:    1 * time.Hour,
 			BehaviorCreator: func(actor gactor.CActor) gactor.CActorBehavior {
 				return actors.NewUser(actor)
 			},
 		},
-		&gactor.ActorDefine{
-			ActorDefineCommon: &gactor.ActorDefineCommon{
-				Name:           "server",
-				Category:       actors.CategoryServer,
-				Priority:       1,
-				MessageBoxSize: 1000,
-				RecycleTime:    0,
-				Handler:        server.Handler(),
-			},
+			gactor.WithMaxCompletedAsyncRPCAmount(1),
+		),
+		gactor.NewActorDefine(gactor.ActorDefineConfig{
+			Name:           "server",
+			Category:       actors.CategoryServer,
+			Priority:       1,
+			MessageBoxSize: 1000,
 			BehaviorCreator: func(actor gactor.Actor) gactor.ActorBehavior {
 				return actors.NewServer(actor)
 			},
-		},
+		}),
 	}
 
 	s1, s2 *service
@@ -140,9 +134,18 @@ func main() {
 	var ackConfig *gactor.AckConfig
 	ackConfig = &gactor.AckConfig{
 		MaxPacketAmount: 10000,
-		Timeout:         100 * time.Millisecond,
+		Timeout:         500 * time.Millisecond,
 		MaxRetry:        1,
 		TickInterval:    50 * time.Millisecond,
+	}
+
+	handler := func(ctx *gactor.Context) {
+		switch ctx.Actor().Category() {
+		case actors.CategoryUser:
+			user.Handler(ctx)
+		case actors.CategoryServer:
+			server.Handler()(ctx)
+		}
 	}
 
 	s1 = &service{
@@ -172,6 +175,7 @@ func main() {
 		NodeId: s1NodeId,
 		ActorConfig: gactor.ActorConfig{
 			ActorDefines: actorDefines,
+			Handler:      handler,
 		},
 		TimerConfig: gactor.TimerConfig{
 			TimeWheelLevels: []gtimewheel.LevelConfig{
@@ -223,6 +227,7 @@ func main() {
 		NodeId: s2NodeId,
 		ActorConfig: gactor.ActorConfig{
 			ActorDefines: actorDefines,
+			Handler:      handler,
 		},
 		TimerConfig: gactor.TimerConfig{
 			TimeWheelLevels: []gtimewheel.LevelConfig{

@@ -14,7 +14,7 @@ import (
 type ActorConfig struct {
 	// ActorDefines Actor 定义.
 	// required.
-	ActorDefines []IActorDefine
+	ActorDefines []ActorDefine
 
 	// ClientActorCategory 当值非0时, 表示客户端需要通信的actor的分类.
 	// 一般情况下, 客户端都与同一分类的actor通信.
@@ -29,6 +29,9 @@ type ActorConfig struct {
 	// 不能 >= RegistryTTL(s).
 	// 默认值 (RegistryTTL / 3)(s).
 	KeepAliveInterval time.Duration
+
+	// Handler Actor 请求处理函数.
+	Handler HandlerFunc
 }
 
 func (c *ActorConfig) init() {
@@ -40,7 +43,7 @@ func (c *ActorConfig) init() {
 	if c.ClientActorCategory > 0 {
 		clientCategoryValid := false
 		for _, ad := range c.ActorDefines {
-			if ad.common().Category == c.ClientActorCategory {
+			if ad.base().category == c.ClientActorCategory {
 				clientCategoryValid = true
 				break
 			}
@@ -58,6 +61,10 @@ func (c *ActorConfig) init() {
 		c.KeepAliveInterval = time.Duration(c.RegistryTTL/3) * time.Second
 	} else if c.KeepAliveInterval >= time.Duration(c.RegistryTTL)*time.Second {
 		panic("gactor: ActorConfig: KeepAliveInterval must be less than RegistryTTL")
+	}
+
+	if c.Handler == nil {
+		panic("gactor: ActorConfig: Handler not specified")
 	}
 }
 
@@ -193,8 +200,8 @@ func (s *Service) getCategoryActors(priority int, category uint16) *categoryActo
 
 // getCategoryActorsByCategory 获取指定类别下的所有 Actor.
 func (s *Service) getCategoryActorsByCategory(category uint16) *categoryActors {
-	define := s.getDefine(category).common()
-	return s.getCategoryActors(define.Priority, define.Category)
+	base := s.getDefine(category).base()
+	return s.getCategoryActors(base.priority, base.category)
 }
 
 // startActor 启动 uid 指定的 Actor.
@@ -206,9 +213,9 @@ func (s *Service) startActor(ctx context.Context, uid ActorUID, leaeId string) (
 		return nil, ErrActorDefineNotExists
 	}
 
-	defineCommon := define.common()
+	defineBase := define.base()
 
-	categoryActors := s.getCategoryActors(defineCommon.Priority, defineCommon.Category)
+	categoryActors := s.getCategoryActors(defineBase.priority, defineBase.category)
 	var starter *actorStarter
 
 	for starter == nil {
@@ -253,7 +260,7 @@ func (s *Service) startActor(ctx context.Context, uid ActorUID, leaeId string) (
 				starter.ref()
 
 				// 更新最大优先级索引.
-				priorityIndex := s.getPriorityIndex(defineCommon.Priority)
+				priorityIndex := s.getPriorityIndex(defineBase.priority)
 				s.mtxActor.Lock()
 				s.updateMaxActorPriorityIndex(priorityIndex)
 				s.mtxActor.Unlock()
@@ -303,10 +310,10 @@ func (s *Service) refActor(uid ActorUID) (actorImpl, error) {
 	if define == nil {
 		return nil, ErrActorDefineNotExists
 	}
-	defineCommon := define.common()
+	defineBase := define.base()
 
 	// 获取 Actor 分类集合.
-	categoryActors := s.getCategoryActors(defineCommon.Priority, defineCommon.Category)
+	categoryActors := s.getCategoryActors(defineBase.priority, defineBase.category)
 	categoryActors.lock(true)
 	defer categoryActors.unlock(true)
 
@@ -331,10 +338,10 @@ func (s *Service) getActor(uid ActorUID) (actorImpl, error) {
 	if define == nil {
 		return nil, ErrActorDefineNotExists
 	}
-	defineCommon := define.common()
+	defineBase := define.base()
 
 	// 获取 Actor 分类集合.
-	categoryActors := s.getCategoryActors(defineCommon.Priority, defineCommon.Category)
+	categoryActors := s.getCategoryActors(defineBase.priority, defineBase.category)
 	categoryActors.lock(true)
 	defer categoryActors.unlock(true)
 
@@ -381,7 +388,7 @@ func (s *Service) resolveNodeOfActor(ctx context.Context, mode int, uid ActorUID
 		params.UID = uid
 		params.NodeId = s.nodeId()
 		params.LeaseId = leaseId
-		if define.common().needRecycle() {
+		if define.base().needRecycle() {
 			params.TTL = s.cfg.RegistryTTL
 		}
 		if result, err = registry.RegisterActor(ctx, params); err != nil {
@@ -416,7 +423,7 @@ func (s *Service) resolveNodeOfActor(ctx context.Context, mode int, uid ActorUID
 		params.UID = uid
 		params.NodeId = s.nodeId()
 		params.LeaseId = leaseId
-		if define.common().needRecycle() {
+		if define.base().needRecycle() {
 			params.TTL = s.cfg.RegistryTTL
 		}
 		result, err = registry.RegisterActor(ctx, params)
@@ -475,11 +482,11 @@ func (s *Service) onActorStopped(actor actorImpl) {
 
 	// 删除 Actor.
 	ac := actor.core()
-	categoryActors := s.getCategoryActorsByCategory(ac.Category)
+	categoryActors := s.getCategoryActorsByCategory(ac.category)
 	categoryActors.delActor(ac.id)
 
 	// 更新监控数据.
-	s.monitorActorStop(ac.Category)
+	s.monitorActorStop(ac.category)
 
 	// 启动下一个 Actor.
 	if starter := categoryActors.getStarter(ac.id); starter != nil {

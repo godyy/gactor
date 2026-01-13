@@ -249,8 +249,7 @@ func (c *Context) handle(a actorImpl) {
 		return
 	}
 
-	core := a.core()
-	core.Handler(c)
+	c.svc.getCfg().ActorConfig.Handler(c)
 }
 
 // handleError 实现 message.

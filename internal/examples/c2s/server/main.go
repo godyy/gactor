@@ -16,6 +16,8 @@ import (
 	"github.com/godyy/gactor/internal/examples/c2s/common/message"
 	"github.com/godyy/gactor/internal/examples/c2s/server/actors"
 	"github.com/godyy/gactor/internal/examples/c2s/server/actors/define"
+	server_ "github.com/godyy/gactor/internal/examples/c2s/server/handlers/server"
+	"github.com/godyy/gactor/internal/examples/c2s/server/handlers/user"
 	"github.com/godyy/gcluster"
 	"github.com/godyy/gcluster/net"
 	"github.com/godyy/gtimewheel"
@@ -250,6 +252,14 @@ func main() {
 			ActorDefines:        define.Defines,
 			ClientActorCategory: consts.CategoryUser,
 			RegistryTTL:         10,
+			Handler: func(ctx *gactor.Context) {
+				switch ctx.Actor().Category() {
+				case consts.CategoryUser:
+					user.Handler()(ctx)
+				case consts.CategoryServer:
+					server_.Handler()(ctx)
+				}
+			},
 		},
 		TimerConfig: gactor.TimerConfig{
 			TimeWheelLevels: []gtimewheel.LevelConfig{
