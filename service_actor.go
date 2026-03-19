@@ -395,7 +395,7 @@ func (s *Service) resolveNodeOfActor(ctx context.Context, mode int, uid ActorUID
 		}
 		if result, err = registry.RegisterActor(ctx, params); err != nil {
 			if errors.Is(err, ErrActorAlreadyRegistered) {
-				err = errCodeActorRegisterByOther
+				err = ErrCodeActorRegisterByOther
 			}
 			return "", "", err
 		}

@@ -44,7 +44,7 @@ func cliHandlePacketRawResp(c *Client, nodeId string, b *Buffer) error {
 	}
 
 	// 发生错误.
-	if head.errCode != errCodeOK {
+	if head.errCode != ErrCodeOK {
 		c.freeBuffer(b)
 		c.handleResponse(ClientResponse{
 			ID:  head.fromId,

@@ -167,7 +167,7 @@ func svcHandlePacketRawReq(s *Service, nodeId string, b *Buffer) error {
 	// 服务必须处于运行状态，否则返回停机错误.
 	if s.checkStarted() != nil {
 		// 编码发送错误响应数据包
-		respHead := newRawRespHeadFromReq(s.genSeq(), errCodeServiceStop, &head)
+		respHead := newRawRespHeadFromReq(s.genSeq(), ErrCodeServiceStop, &head)
 		_ = s.sendRemotePacket(ctx, nodeId, &respHead, nil)
 		return nil
 	}
@@ -228,7 +228,7 @@ func svcHandlePacketS2SRpc(s *Service, nodeId string, b *Buffer) error {
 	// 服务必须处于运行状态，否则返回停机错误.
 	if s.checkStarted() != nil {
 		// 编码发送错误响应数据包
-		respHead := newS2SRpcRespHeadFromReq(s.genSeq(), errCodeServiceStop, &head)
+		respHead := newS2SRpcRespHeadFromReq(s.genSeq(), ErrCodeServiceStop, &head)
 		_ = s.sendRemotePacket(ctx, nodeId, &respHead, nil)
 		return nil
 	}
@@ -277,7 +277,7 @@ func svcHandlePacketS2SRpcResp(s *Service, nodeId string, b *Buffer) error {
 
 	// 处理 RPC 响应
 	var err error
-	if head.errCode != errCodeOK {
+	if head.errCode != ErrCodeOK {
 		err = head.errCode
 	}
 	s.rpcManager.handleResponse(head.reqId, head.fromId, head.toId, b, err)

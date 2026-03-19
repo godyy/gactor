@@ -37,16 +37,16 @@ func (b *Buffer) writePacketType(pt PacketType) (err error) {
 }
 
 // readErrCode 读取错误码.
-func (b *Buffer) readErrCode() (errCode, error) {
+func (b *Buffer) readErrCode() (ErrCode, error) {
 	ec, err := b.ReadUint16()
 	if err != nil {
-		return errCodeOK, err
+		return ErrCodeOK, err
 	}
-	return errCode(ec), nil
+	return ErrCode(ec), nil
 }
 
 // writeErrCode 写入错误码.
-func (b *Buffer) writeErrCode(ec errCode) (err error) {
+func (b *Buffer) writeErrCode(ec ErrCode) (err error) {
 	if err = b.WriteUint16(uint16(ec)); err != nil {
 		return err
 	}

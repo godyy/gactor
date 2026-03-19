@@ -304,14 +304,14 @@ type rawRespPacketHead struct {
 	seq     uint32  // 序号.
 	fromId  int64   // 来自 Actor ID.
 	sid     uint32  // 会话ID.
-	errCode errCode // 错误码.
+	errCode ErrCode // 错误码.
 }
 
-func newRawRespHead(seq uint32, fromId int64, sid uint32, errCode errCode) rawRespPacketHead {
+func newRawRespHead(seq uint32, fromId int64, sid uint32, errCode ErrCode) rawRespPacketHead {
 	return rawRespPacketHead{seq: seq, fromId: fromId, sid: sid, errCode: errCode}
 }
 
-func newRawRespHeadFromReq(seq uint32, errCode errCode, req *rawReqPacketHead) rawRespPacketHead {
+func newRawRespHeadFromReq(seq uint32, errCode ErrCode, req *rawReqPacketHead) rawRespPacketHead {
 	return rawRespPacketHead{seq: seq, fromId: req.toId, sid: req.sid, errCode: errCode}
 }
 
@@ -531,14 +531,14 @@ type s2sRpcRespPacketHead struct {
 	reqId   uint32   // 请求ID.
 	fromId  ActorUID // 来自 Actor ID.
 	toId    ActorUID // 目标 Actor ID.
-	errCode errCode  // 错误码.
+	errCode ErrCode  // 错误码.
 }
 
-func newS2SRpcRespHead(seq uint32, reqId uint32, fromId, toId ActorUID, errCode errCode) s2sRpcRespPacketHead {
+func newS2SRpcRespHead(seq uint32, reqId uint32, fromId, toId ActorUID, errCode ErrCode) s2sRpcRespPacketHead {
 	return s2sRpcRespPacketHead{seq: seq, reqId: reqId, fromId: fromId, toId: toId, errCode: errCode}
 }
 
-func newS2SRpcRespHeadFromReq(seq uint32, errCode errCode, req *s2sRpcPacketHead) s2sRpcRespPacketHead {
+func newS2SRpcRespHeadFromReq(seq uint32, errCode ErrCode, req *s2sRpcPacketHead) s2sRpcRespPacketHead {
 	return s2sRpcRespPacketHead{seq: seq, reqId: req.reqId, fromId: req.toId, toId: req.fromId, errCode: errCode}
 }
 

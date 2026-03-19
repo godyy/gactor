@@ -121,7 +121,7 @@ var (
 func ErrIsServiceStop(err error) bool {
 	return errors.Is(err, ErrServiceStopping) ||
 		errors.Is(err, ErrServiceStopped) ||
-		errors.Is(err, errCodeServiceStop)
+		errors.Is(err, ErrCodeServiceStop)
 }
 
 const (
@@ -433,7 +433,7 @@ func (s *Service) sendLocalPacket(ctx context.Context, ph packetHead, payload an
 	b, err := s.encodePacket(ph, payload)
 	if err != nil {
 		s.logger.ErrorFields("[sendLocalPacket] encode packet failed", lfdPacketType(ph.getPt()), lfdError(err))
-		return errCodeEncodePacketFailed
+		return ErrCodeEncodePacketFailed
 	}
 
 	return s.onLocalPacket(b)
@@ -457,7 +457,7 @@ func (s *Service) sendRemotePacket(ctx context.Context, nodeId string, ph packet
 	b, err := s.encodePacket(ph, payload)
 	if err != nil {
 		s.logger.ErrorFields("[sendRemotePacket] encode packet failed", lfdPacketType(ph.getPt()), lfdError(err))
-		return errCodeEncodePacketFailed
+		return ErrCodeEncodePacketFailed
 	}
 
 	// 添加待确认数据包.

@@ -51,7 +51,7 @@ type request interface {
 
 	// replyError 回复错误码.
 	// * 回复成功后调用无任何效果
-	replyError(ctx *Context, ec errCode) error
+	replyError(ctx *Context, ec ErrCode) error
 
 	// replyDecodeError 回复解码错误.
 	// * 回复成功后调用无任何效果.
@@ -155,10 +155,10 @@ func (req *rawRequest) reply(ctx *Context, payload any) error {
 		return nil
 	}
 
-	head := newRawRespHead(ctx.service().genSeq(), ctx.actor.core().id, req.sid, errCodeOK)
+	head := newRawRespHead(ctx.service().genSeq(), ctx.actor.core().id, req.sid, ErrCodeOK)
 	if err := ctx.service().sendRemotePacket(ctx, req.fromNodeId, &head, payload); err != nil {
-		if errors.Is(err, errCodeEncodePacketFailed) {
-			return req.replyError(ctx, errCodeEncodePacketFailed)
+		if errors.Is(err, ErrCodeEncodePacketFailed) {
+			return req.replyError(ctx, ErrCodeEncodePacketFailed)
 		}
 		return err
 	}
@@ -169,10 +169,10 @@ func (req *rawRequest) reply(ctx *Context, payload any) error {
 }
 
 func (req *rawRequest) replyDecodeError(ctx *Context) error {
-	return req.replyError(ctx, errCodeDecodePacketFailed)
+	return req.replyError(ctx, ErrCodeDecodePacketFailed)
 }
 
-func (req *rawRequest) replyError(ctx *Context, ec errCode) error {
+func (req *rawRequest) replyError(ctx *Context, ec ErrCode) error {
 	if req.replied {
 		return nil
 	}
@@ -208,7 +208,7 @@ func (req *rawRequest) beforeHandle(ctx *Context) error {
 	}
 
 	if !ca.session.IsConnected() {
-		_ = req.replyError(ctx, errCodeActorNotConnect)
+		_ = req.replyError(ctx, ErrCodeActorNotConnect)
 		return errSkipHandleRequest
 	}
 
@@ -217,7 +217,7 @@ func (req *rawRequest) beforeHandle(ctx *Context) error {
 		SID:    req.sid,
 	}
 	if reqSession != ca.session {
-		_ = req.replyError(ctx, errCodeActorOtherConnect)
+		_ = req.replyError(ctx, ErrCodeActorOtherConnect)
 		return errSkipHandleRequest
 	}
 
@@ -278,10 +278,10 @@ func (req *rpcRequest) reply(ctx *Context, payload any) error {
 		return nil
 	}
 
-	head := newS2SRpcRespHead(ctx.service().genSeq(), req.reqId, ctx.actor.ActorUID(), req.fromId, errCodeOK)
+	head := newS2SRpcRespHead(ctx.service().genSeq(), req.reqId, ctx.actor.ActorUID(), req.fromId, ErrCodeOK)
 	if err := ctx.service().sendPacket(ctx, req.fromNodeId, &head, payload); err != nil {
-		if errors.Is(err, errCodeEncodePacketFailed) {
-			return req.replyError(ctx, errCodeEncodePacketFailed)
+		if errors.Is(err, ErrCodeEncodePacketFailed) {
+			return req.replyError(ctx, ErrCodeEncodePacketFailed)
 		}
 		return err
 	}
@@ -292,10 +292,10 @@ func (req *rpcRequest) reply(ctx *Context, payload any) error {
 }
 
 func (req *rpcRequest) replyDecodeError(ctx *Context) error {
-	return req.replyError(ctx, errCodeDecodePacketFailed)
+	return req.replyError(ctx, ErrCodeDecodePacketFailed)
 }
 
-func (req *rpcRequest) replyError(ctx *Context, ec errCode) error {
+func (req *rpcRequest) replyError(ctx *Context, ec ErrCode) error {
 	if req.replied {
 		return nil
 	}
@@ -375,7 +375,7 @@ func (req *castRequest) replyDecodeError(ctx *Context) error {
 	return nil
 }
 
-func (req *castRequest) replyError(ctx *Context, _ errCode) error {
+func (req *castRequest) replyError(ctx *Context, _ ErrCode) error {
 	return nil
 }
 

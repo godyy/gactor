@@ -48,7 +48,7 @@ func actorBeforeLoop(a actorImpl) error {
 	if err := a.Behavior().OnStart(); err != nil {
 		core.getLogger().ErrorFields("OnStart failed", lfdError(err))
 		a.core().service().monitorActorOnStartErr(a.core().category)
-		return errCodeStartActorFailed
+		return ErrCodeStartActorFailed
 	}
 
 	core.getLogger().DebugFields("OnStart")
@@ -63,7 +63,7 @@ func actorBeforeLoop(a actorImpl) error {
 func actorLoop(a actorImpl) {
 	defer recoverAndLog("actor loop panic", a.core().getLogger(), func() {
 		a.core().service().monitorActorPanic(a.core().category)
-		actorStopWithErr(a, errCodeActorLoopError)
+		actorStopWithErr(a, ErrCodeActorLoopError)
 	})
 
 	// 主循环前置逻辑.
@@ -103,7 +103,7 @@ func actorLoop(a actorImpl) {
 				if a.core().service().isRunning() {
 					actorDrain(a, nil)
 				} else {
-					actorDrain(a, errCodeServiceStop)
+					actorDrain(a, ErrCodeServiceStop)
 				}
 
 				// 检查是否可以停止.

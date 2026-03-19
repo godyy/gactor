@@ -81,7 +81,7 @@ func lfdTimeout(timeout int64) zap.Field {
 	return zap.Int64("timeout", timeout)
 }
 
-func lfdErrCode(ec errCode) zap.Field {
+func lfdErrCode(ec ErrCode) zap.Field {
 	return zap.String("errcode", ec.String())
 }
 
