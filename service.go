@@ -14,9 +14,6 @@ import (
 	pkgerrors "github.com/pkg/errors"
 )
 
-// ErrBytesEscape 表示字节切片逃逸.
-var ErrBytesEscape = errors.New("gactor: bytes escape")
-
 // ServiceHandler 封装 Service 处理器需要实现的功能.
 type ServiceHandler interface {
 	// GetActorRegistry 获取 Actor 注册表.
@@ -119,6 +116,13 @@ var (
 	// ErrServiceStopped 服务已停机.
 	ErrServiceStopped = errors.New("gactor: service stopped")
 )
+
+// ErrIsServiceStop error 是否表示服务停机.
+func ErrIsServiceStop(err error) bool {
+	return errors.Is(err, ErrServiceStopping) ||
+		errors.Is(err, ErrServiceStopped) ||
+		errors.Is(err, errCodeServiceStop)
+}
 
 const (
 	serviceStateInit     = 0 // 初始化.
@@ -308,6 +312,24 @@ func (s *Service) isRunning() bool {
 	s.mtxState.RLock()
 	defer s.mtxState.RUnlock()
 	return s.state == serviceStateStarted
+}
+
+// checkStarted 检查是否正在运行.
+func (s *Service) checkStarted() error {
+	if err := s.lockState(serviceStateStarted, true); err != nil {
+		return err
+	}
+	s.unlockState(true)
+	return nil
+}
+
+// checkNotStopped 检查是否已启动且未完全停机.
+func (s *Service) checkNotStopped() error {
+	if err := s.lockNotStopped(true); err != nil {
+		return err
+	}
+	s.unlockState(true)
+	return nil
 }
 
 // Start 启动.

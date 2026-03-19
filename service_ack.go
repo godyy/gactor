@@ -81,10 +81,9 @@ func (s *Service) sendAckPacket(nodeId string, ph packetHead) error {
 
 // onAckRetry 处理 Ack 重试.
 func (s *Service) onAckRetry(ap ackPacket) {
-	if err := s.lockNotStopped(true); err != nil {
+	if err := s.checkNotStopped(); err != nil {
 		return
 	}
-	defer s.unlockState(true)
 
 	ctx, cancel := context.WithTimeout(context.Background(), s.ackManager.getCfg().Timeout)
 	defer cancel()
@@ -98,10 +97,9 @@ func (s *Service) onAckRetry(ap ackPacket) {
 
 // onAckFailed 处理 Ack 失败.
 func (s *Service) onAckOver(ap ackPacket, reason ackOverReason) {
-	if err := s.lockNotStopped(true); err != nil {
+	if err := s.checkNotStopped(); err != nil {
 		return
 	}
-	defer s.unlockState(true)
 
 	if reason.isFailed() {
 		s.logger.ErrorFields("packet to ack failed", lfdRemoteNodeId(ap.nodeId), lfdPacketType(ap.pt), lfdSeq(ap.seq))

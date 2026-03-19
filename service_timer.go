@@ -74,10 +74,9 @@ func (s *Service) StartTimer(d time.Duration, periodic bool, args any, cb TimerF
 		panic("gactor: cb is nil")
 	}
 
-	if err := s.lockState(serviceStateStarted, true); err != nil {
+	if s.checkStarted() != nil {
 		return TimerIdNone
 	}
-	defer s.unlockState(true)
 
 	s.mtxTimer.RLock()
 	defer s.mtxTimer.RUnlock()
@@ -101,10 +100,9 @@ func (s *Service) StartTimer(d time.Duration, periodic bool, args any, cb TimerF
 
 // StopTimer 停止定时器.
 func (s *Service) StopTimer(tid TimerId) {
-	if err := s.lockState(serviceStateStarted, true); err != nil {
+	if s.checkStarted() != nil {
 		return
 	}
-	defer s.unlockState(true)
 
 	if s.timeWheel.RemoveTimer(tid) {
 		// 更新监控数据.

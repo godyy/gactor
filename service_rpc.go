@@ -58,6 +58,11 @@ func (s *Service) doRPC(ctx context.Context, from ActorUID, to ActorUID, params 
 		defer cancel()
 	}
 
+	// 检查服务状态
+	if err := s.checkNotStopped(); err != nil {
+		return err
+	}
+
 	// 获取目标 Actor 所在节点信息.
 	toNodeId, leaseId, err = s.resolveNodeOfActor(ctx, actorNodeModeRouter, to)
 	if err != nil {
@@ -75,6 +80,10 @@ func (s *Service) doRPC(ctx context.Context, from ActorUID, to ActorUID, params 
 	seq := s.genSeq()
 
 	if toNodeId != s.nodeId() {
+		if err := s.checkNotStopped(); err != nil {
+			return err
+		}
+
 		// 目标节点非本地.
 		// 编码数据包并发送到远端节点.
 		ph := s2sRpcPacketHead{
@@ -142,6 +151,7 @@ func (cb *rpcDoneFunc) invoke(resp *RPCResp) {
 }
 
 // rpc 向 to 指向的 Actor 发起 RPC 调用.
+// 若 Service 未启动或停机, 返回错误.
 func (s *Service) rpc(ctx context.Context, from, to ActorUID, params any, reply any) error {
 	// 执行同步RPC 调用.
 	doneFunc := rpcDoneFunc{
@@ -158,25 +168,18 @@ func (s *Service) rpc(ctx context.Context, from, to ActorUID, params any, reply 
 	return doneFunc.err
 }
 
-// RPC 向 to 指向的 Actor 发起 RPC 调用. 若 Service 未启动或停机, 返回错误.
+// RPC 向 to 指向的 Actor 发起 RPC 调用.
 func (s *Service) RPC(ctx context.Context, to ActorUID, params any, reply any) error {
-	if err := s.lockState(serviceStateStarted, true); err != nil {
-		return err
-	}
-	defer s.unlockState(true)
 	return s.rpc(ctx, ActorUID{}, to, params, reply)
 }
 
 // asyncRPC 向 to 指向的 Actor 发起异步 RPC 调用.
+// 若 Service 未启动或停机, 返回错误.
 func (s *Service) asyncRPC(ctx context.Context, from, to ActorUID, params any, cb RPCFunc) error {
 	return s.doRPC(ctx, from, to, params, cb, true)
 }
 
-// AsyncRPC 向 to 指向的 Actor 发起异步 RPC 调用. 若 Service 未启动或停机, 返回错误.
+// AsyncRPC 向 to 指向的 Actor 发起异步 RPC 调用.
 func (s *Service) AsyncRPC(ctx context.Context, to ActorUID, params any, cb RPCFunc) error {
-	if err := s.lockState(serviceStateStarted, true); err != nil {
-		return err
-	}
-	defer s.unlockState(true)
 	return s.asyncRPC(ctx, ActorUID{}, to, params, cb)
 }

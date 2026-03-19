@@ -1,7 +1,6 @@
 package gactor
 
 import (
-	"errors"
 	"fmt"
 
 	pkgerrors "github.com/pkg/errors"
@@ -45,7 +44,7 @@ func cliHandlePacketRawResp(c *Client, nodeId string, b *Buffer) error {
 	}
 
 	// 发生错误.
-	if !errors.Is(head.errCode, errCodeOK) {
+	if head.errCode != errCodeOK {
 		c.freeBuffer(b)
 		c.handleResponse(ClientResponse{
 			ID:  head.fromId,

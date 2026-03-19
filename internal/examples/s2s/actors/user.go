@@ -49,7 +49,7 @@ func (u *User) OnDisconnected() {
 }
 
 func randomGetServerName(u *User) {
-	d := time.Duration(100+rd.Intn(400)) * time.Millisecond
+	d := time.Duration(100+rand.Intn(400)) * time.Millisecond
 	u.StartTimer(d, false, nil, onRandomGetServerName)
 }
 
@@ -80,9 +80,3 @@ var getServerNameRPCCallback = WrapRPCCallback(func(u *User, reply *message.GetS
 	}
 	//randomGetServerName(u)
 })
-
-var rd *rand.Rand
-
-func init() {
-	rd = rand.New(rand.NewSource(time.Now().UnixNano()))
-}

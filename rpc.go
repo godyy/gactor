@@ -245,10 +245,8 @@ func (m *rpcManager) resetTimer(expiredAt int64) {
 
 	d := time.Duration(expiredAt - time.Now().UnixNano())
 	if d <= 0 {
-		m.enqueueCmd(&rpcCmdTick{tid: TimerIdNone})
-		return
+		d = time.Millisecond * 1
 	}
-
 	m.timerId = m.svc.StartTimer(d, false, nil, m.onTimer)
 }
 
@@ -339,14 +337,16 @@ func (m *rpcManager) handleCallDone(call *rpcCall, payload *Buffer, err error) {
 	}
 
 	call.onResponse(payload, err)
-	m.completedCalls <- call
+
+	chStop := m.svc.getStopWait().C
+	select {
+	case m.completedCalls <- call:
+	case <-chStop:
+	}
 }
 
 // handleResponse 处理 RPC Response. 返回对应的 rpcCall 是否存在.
 func (m *rpcManager) handleResponse(reqId uint32, from, to ActorUID, payload *Buffer, err error) {
-	if errors.Is(err, errCodeOK) {
-		err = nil
-	}
 	m.enqueueCmd(newRPCCmdResp(reqId, from, to, payload, err))
 }
 

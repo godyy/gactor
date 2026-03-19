@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"math/rand"
 	stdnet "net"
 	"os"
 	"os/signal"
@@ -49,7 +50,7 @@ var (
 			Name:           "server",
 			Category:       actors.CategoryServer,
 			Priority:       1,
-			MessageBoxSize: 1000,
+			MessageBoxSize: 10000,
 			BehaviorCreator: func(actor gactor.Actor) gactor.ActorBehavior {
 				return actors.NewServer(actor)
 			},
@@ -76,6 +77,8 @@ func (m *s2sMeta) GetNodeId() string {
 }
 
 func main() {
+	rand.Seed(time.Now().UnixNano())
+
 	if err := logger.Init(); err != nil {
 		panic(pkgerrors.WithMessage(err, "init logger"))
 	}
@@ -85,8 +88,9 @@ func main() {
 		Category: actors.CategoryServer,
 		ID:       1,
 	}] = s2NodeId
-	userIds = make([]gactor.ActorUID, 8000)
-	for i := 0; i < 8000; i++ {
+	userAmount := 8000
+	userIds = make([]gactor.ActorUID, userAmount)
+	for i := 0; i < userAmount; i++ {
 		uid := gactor.ActorUID{
 			Category: actors.CategoryUser,
 			ID:       int64(i),
@@ -184,10 +188,11 @@ func main() {
 				{Name: "m", Span: 1 * time.Minute, Slots: 60},
 				{Name: "hour", Span: 1 * time.Hour, Slots: 24},
 			},
+			MaxTriggerdTimerAmount: 10000,
 		},
 		RPCConfig: gactor.RPCConfig{
 			DefRPCTimeout:    0,
-			MaxRPCCallAmount: 0,
+			MaxRPCCallAmount: 10000,
 		},
 
 		MaxRTT:  0,
@@ -266,6 +271,8 @@ func main() {
 	chSignal := make(chan os.Signal, 1)
 	signal.Notify(chSignal, syscall.SIGINT, syscall.SIGTERM)
 	<-chSignal
+
+	// time.Sleep(10 * time.Second)
 
 	_ = s1.Stop()
 	_ = s2.Stop()

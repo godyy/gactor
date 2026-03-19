@@ -133,9 +133,6 @@ func (s *Service) stopCategoryActors(categoryActors *categoryActors) bool {
 	return stopped
 }
 
-// ErrActorDeployedOnOtherNode Actor 部署在其它节点上.
-var ErrActorDeployedOnOtherNode = errors.New("gactor: actor deployed on other node")
-
 // StartActor 尝试启动 uid 指定的 Actor, 通过向 Actor 投递消息并检查消息的处理
 // 结果来判断是否启动成功.
 // PS: 即使 Actor 已经被启动, 仍会向其投递消息, 并检查处理结果.
@@ -207,6 +204,11 @@ func (s *Service) getCategoryActorsByCategory(category uint16) *categoryActors {
 // startActor 启动 uid 指定的 Actor.
 // 如果 leaseId 为空, 需要同时注册 Actor.
 func (s *Service) startActor(ctx context.Context, uid ActorUID, leaeId string) (actorImpl, error) {
+	// 检查装运行状态
+	if err := s.checkStarted(); err != nil {
+		return nil, err
+	}
+
 	// 获取 Actor 定义.
 	define := s.getDefine(uid.Category)
 	if define == nil {
@@ -456,24 +458,39 @@ func (s *Service) send2LocalActor(ctx context.Context, uid ActorUID, msg message
 		defer cancel()
 	}
 
-	// 尝试引用本地的actor.
-	actor, err := s.refActor(uid)
-	if err != nil {
-		return err
-	}
-
-	// 若 Actor 不存在, 尝试启动 Actor.
-	if actor == nil {
-		actor, err = s.startActor(ctx, uid, leaseId)
+	for {
+		// 尝试引用本地的actor.
+		actor, err := s.refActor(uid)
 		if err != nil {
 			return err
 		}
+
+		// 若 Actor 不存在, 尝试启动 Actor.
+		if actor == nil {
+			actor, err = s.startActor(ctx, uid, leaseId)
+			if err != nil {
+				return err
+			}
+		}
+
+		// 投递消息
+		if err := actor.core().receiveMessage(ctx, msg); err == nil {
+			// 投递成功
+			actor.core().deref()
+			return nil
+		} else if ErrIsServiceStop(err) {
+			// 投递失败，Actor停机
+			actor.core().deref()
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			continue
+		} else {
+			// 投递失败, 其它错误
+			actor.core().deref()
+			return err
+		}
 	}
-
-	// 解除引用.
-	defer actor.core().deref()
-
-	return actor.core().receiveMessage(ctx, msg)
 }
 
 // onActorStopped 处理 Actor 停机完成事件.
@@ -517,6 +534,11 @@ func (s *Service) cast(ctx context.Context, from, to ActorUID, payload any) erro
 		defer cancel()
 	}
 
+	// 检查服务状态
+	if err := s.checkNotStopped(); err != nil {
+		return err
+	}
+
 	// 获取目标 Actor 所在节点信息.
 	toNodeId, leaseId, err = s.resolveNodeOfActor(ctx, actorNodeModeRouter, to)
 	if err != nil {
@@ -530,6 +552,10 @@ func (s *Service) cast(ctx context.Context, from, to ActorUID, payload any) erro
 	// 如果 Actor 位于其它节点.
 	// 编码数据并发送到远端.
 	if toNodeId != s.nodeId() {
+		if err := s.checkNotStopped(); err != nil {
+			return err
+		}
+
 		ph := s2sCastPacketHead{
 			seq:    seq,
 			fromId: from,
@@ -565,10 +591,6 @@ func (s *Service) cast(ctx context.Context, from, to ActorUID, payload any) erro
 
 // Cast 向 to 指向的 Actor 投递消息. 若 Service 未启动或停机, 返回错误.
 func (s *Service) Cast(ctx context.Context, to ActorUID, payload any) error {
-	if err := s.lockState(serviceStateStarted, true); err != nil {
-		return err
-	}
-	defer s.unlockState(true)
 	return s.cast(ctx, ActorUID{}, to, payload)
 }
 
@@ -633,7 +655,17 @@ func (s *actorStarter) start(svc *Service) {
 	s.state = 1
 	s.mtx.Unlock()
 
-	svc.getLogger().DebugFields("actorStarter start", svc.lfdActorUID("uid", s.uid))
+	categoryActors := svc.getCategoryActorsByCategory(s.uid.Category)
+	defer categoryActors.delStarter(s.uid.ID)
+
+	// 检查服务状态
+	if err := svc.checkStarted(); err != nil {
+		s.complete(nil, err)
+		svc.getLogger().WarnFields("actorStarter start failed, service not started", svc.lfdActorUID("uid", s.uid))
+		return
+	} else {
+		svc.getLogger().DebugFields("actorStarter start", svc.lfdActorUID("uid", s.uid))
+	}
 
 	// 注册 Actor.
 	if err := s.registerActor(svc); err != nil {
@@ -642,8 +674,14 @@ func (s *actorStarter) start(svc *Service) {
 		return
 	}
 
-	categoryActors := svc.getCategoryActorsByCategory(s.uid.Category)
-	defer categoryActors.delStarter(s.uid.ID)
+	// 检查服务状态, 若服务非运行状态, 注销 Actor.
+	if err := svc.lockState(serviceStateStarted, true); err != nil {
+		svc.getLogger().WarnFields("after register actor, service not started", svc.lfdActorUID("uid", s.uid))
+		s.complete(nil, err)
+		s.unreigsterActor(svc)
+		return
+	}
+	defer svc.unlockState(true)
 
 	// 创建并启动 Actor.
 	actor := svc.createActor(s.uid, s.leaseId)
@@ -684,6 +722,29 @@ func (s *actorStarter) registerActor(svc *Service) error {
 		return err
 	}
 	s.leaseId = leasId
+	return nil
+}
+
+// unreigsterActor 注销 Actor.
+func (s *actorStarter) unreigsterActor(svc *Service) error {
+	if s.leaseId == "" {
+		return nil
+	}
+
+	reg := svc.getCfg().Handler.GetActorRegistry()
+
+	ctx, cancel := context.WithTimeout(context.Background(), actorReigsterTimeout)
+	defer cancel()
+
+	if err := reg.UnregisterActor(ctx, ActorUnregisterParams{
+		UID:     s.uid,
+		NodeId:  svc.nodeId(),
+		LeaseId: s.leaseId,
+	}); err != nil {
+		return err
+	}
+
+	s.leaseId = ""
 	return nil
 }
 
@@ -754,7 +815,7 @@ func (ca *categoryActors) refActor(id int64) (actorImpl, error) {
 		return actor, nil
 	}
 
-	if errors.Is(err, ErrActorStopping) || errors.Is(err, ErrActorStopped) {
+	if ErrIsActorStop(err) {
 		return nil, nil
 	}
 

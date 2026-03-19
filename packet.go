@@ -1,6 +1,7 @@
 package gactor
 
 import (
+	"errors"
 	"unsafe"
 
 	pkgerrors "github.com/pkg/errors"
@@ -36,6 +37,9 @@ type PacketAllocator interface {
 	// 返回的缓冲区中已经填充好包头信息. 只需往里写入负载数据.
 	AllocBuf(b *Buffer, payloadLen int) error
 }
+
+// ErrBytesEscape 表示字节切片逃逸.
+var ErrBytesEscape = errors.New("gactor: bytes escape")
 
 // PacketCodec 数据包编解码器.
 type PacketCodec interface {
@@ -297,6 +301,11 @@ func (ph *rawRespPacketHead) getSize() int {
 	return sizeOfRawRespPacketHead
 }
 
+func (ph *rawRespPacketHead) copyFromReq(req *rawReqPacketHead) {
+	ph.fromId = req.toId
+	ph.sid = req.sid
+}
+
 func (ph *rawRespPacketHead) encode(b *Buffer) error {
 	if err := b.WriteUint32(ph.seq); err != nil {
 		return pkgerrors.WithMessage(err, "write seq")
@@ -515,6 +524,12 @@ func (ph *s2sRpcRespPacketHead) getFlag() s2sPacketFlag {
 		flag.setToId()
 	}
 	return flag
+}
+
+func (ph *s2sRpcRespPacketHead) copyFromReq(req *s2sRpcPacketHead) {
+	ph.reqId = req.reqId
+	ph.fromId = req.toId
+	ph.toId = req.fromId
 }
 
 func (ph *s2sRpcRespPacketHead) encode(b *Buffer) error {

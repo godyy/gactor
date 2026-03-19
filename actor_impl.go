@@ -97,21 +97,28 @@ func actorLoop(a actorImpl) {
 			// 处理异步 RPC 调用.
 			actorInvokeAsyncRPCFunc(a, &call)
 
-		case <-core.sigPrepareStop:
-			// 清空信箱.
-			actorDrain(a, nil)
-
-			// 尝试 stopping.
-			if err := core.prepareStopping(); err != nil {
-				if errors.Is(err, ErrActorBeReferenced) || errors.Is(err, ErrActorMessageNotDrained) {
-					runtime.Gosched()
-					continue
+		case <-core.sigStop:
+			for {
+				// 清空信箱.
+				if a.core().service().isRunning() {
+					actorDrain(a, nil)
+				} else {
+					actorDrain(a, errCodeServiceStop)
 				}
-				core.getLogger().ErrorFields("prepare stopping failed", lfdError(err))
-			}
 
-			actorStopped(a)
-			return
+				// 检查是否可以停止.
+				if err := actorCheckCouldStopped(a); err != nil {
+					if errors.Is(err, ErrActorBeReferenced) || errors.Is(err, ErrActorMessageNotDrained) {
+						runtime.Gosched()
+						continue
+					}
+
+					core.getLogger().ErrorFields("check could stopped failed", lfdError(err))
+				}
+
+				actorStopped(a)
+				return
+			}
 		}
 	}
 }
@@ -129,6 +136,26 @@ func actorStopWithErr(a actorImpl, err error) {
 	actorDrain(a, err)
 
 	actorStopped(a)
+}
+
+// actorCheckCouldStopped 检查 Actor 是否能够停机.
+func actorCheckCouldStopped(a actorImpl) error {
+	core := a.core()
+
+	if err := core.lockState(actorStateStopping, true); err != nil {
+		return err
+	}
+
+	defer core.unlock(true)
+
+	if core.refCount > 0 {
+		return ErrActorBeReferenced
+	}
+	if len(core.messageBox) > 0 || len(core.completedAsyncRPC) > 0 {
+		return ErrActorMessageNotDrained
+	}
+
+	return nil
 }
 
 // actorStopped Actor 最终停机逻辑.
@@ -155,9 +182,9 @@ func actorUnregister(a actorImpl) {
 	svc := core.service()
 	reg := svc.getCfg().Handler.GetActorRegistry()
 
-	// 若设置 actorFlagShutdown 标志, 直接注销.
+	// 若设置 actorFlagShutdown 标志, 或服务即将停机. 直接注销.
 	// 否则, 使其在注册表中再存续一小段时间, 方便再次唤醒.
-	if core.hasFlag(actorFlagShutdown) {
+	if core.hasFlag(actorFlagShutdown) || !svc.isRunning() {
 		ctx, cancel := context.WithTimeout(context.Background(), actorReigsterTimeout)
 		defer cancel()
 		if err := reg.UnregisterActor(ctx, ActorUnregisterParams{
@@ -291,17 +318,11 @@ var (
 	// ErrActorNotBeReferenced 表示 Actor 未被引用.
 	ErrActorNotBeReferenced = errors.New("gactor: actor not be referenced")
 
-	// ErrNotCActor 表示不是 CActor.
-	ErrNotCActor = errors.New("gactor: not CActor")
-
 	// ErrActorNotStarted 表示 Actor 未启动.
 	ErrActorNotStarted = errors.New("gactor: actor not started")
 
 	// ErrActorStarted 表示 Actor 已启动.
 	ErrActorStarted = errors.New("gactor: actor started")
-
-	// ErrActorPrepareStop 表示 Actor 准备停机.
-	ErrActorPrepareStop = errors.New("gactor: actor prepare stop")
 
 	// ErrActorStopping 表示 Actor 正在停机.
 	ErrActorStopping = errors.New("gactor: actor stopping")
@@ -313,21 +334,24 @@ var (
 	ErrActorMessageNotDrained = errors.New("gactor: actor message not drained")
 )
 
+// ErrIsActorStop error 是否表示 Actor 停机.
+func ErrIsActorStop(err error) bool {
+	return errors.Is(err, ErrActorStopping) || errors.Is(err, ErrActorStopped)
+}
+
 const (
-	actorStateInit        = 0 // 初始状态.
-	actorStateStarted     = 1 // 已启动.
-	actorStatePrepareStop = 2 // 准备停机.
-	actorStateStopping    = 3 // 正在停机.
-	actorStateStopped     = 4 // 已停机.
+	actorStateInit     = 0 // 初始状态.
+	actorStateStarted  = 1 // 已启动.
+	actorStateStopping = 2 // 正在停机.
+	actorStateStopped  = 3 // 已停机.
 )
 
 // actorStateErrs Actor State error 映射.
 var actorStateErrs = map[int8]error{
-	actorStateInit:        ErrActorNotStarted,
-	actorStateStarted:     ErrActorStarted,
-	actorStatePrepareStop: ErrActorPrepareStop,
-	actorStateStopping:    ErrActorStopping,
-	actorStateStopped:     ErrActorStopped,
+	actorStateInit:     ErrActorNotStarted,
+	actorStateStarted:  ErrActorStarted,
+	actorStateStopping: ErrActorStopping,
+	actorStateStopped:  ErrActorStopped,
 }
 
 func actorStateErr(state int8) error {
@@ -367,7 +391,7 @@ type actorCore struct {
 	messageBox        chan message                // 信箱.
 	triggeredTimer    chan actorTriggeredTimer    // 已触发的定时器.
 	completedAsyncRPC chan actorCompletedAsyncRPC // 已完成的异步 RPC 调用.
-	sigPrepareStop    chan struct{}               // 准备停机信号.
+	sigStop           chan struct{}               // 停机信号.
 	logger            glog.Logger                 // 日志工具.
 
 	mtx              sync.RWMutex // 读写锁.
@@ -388,7 +412,7 @@ func newActorCore(ad *actorDefineBase, id int64, leaseId string, svc *Service) *
 		messageBox:        make(chan message, ad.messageBoxSize),
 		triggeredTimer:    make(chan actorTriggeredTimer, ad.maxTriggeredTimerAmount),
 		completedAsyncRPC: make(chan actorCompletedAsyncRPC, ad.maxCompletedAsyncRPCAmount),
-		sigPrepareStop:    make(chan struct{}),
+		sigStop:           make(chan struct{}),
 		logger: svc.oriLogger.Named("actor").
 			WithFields(lfdCategoryName(ad.name), lfdId(id)),
 		state:    actorStateInit,
@@ -434,6 +458,28 @@ func (a *actorCore) lockState(needState int8, read bool) error {
 	return actorStateErr(state)
 }
 
+// lockNotStopped 锁定未停止状态.
+func (a *actorCore) lockNotStopped(read bool) error {
+	if read {
+		a.mtx.RLock()
+	} else {
+		a.mtx.Lock()
+	}
+
+	state := a.state
+	if state == actorStateStarted || state == actorStateStopping {
+		return nil
+	}
+
+	if read {
+		a.mtx.RUnlock()
+	} else {
+		a.mtx.Unlock()
+	}
+
+	return actorStateErr(state)
+}
+
 // unlock 解锁.
 func (a *actorCore) unlock(read bool) {
 	if read {
@@ -448,6 +494,24 @@ func (a *actorCore) isRunning() bool {
 	a.mtx.RLock()
 	defer a.mtx.RUnlock()
 	return a.state == actorStateStarted
+}
+
+// checkStarted 检查是运行中.
+func (a *actorCore) checkStarted() error {
+	if err := a.lockState(actorStateStarted, true); err != nil {
+		return err
+	}
+	a.unlock(true)
+	return nil
+}
+
+// checkNotStopped 检查是否未停止.
+func (a *actorCore) checkNotStopped() error {
+	if err := a.lockNotStopped(true); err != nil {
+		return err
+	}
+	a.unlock(true)
+	return nil
 }
 
 // updateFlag 更新标志
@@ -494,40 +558,14 @@ func (a *actorCore) stop(shutdown bool) error {
 	}
 	defer a.unlock(false)
 
-	// 若仍被引用, 无法停机.
-	if a.refCount > 0 {
-		a.getLogger().Debug("refCount", a.refCount)
-		return ErrActorBeReferenced
-	}
+	// 不用管引用计数.
 
-	// 进入停机状态.
-	a.state = actorStatePrepareStop
+	// 开始停机.
+	a.state = actorStateStopping
 	if shutdown {
 		a.updateFlag(actorFlagShutdown, true)
 	}
-	close(a.sigPrepareStop)
-	return nil
-}
-
-// prepareStopping 尝试从 actorStatePrepareStop 进入 actorStateStopping 状态.
-func (a *actorCore) prepareStopping() error {
-	// 锁定状态, 检查是否未被引用, 且信箱已清空.
-	// 上述条件均满足即可完成停机.
-	if err := a.lockState(actorStatePrepareStop, false); err != nil {
-		a.getLogger().ErrorFields("prepare stop, but lock state failed", lfdError(err))
-		return err
-	}
-	if a.refCount > 0 {
-		a.unlock(false)
-		return ErrActorBeReferenced
-	}
-	if len(a.messageBox) > 0 {
-		a.unlock(false)
-		return ErrActorMessageNotDrained
-	}
-	a.state = actorStateStopping
-	a.unlock(false)
-
+	close(a.sigStop)
 	return nil
 }
 
@@ -535,9 +573,7 @@ func (a *actorCore) prepareStopping() error {
 func (a *actorCore) stopWithErr() error {
 	// 锁定状态.
 	if err := a.lockState(actorStateStarted, false); err != nil {
-		if err := a.lockState(actorStatePrepareStop, false); err != nil {
-			return err
-		}
+		return err
 	}
 	a.state = actorStateStopping
 	a.unlock(false)
@@ -553,7 +589,7 @@ func (a *actorCore) stopped(f func()) {
 	a.svc = nil
 	close(a.messageBox)
 	a.messageBox = nil
-	a.sigPrepareStop = nil
+	a.sigStop = nil
 	if a.completedAsyncRPC != nil {
 		close(a.completedAsyncRPC)
 		a.completedAsyncRPC = nil
@@ -565,31 +601,9 @@ func (a *actorCore) stopped(f func()) {
 	a.unlock(false)
 }
 
-// lockRef 锁定可以被引用的状态.
-func (a *actorCore) lockRef(read bool) error {
-	if read {
-		a.mtx.RLock()
-	} else {
-		a.mtx.Lock()
-	}
-
-	state := a.state
-	if state == actorStateStarted || state == actorStatePrepareStop {
-		return nil
-	}
-
-	if read {
-		a.mtx.RUnlock()
-	} else {
-		a.mtx.Unlock()
-	}
-
-	return actorStateErr(state)
-}
-
 // ref 引用.
 func (a *actorCore) ref() error {
-	if err := a.lockRef(false); err != nil {
+	if err := a.lockState(actorStateStarted, false); err != nil {
 		return err
 	}
 	defer a.unlock(false)
@@ -600,7 +614,7 @@ func (a *actorCore) ref() error {
 
 // ref 解除引用.
 func (a *actorCore) deref() error {
-	if err := a.lockRef(false); err != nil {
+	if err := a.lockNotStopped(false); err != nil {
 		return err
 	}
 	defer a.unlock(false)
@@ -616,12 +630,11 @@ func (a *actorCore) deref() error {
 
 // receiveMessage 接收消息.
 func (a *actorCore) receiveMessage(ctx context.Context, msg message) error {
-	if err := a.lockRef(true); err != nil {
+	if err := ctx.Err(); err != nil {
 		return err
 	}
-	defer a.unlock(true)
 
-	if err := ctx.Err(); err != nil {
+	if err := a.checkStarted(); err != nil {
 		return err
 	}
 
@@ -630,17 +643,18 @@ func (a *actorCore) receiveMessage(ctx context.Context, msg message) error {
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
+	case <-a.sigStop:
+		return a.checkStarted()
 	}
 }
 
 // receiveCompletedAsyncRPC 接收已完成的异步 RPC 调用.
 func (a *actorCore) receiveCompletedAsyncRPC(ctx context.Context, resp *RPCResp, cb ActorRPCFunc) error {
-	if err := a.lockRef(true); err != nil {
+	if err := ctx.Err(); err != nil {
 		return err
 	}
-	defer a.unlock(true)
 
-	if err := ctx.Err(); err != nil {
+	if err := a.checkNotStopped(); err != nil {
 		return err
 	}
 
@@ -677,10 +691,9 @@ func (a *actorCore) resetRecycleTimer(stop bool) {
 
 // StartTimer 启动定时器.
 func (a *actorCore) StartTimer(d time.Duration, periodic bool, args any, cb ActorTimerFunc) TimerId {
-	if err := a.lockState(actorStateStarted, true); err != nil {
-		return 0
+	if a.checkStarted() != nil {
+		return TimerIdNone
 	}
-	defer a.unlock(true)
 
 	return a.svc.startActorTimer(a.ActorUID(), d, periodic, args, cb)
 }
@@ -692,10 +705,9 @@ func (a *actorCore) StopTimer(tid TimerId) {
 
 // receiveTriggerdTimer 接收已触发的定时器.
 func (a *actorCore) receiveTriggerdTimer(tid TimerId, args any, cb ActorTimerFunc) {
-	if err := a.lockState(actorStateStarted, true); err != nil {
+	if a.checkStarted() != nil {
 		return
 	}
-	defer a.unlock(true)
 
 	timer := actorTriggeredTimer{
 		tid:  tid,
@@ -705,7 +717,7 @@ func (a *actorCore) receiveTriggerdTimer(tid TimerId, args any, cb ActorTimerFun
 	select {
 	case a.triggeredTimer <- timer:
 		return
-	case <-a.sigPrepareStop:
+	case <-a.sigStop:
 		return
 	}
 }

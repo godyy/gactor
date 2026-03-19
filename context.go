@@ -258,17 +258,10 @@ func (c *Context) handleError(a actorImpl, err error) {
 		return
 	}
 
-	// 如果返回的是错误码.
-	var ec errCode
-	if errors.As(err, &ec) {
-		if err := c.req.replyError(c, ec); err != nil {
-			a.core().getLogger().ErrorFields("[HandleRequest] reply error", zap.Object("req", c.req), lfdError(err))
-		}
-		return
-	}
-
-	if err := c.req.replyError(c, errCodeInternalError); err != nil {
-		a.core().getLogger().ErrorFields("[HandleRequest] reply internal error", zap.Object("req", c.req), lfdError(err))
+	// 返回错误码.
+	errCode := Err2ErrCode(err)
+	if err := c.req.replyError(c, errCode); err != nil {
+		a.core().getLogger().ErrorFields("[HandleRequest] reply error", zap.Object("req", c.req), lfdError(err))
 	}
 }
 

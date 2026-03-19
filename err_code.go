@@ -1,6 +1,7 @@
 package gactor
 
 import (
+	"errors"
 	"fmt"
 	"unsafe"
 )
@@ -13,6 +14,7 @@ const sizeOfErrCode = int(unsafe.Sizeof(errCodeOK))
 const (
 	errCodeOK            = errCode(0) // OK.
 	errCodeInternalError = errCode(1) // 内部错误.
+	errCodeServiceStop   = errCode(2) // 服务停止.
 
 	errCodeEncodePacketFailed   = errCode(101) // 编码数据包失败.
 	errCodeDecodePacketFailed   = errCode(102) // 解码数据包失败.
@@ -28,6 +30,7 @@ const (
 var errCodeStrings = map[errCode]string{
 	errCodeOK:                   "ok",
 	errCodeInternalError:        "internal error",
+	errCodeServiceStop:          "service stop",
 	errCodeActorRegisterByOther: "actor register by other",
 	errCodeEncodePacketFailed:   "encode packet failed",
 	errCodeDecodePacketFailed:   "decode packet failed",
@@ -46,5 +49,16 @@ func (ec errCode) Error() string {
 		return fmt.Sprintf("gactor: %d - %s", ec, s)
 	} else {
 		return fmt.Sprintf("gactor: unknown error code %d", ec)
+	}
+}
+
+// Err2ErrCode 将 error 转换为 errCode.
+func Err2ErrCode(err error) (code errCode) {
+	if errors.As(err, &code) {
+		return
+	} else if ErrIsServiceStop(err) {
+		return errCodeServiceStop
+	} else {
+		return errCodeInternalError
 	}
 }
