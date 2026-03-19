@@ -63,10 +63,7 @@ func (s *Service) sendAckPacket(nodeId string, ph packetHead) error {
 	}
 
 	// 编码数据包.
-	head := ackPacketHead{
-		ackPt:  ph.getPt(),
-		ackSeq: ph.getSeq(),
-	}
+	head := newAckHeadFrom(ph)
 	b, err := s.encodePacket(&head, nil)
 	if err != nil {
 		s.logger.ErrorFields("encode ack packet failed", lfdPacketTypeSeq(ph), lfdError(err))

@@ -349,10 +349,7 @@ func (c *Client) Connect(ctx context.Context, id int64, sid uint32) error {
 	defer c.unlockState(true)
 
 	// 编码并发送消息.
-	ph := connectPacketHead{
-		id:  id,
-		sid: sid,
-	}
+	ph := newConnectHead(c.genSeq(), id, sid)
 	return c.sendPacket(ctx, nodeId, &ph, nil)
 }
 
@@ -378,11 +375,7 @@ func (c *Client) Disconnect(ctx context.Context, id int64, sid uint32) error {
 	defer c.unlockState(true)
 
 	// 编码并发送消息.
-	ph := disconnectPacketHead{
-		seq: c.genSeq(),
-		id:  id,
-		sid: sid,
-	}
+	ph := newDisconnectHead(c.genSeq(), id, sid)
 	return c.sendPacket(ctx, nodeId, &ph, nil)
 }
 
@@ -414,12 +407,7 @@ func (c *Client) SendRequest(ctx context.Context, req ClientRequest) error {
 	defer c.unlockState(true)
 
 	// 编码并发送消息.
-	ph := rawReqPacketHead{
-		seq:     c.genSeq(),
-		toId:    req.ID,
-		sid:     req.SID,
-		timeout: uint32(req.Timeout.Milliseconds()),
-	}
+	ph := newRawReqHead(c.genSeq(), req.ID, req.SID, uint32(req.Timeout.Milliseconds()))
 	return c.sendPacket(ctx, nodeId, &ph, req.Payload)
 }
 

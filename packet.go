@@ -95,6 +95,10 @@ type ackPacketHead struct {
 	ackSeq uint32     // 确认的数据包序号.
 }
 
+func newAckHeadFrom(head packetHead) ackPacketHead {
+	return ackPacketHead{ackPt: head.getPt(), ackSeq: head.getSeq()}
+}
+
 const sizeOfAckPacketHead = sizeOfPacketType + 4
 
 func (ph *ackPacketHead) getPt() PacketType {
@@ -136,6 +140,10 @@ type connectPacketHead struct {
 	seq uint32 // 序号.
 	id  int64  // Actor ID
 	sid uint32 // 会话ID.
+}
+
+func newConnectHead(seq uint32, id int64, sid uint32) connectPacketHead {
+	return connectPacketHead{seq: seq, id: id, sid: sid}
 }
 
 const sizeOfConnectPacketHead = 4 + 8 + 4
@@ -190,6 +198,10 @@ type disconnectPacketHead struct {
 	sid uint32 // 会话ID.
 }
 
+func newDisconnectHead(seq uint32, id int64, sid uint32) disconnectPacketHead {
+	return disconnectPacketHead{seq: seq, id: id, sid: sid}
+}
+
 const sizeOfS2SDisconnectedPacketHead = 4 + 8 + 4
 
 func (ph *disconnectPacketHead) getPt() PacketType { return PacketTypeDisconnect }
@@ -235,6 +247,10 @@ type rawReqPacketHead struct {
 	toId    int64  // 目标 Actor ID.
 	sid     uint32 // 会话ID.
 	timeout uint32 // 超时.
+}
+
+func newRawReqHead(seq uint32, toId int64, sid uint32, timeout uint32) rawReqPacketHead {
+	return rawReqPacketHead{seq: seq, toId: toId, sid: sid, timeout: timeout}
 }
 
 const sizeOfRawReqPacketHead = 4 + 8 + 4 + 4
@@ -291,6 +307,14 @@ type rawRespPacketHead struct {
 	errCode errCode // 错误码.
 }
 
+func newRawRespHead(seq uint32, fromId int64, sid uint32, errCode errCode) rawRespPacketHead {
+	return rawRespPacketHead{seq: seq, fromId: fromId, sid: sid, errCode: errCode}
+}
+
+func newRawRespHeadFromReq(seq uint32, errCode errCode, req *rawReqPacketHead) rawRespPacketHead {
+	return rawRespPacketHead{seq: seq, fromId: req.toId, sid: req.sid, errCode: errCode}
+}
+
 const sizeOfRawRespPacketHead = 4 + 8 + 4 + sizeOfErrCode
 
 func (ph *rawRespPacketHead) getPt() PacketType { return PacketTypeRawResp }
@@ -299,11 +323,6 @@ func (ph *rawRespPacketHead) getSeq() uint32 { return ph.seq }
 
 func (ph *rawRespPacketHead) getSize() int {
 	return sizeOfRawRespPacketHead
-}
-
-func (ph *rawRespPacketHead) copyFromReq(req *rawReqPacketHead) {
-	ph.fromId = req.toId
-	ph.sid = req.sid
 }
 
 func (ph *rawRespPacketHead) encode(b *Buffer) error {
@@ -347,6 +366,10 @@ type rawPushPacketHead struct {
 	seq    uint32 // 序号.
 	fromId int64  // 来自 Actor ID.
 	sid    uint32 // 会话ID.
+}
+
+func newRawPushHead(seq uint32, fromId int64, sid uint32) rawPushPacketHead {
+	return rawPushPacketHead{seq: seq, fromId: fromId, sid: sid}
 }
 
 const sizeOfRawPushPacketHead = 4 + 8 + 4
@@ -421,6 +444,10 @@ type s2sRpcPacketHead struct {
 	fromId  ActorUID // 来源 Actor ID.
 	toId    ActorUID // 目标 Actor ID.
 	timeout uint32   // 超时.
+}
+
+func newS2SRpcHead(seq uint32, reqId uint32, fromId, toId ActorUID, timeout uint32) s2sRpcPacketHead {
+	return s2sRpcPacketHead{seq: seq, reqId: reqId, fromId: fromId, toId: toId, timeout: timeout}
 }
 
 const sizeOfS2SRpcPacketHead = 1 + 4 + 4 + sizeOfActorUID*2 + 4
@@ -507,6 +534,14 @@ type s2sRpcRespPacketHead struct {
 	errCode errCode  // 错误码.
 }
 
+func newS2SRpcRespHead(seq uint32, reqId uint32, fromId, toId ActorUID, errCode errCode) s2sRpcRespPacketHead {
+	return s2sRpcRespPacketHead{seq: seq, reqId: reqId, fromId: fromId, toId: toId, errCode: errCode}
+}
+
+func newS2SRpcRespHeadFromReq(seq uint32, errCode errCode, req *s2sRpcPacketHead) s2sRpcRespPacketHead {
+	return s2sRpcRespPacketHead{seq: seq, reqId: req.reqId, fromId: req.toId, toId: req.fromId, errCode: errCode}
+}
+
 const sizeOfS2SRpcRespPacketHead = 4 + 4 + sizeOfActorUID*2 + sizeOfErrCode
 
 func (ph *s2sRpcRespPacketHead) getPt() PacketType { return PacketTypeS2SRpcResp }
@@ -524,12 +559,6 @@ func (ph *s2sRpcRespPacketHead) getFlag() s2sPacketFlag {
 		flag.setToId()
 	}
 	return flag
-}
-
-func (ph *s2sRpcRespPacketHead) copyFromReq(req *s2sRpcPacketHead) {
-	ph.reqId = req.reqId
-	ph.fromId = req.toId
-	ph.toId = req.fromId
 }
 
 func (ph *s2sRpcRespPacketHead) encode(b *Buffer) error {
@@ -593,6 +622,10 @@ type s2sCastPacketHead struct {
 	seq    uint32   // 序号.
 	fromId ActorUID // 来源 Actor ID.
 	toId   ActorUID // 目标 Actor ID.
+}
+
+func newS2SCastHead(seq uint32, fromId, toId ActorUID) s2sCastPacketHead {
+	return s2sCastPacketHead{seq: seq, fromId: fromId, toId: toId}
 }
 
 const sizeOfS2SCastPacketHead = 4 + sizeOfActorUID*2

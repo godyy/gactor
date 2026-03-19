@@ -866,11 +866,7 @@ func (a *cactor) PushRawMessage(ctx context.Context, payload any) error {
 	if a.session.NodeId == "" {
 		return ErrActorNotConnected
 	}
-	ph := rawPushPacketHead{
-		seq:    a.service().genSeq(),
-		fromId: a.id,
-		sid:    a.session.SID,
-	}
+	ph := newRawPushHead(a.service().genSeq(), a.id, a.session.SID)
 	return a.svc.sendRemotePacket(ctx, a.session.NodeId, &ph, payload)
 }
 
@@ -880,10 +876,7 @@ func (a *cactor) Disconnect(ctx context.Context) {
 		return
 	}
 
-	ph := disconnectPacketHead{
-		id:  a.id,
-		sid: a.session.SID,
-	}
+	ph := newDisconnectHead(a.svc.genSeq(), a.id, a.session.SID)
 	if err := a.svc.sendRemotePacket(ctx, a.session.NodeId, &ph, nil); err != nil {
 		a.getLogger().ErrorFields("send disconnect packet failed", lfdSession(a.session), lfdError(err))
 	} else {

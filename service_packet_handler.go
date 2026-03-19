@@ -167,11 +167,7 @@ func svcHandlePacketRawReq(s *Service, nodeId string, b *Buffer) error {
 	// 服务必须处于运行状态，否则返回停机错误.
 	if s.checkStarted() != nil {
 		// 编码发送错误响应数据包
-		respHead := rawRespPacketHead{
-			seq:     s.genSeq(),
-			errCode: errCodeServiceStop,
-		}
-		respHead.copyFromReq(&head)
+		respHead := newRawRespHeadFromReq(s.genSeq(), errCodeServiceStop, &head)
 		_ = s.sendRemotePacket(ctx, nodeId, &respHead, nil)
 		return nil
 	}
@@ -184,11 +180,7 @@ func svcHandlePacketRawReq(s *Service, nodeId string, b *Buffer) error {
 			lfdRemoteNodeId(nodeId), lfdSeq(head.getSeq()), s.lfdActorUID("uid", uid), lfdSid(head.sid), lfdTimeout(int64(head.timeout)), lfdError(err))
 
 		// 编码发送错误响应数据包
-		respHead := rawRespPacketHead{
-			seq:     s.genSeq(),
-			errCode: Err2ErrCode(err),
-		}
-		respHead.copyFromReq(&head)
+		respHead := newRawRespHeadFromReq(s.genSeq(), Err2ErrCode(err), &head)
 		if err := s.sendRemotePacket(ctx, nodeId, &respHead, nil); err != nil {
 			s.getLogger().ErrorFields("[HandlePacketRawReq] send errcode response to actor failed",
 				lfdRemoteNodeId(nodeId), lfdSeq(head.getSeq()), s.lfdActorUID("uid", uid), lfdSid(head.sid), lfdTimeout(int64(head.timeout)), lfdError(err))
@@ -236,11 +228,7 @@ func svcHandlePacketS2SRpc(s *Service, nodeId string, b *Buffer) error {
 	// 服务必须处于运行状态，否则返回停机错误.
 	if s.checkStarted() != nil {
 		// 编码发送错误响应数据包
-		respHead := s2sRpcRespPacketHead{
-			seq:     s.genSeq(),
-			errCode: errCodeServiceStop,
-		}
-		respHead.copyFromReq(&head)
+		respHead := newS2SRpcRespHeadFromReq(s.genSeq(), errCodeServiceStop, &head)
 		_ = s.sendRemotePacket(ctx, nodeId, &respHead, nil)
 		return nil
 	}
@@ -253,11 +241,7 @@ func svcHandlePacketS2SRpc(s *Service, nodeId string, b *Buffer) error {
 			lfdRemoteNodeId(nodeId), lfdSeq(head.getSeq()), lfdReqId(head.reqId), s.lfdActorUID("fromId", head.fromId), s.lfdActorUID("toId", head.toId), lfdTimeout(int64(head.timeout)), lfdError(err))
 
 		// 编码发送错误响应数据包.
-		respHead := s2sRpcRespPacketHead{
-			seq:     s.genSeq(),
-			errCode: Err2ErrCode(err),
-		}
-		respHead.copyFromReq(&head)
+		respHead := newS2SRpcRespHeadFromReq(s.genSeq(), Err2ErrCode(err), &head)
 		if err := s.sendRemotePacket(ctx, nodeId, &respHead, nil); err != nil {
 			s.getLogger().ErrorFields("[HandlePacketS2SRpc] send errcode response to actor failed",
 				lfdRemoteNodeId(nodeId), lfdSeq(head.getSeq()), lfdReqId(head.reqId), s.lfdActorUID("fromId", head.fromId), s.lfdActorUID("toId", head.toId), lfdTimeout(int64(head.timeout)), lfdError(err))

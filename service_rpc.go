@@ -86,13 +86,7 @@ func (s *Service) doRPC(ctx context.Context, from ActorUID, to ActorUID, params 
 
 		// 目标节点非本地.
 		// 编码数据包并发送到远端节点.
-		ph := s2sRpcPacketHead{
-			seq:     seq,
-			reqId:   callReqId,
-			fromId:  from,
-			toId:    to,
-			timeout: uint32(time.Until(deadline).Milliseconds()),
-		}
+		ph := newS2SRpcHead(seq, callReqId, from, to, uint32(time.Until(deadline).Milliseconds()))
 		if err = s.sendRemotePacket(ctx, toNodeId, &ph, params); err != nil {
 			s.monitorRPCActionSend2RemoteErr(err)
 		}

@@ -155,12 +155,7 @@ func (req *rawRequest) reply(ctx *Context, payload any) error {
 		return nil
 	}
 
-	head := rawRespPacketHead{
-		seq:     ctx.service().genSeq(),
-		fromId:  ctx.actor.core().id,
-		sid:     req.sid,
-		errCode: errCodeOK,
-	}
+	head := newRawRespHead(ctx.service().genSeq(), ctx.actor.core().id, req.sid, errCodeOK)
 	if err := ctx.service().sendRemotePacket(ctx, req.fromNodeId, &head, payload); err != nil {
 		if errors.Is(err, errCodeEncodePacketFailed) {
 			return req.replyError(ctx, errCodeEncodePacketFailed)
@@ -182,13 +177,7 @@ func (req *rawRequest) replyError(ctx *Context, ec errCode) error {
 		return nil
 	}
 
-	head := rawRespPacketHead{
-		seq:     ctx.service().genSeq(),
-		fromId:  ctx.actor.core().id,
-		sid:     req.sid,
-		errCode: ec,
-	}
-
+	head := newRawRespHead(ctx.service().genSeq(), ctx.actor.core().id, req.sid, ec)
 	if err := ctx.service().sendRemotePacket(ctx, req.fromNodeId, &head, nil); err != nil {
 		return err
 	}
@@ -289,13 +278,7 @@ func (req *rpcRequest) reply(ctx *Context, payload any) error {
 		return nil
 	}
 
-	head := s2sRpcRespPacketHead{
-		seq:     ctx.service().genSeq(),
-		reqId:   req.reqId,
-		fromId:  ctx.actor.ActorUID(),
-		toId:    req.fromId,
-		errCode: errCodeOK,
-	}
+	head := newS2SRpcRespHead(ctx.service().genSeq(), req.reqId, ctx.actor.ActorUID(), req.fromId, errCodeOK)
 	if err := ctx.service().sendPacket(ctx, req.fromNodeId, &head, payload); err != nil {
 		if errors.Is(err, errCodeEncodePacketFailed) {
 			return req.replyError(ctx, errCodeEncodePacketFailed)
@@ -317,13 +300,7 @@ func (req *rpcRequest) replyError(ctx *Context, ec errCode) error {
 		return nil
 	}
 
-	head := s2sRpcRespPacketHead{
-		seq:     ctx.service().genSeq(),
-		reqId:   req.reqId,
-		fromId:  ctx.actor.ActorUID(),
-		toId:    req.fromId,
-		errCode: ec,
-	}
+	head := newS2SRpcRespHead(ctx.service().genSeq(), req.reqId, ctx.actor.ActorUID(), req.fromId, ec)
 	if err := ctx.service().sendPacket(ctx, req.fromNodeId, &head, nil); err != nil {
 		return err
 	}

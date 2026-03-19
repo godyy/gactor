@@ -556,11 +556,7 @@ func (s *Service) cast(ctx context.Context, from, to ActorUID, payload any) erro
 			return err
 		}
 
-		ph := s2sCastPacketHead{
-			seq:    seq,
-			fromId: from,
-			toId:   to,
-		}
+		ph := newS2SCastHead(seq, from, to)
 		if err := s.sendRemotePacket(ctx, toNodeId, &ph, payload); err != nil {
 			s.monitorCastActionSend2RemoteErr(err)
 			return err
