@@ -43,23 +43,16 @@ func cliHandlePacketRawResp(c *Client, nodeId string, b *Buffer) error {
 			lfdRemoteNodeId(nodeId), lfdSeq(head.getSeq()), lfdId(head.fromId), lfdErrCode(head.errCode), lfdError(err))
 	}
 
-	// 发生错误.
-	if head.errCode != ErrCodeOK {
-		c.freeBuffer(b)
-		c.handleResponse(ClientResponse{
-			ID:  head.fromId,
-			SID: head.sid,
-			Err: head.errCode,
-		})
-		return nil
-	}
-
 	// 处理响应.
-	c.handleResponse(ClientResponse{
+	resp := ClientResponse{
 		ID:      head.fromId,
 		SID:     head.sid,
-		Payload: *b,
-	})
+		ErrCode: head.errCode,
+	}
+	if head.errCode == ErrCodeOK {
+		resp.Payload = *b
+	}
+	c.handleResponse(resp)
 
 	return nil
 }

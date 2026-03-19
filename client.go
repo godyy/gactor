@@ -24,10 +24,10 @@ type ClientRequest struct {
 // ClientResponse 客户端响应.
 // PS: 需自行回收 Payload 中的字节切片.
 type ClientResponse struct {
-	ID      int64  // 来源 Actor ID.
-	SID     uint32 // 会话ID.
-	Payload Buffer // 负载数据.
-	Err     error  // 错误.
+	ID      int64   // 来源 Actor ID.
+	SID     uint32  // 会话ID.
+	Payload Buffer  // 负载数据.
+	ErrCode ErrCode // 错误码.
 }
 
 // ClientPush 客户端推送.

@@ -95,10 +95,14 @@ func (c *client) HandleResponse(resp gactor.ClientResponse) {
 		return
 	}
 
+	var err error
+	if resp.ErrCode != gactor.ErrCodeOK {
+		err = resp.ErrCode
+	}
 	u.receiveMessage(&msgResp{
 		sid:     resp.SID,
 		payload: resp.Payload,
-		err:     resp.Err,
+		err:     err,
 	})
 }
 
