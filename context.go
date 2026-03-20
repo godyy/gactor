@@ -85,7 +85,7 @@ func (c *Context) Decode(v any) error {
 
 // Reply 回复请求. 参数为负载数据实体.
 func (c *Context) Reply(v any) error {
-	return c.req.reply(c, v)
+	return c.req.reply(c, v, ErrCodeOK)
 }
 
 // ReplyDecodeError 回复解码错误.
@@ -260,7 +260,7 @@ func (c *Context) handleError(a actorImpl, err error) {
 
 	// 返回错误码.
 	errCode := Err2ErrCode(err)
-	if err := c.req.replyError(c, errCode); err != nil {
+	if err := c.req.reply(c, nil, errCode); err != nil {
 		a.core().getLogger().ErrorFields("[HandleRequest] reply error", zap.Object("req", c.req), lfdError(err))
 	}
 }

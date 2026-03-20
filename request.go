@@ -45,13 +45,9 @@ type request interface {
 	// * 不可重入, 只能调用一次.
 	decode(ctx *Context, v any) error
 
-	// reply 回复请求. 参数为负载数据实体.
+	// reply 回复请求.
 	// * 回复成功后调用无任何效果.
-	reply(ctx *Context, payload any) error
-
-	// replyError 回复错误码.
-	// * 回复成功后调用无任何效果
-	replyError(ctx *Context, ec ErrCode) error
+	reply(ctx *Context, payload any, ec ErrCode) error
 
 	// replyDecodeError 回复解码错误.
 	// * 回复成功后调用无任何效果.
@@ -150,15 +146,19 @@ func (req *rawRequest) decode(ctx *Context, v any) error {
 	return req.requestCom.decode(ctx, PacketTypeRawReq, v)
 }
 
-func (req *rawRequest) reply(ctx *Context, payload any) error {
+func (req *rawRequest) reply(ctx *Context, payload any, ec ErrCode) error {
 	if req.replied {
 		return nil
+	}
+
+	if ec != ErrCodeOK {
+		payload = nil
 	}
 
 	head := newRawRespHead(ctx.service().genSeq(), ctx.actor.core().id, req.sid, ErrCodeOK)
 	if err := ctx.service().sendRemotePacket(ctx, req.fromNodeId, &head, payload); err != nil {
 		if errors.Is(err, ErrCodeEncodePacketFailed) {
-			return req.replyError(ctx, ErrCodeEncodePacketFailed)
+			return req.reply(ctx, nil, ErrCodeEncodePacketFailed)
 		}
 		return err
 	}
@@ -169,22 +169,7 @@ func (req *rawRequest) reply(ctx *Context, payload any) error {
 }
 
 func (req *rawRequest) replyDecodeError(ctx *Context) error {
-	return req.replyError(ctx, ErrCodeDecodePacketFailed)
-}
-
-func (req *rawRequest) replyError(ctx *Context, ec ErrCode) error {
-	if req.replied {
-		return nil
-	}
-
-	head := newRawRespHead(ctx.service().genSeq(), ctx.actor.core().id, req.sid, ec)
-	if err := ctx.service().sendRemotePacket(ctx, req.fromNodeId, &head, nil); err != nil {
-		return err
-	}
-
-	req.replied = true
-
-	return nil
+	return req.reply(ctx, nil, ErrCodeDecodePacketFailed)
 }
 
 func (req *rawRequest) clone(ctx *Context) request {
@@ -208,7 +193,7 @@ func (req *rawRequest) beforeHandle(ctx *Context) error {
 	}
 
 	if !ca.session.IsConnected() {
-		_ = req.replyError(ctx, ErrCodeActorNotConnect)
+		_ = req.reply(ctx, nil, ErrCodeActorNotConnect)
 		return errSkipHandleRequest
 	}
 
@@ -217,7 +202,7 @@ func (req *rawRequest) beforeHandle(ctx *Context) error {
 		SID:    req.sid,
 	}
 	if reqSession != ca.session {
-		_ = req.replyError(ctx, ErrCodeActorOtherConnect)
+		_ = req.reply(ctx, nil, ErrCodeActorOtherConnect)
 		return errSkipHandleRequest
 	}
 
@@ -273,15 +258,19 @@ func (req *rpcRequest) decode(ctx *Context, v any) error {
 	return req.requestCom.decode(ctx, PacketTypeS2SRpc, v)
 }
 
-func (req *rpcRequest) reply(ctx *Context, payload any) error {
+func (req *rpcRequest) reply(ctx *Context, payload any, ec ErrCode) error {
 	if req.replied {
 		return nil
+	}
+
+	if ec != ErrCodeOK {
+		payload = nil
 	}
 
 	head := newS2SRpcRespHead(ctx.service().genSeq(), req.reqId, ctx.actor.ActorUID(), req.fromId, ErrCodeOK)
 	if err := ctx.service().sendPacket(ctx, req.fromNodeId, &head, payload); err != nil {
 		if errors.Is(err, ErrCodeEncodePacketFailed) {
-			return req.replyError(ctx, ErrCodeEncodePacketFailed)
+			return req.reply(ctx, nil, ErrCodeEncodePacketFailed)
 		}
 		return err
 	}
@@ -292,22 +281,7 @@ func (req *rpcRequest) reply(ctx *Context, payload any) error {
 }
 
 func (req *rpcRequest) replyDecodeError(ctx *Context) error {
-	return req.replyError(ctx, ErrCodeDecodePacketFailed)
-}
-
-func (req *rpcRequest) replyError(ctx *Context, ec ErrCode) error {
-	if req.replied {
-		return nil
-	}
-
-	head := newS2SRpcRespHead(ctx.service().genSeq(), req.reqId, ctx.actor.ActorUID(), req.fromId, ec)
-	if err := ctx.service().sendPacket(ctx, req.fromNodeId, &head, nil); err != nil {
-		return err
-	}
-
-	req.replied = true
-
-	return nil
+	return req.reply(ctx, nil, ErrCodeDecodePacketFailed)
 }
 
 func (req *rpcRequest) clone(ctx *Context) request {
@@ -367,15 +341,11 @@ func (req *castRequest) decode(ctx *Context, v any) error {
 	return req.requestCom.decode(ctx, PacketTypeS2SCast, v)
 }
 
-func (req *castRequest) reply(ctx *Context, _ any) error {
+func (req *castRequest) reply(ctx *Context, _ any, ec ErrCode) error {
 	return nil
 }
 
 func (req *castRequest) replyDecodeError(ctx *Context) error {
-	return nil
-}
-
-func (req *castRequest) replyError(ctx *Context, _ ErrCode) error {
 	return nil
 }
 
