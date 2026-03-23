@@ -155,7 +155,7 @@ func (req *rawRequest) reply(ctx *Context, payload any, ec ErrCode) error {
 		payload = nil
 	}
 
-	head := newRawRespHead(ctx.service().genSeq(), ctx.actor.core().id, req.sid, ErrCodeOK)
+	head := newRawRespHead(ctx.service().genSeq(), ctx.actor.core().id, req.sid, ec)
 	if err := ctx.service().sendRemotePacket(req.fromNodeId, &head, payload); err != nil {
 		if errors.Is(err, ErrCodeEncodePacketFailed) {
 			return req.reply(ctx, nil, ErrCodeEncodePacketFailed)
@@ -267,7 +267,7 @@ func (req *rpcRequest) reply(ctx *Context, payload any, ec ErrCode) error {
 		payload = nil
 	}
 
-	head := newS2SRpcRespHead(ctx.service().genSeq(), req.reqId, ctx.actor.ActorUID(), req.fromId, ErrCodeOK)
+	head := newS2SRpcRespHead(ctx.service().genSeq(), req.reqId, ctx.actor.ActorUID(), req.fromId, ec)
 	if err := ctx.service().sendPacket(req.fromNodeId, &head, payload); err != nil {
 		if errors.Is(err, ErrCodeEncodePacketFailed) {
 			return req.reply(ctx, nil, ErrCodeEncodePacketFailed)
