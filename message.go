@@ -1,9 +1,5 @@
 package gactor
 
-import (
-	"context"
-)
-
 // message 封装 Actor 消息.
 type message interface {
 	// handle 处理消息.
@@ -42,7 +38,7 @@ func (m *messageConnect) handle(a actorImpl) {
 		SID:    m.sid,
 	}
 	a.core().getLogger().DebugFields("[HandleMessageConnect]", lfdSession(session))
-	ca.updateSession(context.Background(), session)
+	ca.updateSession(session)
 }
 
 // handleError 处理错误.

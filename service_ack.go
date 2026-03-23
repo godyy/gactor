@@ -1,7 +1,6 @@
 package gactor
 
 import (
-	"context"
 	"errors"
 )
 
@@ -71,9 +70,7 @@ func (s *Service) sendAckPacket(nodeId string, ph packetHead) error {
 	}
 
 	// 发送数据.
-	ctx, cancel := context.WithTimeout(context.Background(), s.ackManager.getCfg().Timeout)
-	defer cancel()
-	return s.send(ctx, nodeId, b)
+	return s.send(nodeId, b)
 }
 
 // onAckRetry 处理 Ack 重试.
@@ -82,10 +79,7 @@ func (s *Service) onAckRetry(ap ackPacket) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), s.ackManager.getCfg().Timeout)
-	defer cancel()
-
-	if err := s.send(ctx, ap.nodeId, ap.b); err != nil {
+	if err := s.send(ap.nodeId, ap.b); err != nil {
 		s.logger.ErrorFields("retry to send packet failed", lfdRemoteNodeId(ap.nodeId), lfdPacketType(ap.pt), lfdSeq(ap.seq), lfdError(err))
 	} else {
 		s.logger.WarnFields("retry to send packet", lfdRemoteNodeId(ap.nodeId), lfdPacketType(ap.pt), lfdSeq(ap.seq))

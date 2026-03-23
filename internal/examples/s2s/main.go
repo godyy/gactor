@@ -30,6 +30,17 @@ const (
 	s2NodeId = "s2"
 	s1Addr   = "localhost:10001"
 	s2Addr   = "localhost:10002"
+
+	// actor
+	userMessageBoxSize      = 10
+	serverMessageBoxSize    = 10000
+	userAmount              = 10000
+	maxAckPacketAmount      = 10000
+	maxTriggeredTimerAmount = 10000
+	maxRPCCallAmount        = 10000
+
+	// session
+	pendingPacketQueueSize = 20000
 )
 
 var (
@@ -38,7 +49,7 @@ var (
 			Name:           "user",
 			Category:       actors.CategoryUser,
 			Priority:       10,
-			MessageBoxSize: 10,
+			MessageBoxSize: userMessageBoxSize,
 			RecycleTime:    1 * time.Hour,
 			BehaviorCreator: func(actor gactor.CActor) gactor.CActorBehavior {
 				return actors.NewUser(actor)
@@ -50,7 +61,7 @@ var (
 			Name:           "server",
 			Category:       actors.CategoryServer,
 			Priority:       1,
-			MessageBoxSize: 10000,
+			MessageBoxSize: serverMessageBoxSize,
 			BehaviorCreator: func(actor gactor.Actor) gactor.ActorBehavior {
 				return actors.NewServer(actor)
 			},
@@ -88,7 +99,6 @@ func main() {
 		Category: actors.CategoryServer,
 		ID:       1,
 	}] = s2NodeId
-	userAmount := 8000
 	userIds = make([]gactor.ActorUID, userAmount)
 	for i := 0; i < userAmount; i++ {
 		uid := gactor.ActorUID{
@@ -120,7 +130,7 @@ func main() {
 		Timeout: 5 * time.Second,
 	}
 	sessionConfig := net.SessionConfig{
-		PendingPacketQueueSize: 100,
+		PendingPacketQueueSize: pendingPacketQueueSize,
 		MaxPacketLength:        64 * 1024,
 		ReadBufSize:            128 * 1024,
 		WriteBufSize:           128 * 1024,
@@ -137,7 +147,7 @@ func main() {
 
 	var ackConfig *gactor.AckConfig
 	ackConfig = &gactor.AckConfig{
-		MaxPacketAmount: 10000,
+		MaxPacketAmount: maxAckPacketAmount,
 		Timeout:         500 * time.Millisecond,
 		MaxRetry:        1,
 		TickInterval:    50 * time.Millisecond,
@@ -188,11 +198,11 @@ func main() {
 				{Name: "m", Span: 1 * time.Minute, Slots: 60},
 				{Name: "hour", Span: 1 * time.Hour, Slots: 24},
 			},
-			MaxTriggerdTimerAmount: 10000,
+			MaxTriggerdTimerAmount: maxTriggeredTimerAmount,
 		},
 		RPCConfig: gactor.RPCConfig{
 			DefRPCTimeout:    0,
-			MaxRPCCallAmount: 10000,
+			MaxRPCCallAmount: maxRPCCallAmount,
 		},
 
 		MaxRTT:  0,
@@ -430,8 +440,16 @@ type netAgent struct {
 	*gcluster.Agent
 }
 
-func (a *netAgent) Send(ctx context.Context, nodeId string, b []byte) error {
-	return a.Send2Node(ctx, nodeId, b)
+func (a *netAgent) Send(nodeId string, b []byte) error {
+	return a.Send2Node(nodeId, b)
+}
+
+func (a *netAgent) Send2Node(nodeId string, b []byte) error {
+	err := a.Agent.Send2Node(nodeId, b)
+	if errors.Is(err, net.ErrPendingPacketsFull) {
+		err = gactor.ErrNetworkBusy
+	}
+	return err
 }
 
 type packetCodec struct {

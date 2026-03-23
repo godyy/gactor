@@ -257,8 +257,8 @@ func (c *Client) encodePacket(ph packetHead, payload []byte) ([]byte, error) {
 }
 
 // send 发送字节数据.
-func (c *Client) send(ctx context.Context, nodeId string, b []byte) error {
-	return c.cfg.Handler.GetNetAgent().Send2Node(ctx, nodeId, b)
+func (c *Client) send(nodeId string, b []byte) error {
+	return c.cfg.Handler.GetNetAgent().Send2Node(nodeId, b)
 }
 
 // sendPacket 编码数据包并发送到 nodeId 指定的节点. payload 为已编码的自定义负载数据.
@@ -278,7 +278,7 @@ func (c *Client) sendPacket(ctx context.Context, nodeId string, ph packetHead, p
 	c.addPacket2Ack(nodeId, ph.getPt(), ph.getSeq(), b)
 
 	// 发送数据.
-	if err = c.send(ctx, nodeId, b); err != nil {
+	if err = c.send(nodeId, b); err != nil {
 		// 若发送失败, 直接移除待确认数据包.
 		c.remPacket2Ack(ph.getPt(), ph.getSeq())
 		return pkgerrors.WithMessage(err, "send packet")

@@ -74,8 +74,12 @@ func (c *client) NodeId() string {
 }
 
 // SendBytes 发送字节流到 nodeId 指定的节点.
-func (c *client) Send2Node(ctx context.Context, nodeId string, b []byte) error {
-	return c.agent.Send2Node(ctx, nodeId, b)
+func (c *client) Send2Node(nodeId string, b []byte) error {
+	err := c.agent.Send2Node(nodeId, b)
+	if errors.Is(err, net.ErrPendingPacketsFull) {
+		err = gactor.ErrNetworkBusy
+	}
+	return err
 }
 
 // GetBytes 获取容量为 size 的字节流.

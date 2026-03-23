@@ -68,7 +68,7 @@ func (h *handler) checkLogin(ctx *gactor.Context) {
 	if !u.IsLogin {
 		ctx.Abort()
 		h.RawHandler.ReplyError(ctx, common.ErrCodeNotLogin)
-		u.Disconnect(ctx)
+		u.Disconnect()
 	}
 }
 

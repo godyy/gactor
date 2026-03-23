@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"os"
 	"os/signal"
@@ -93,8 +94,12 @@ func (s *server) NodeId() string {
 }
 
 // SendPacket 发送数据包 p 到 nodeId 指定的节点.
-func (s *server) Send2Node(ctx context.Context, nodeId string, b []byte) error {
-	return s.agent.Send2Node(ctx, nodeId, b)
+func (s *server) Send2Node(nodeId string, b []byte) error {
+	err := s.agent.Send2Node(nodeId, b)
+	if errors.Is(err, net.ErrPendingPacketsFull) {
+		err = gactor.ErrNetworkBusy
+	}
+	return err
 }
 
 // GetPacket 获取容量为 size 的数据包.

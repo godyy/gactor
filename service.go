@@ -1,7 +1,6 @@
 package gactor
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"sync"
@@ -419,16 +418,12 @@ func (s *Service) freeBuffer(buf *Buffer) {
 }
 
 // send 发送字节数据.
-func (s *Service) send(ctx context.Context, nodeId string, b []byte) error {
-	return s.cfg.Handler.GetNetAgent().Send2Node(ctx, nodeId, b)
+func (s *Service) send(nodeId string, b []byte) error {
+	return s.cfg.Handler.GetNetAgent().Send2Node(nodeId, b)
 }
 
 // sendLocalPacket 发送本地数据包.
-func (s *Service) sendLocalPacket(ctx context.Context, ph packetHead, payload any) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-
+func (s *Service) sendLocalPacket(ph packetHead, payload any) error {
 	// 编码数据包.
 	b, err := s.encodePacket(ph, payload)
 	if err != nil {
@@ -440,19 +435,7 @@ func (s *Service) sendLocalPacket(ctx context.Context, ph packetHead, payload an
 }
 
 // sendRemotePacket 发送远程数据包.
-func (s *Service) sendRemotePacket(ctx context.Context, nodeId string, ph packetHead, payload any) error {
-	// 优先检查ctx是否已取消.
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-
-	// 若ctx未设置dealine, 附加默认超时
-	if _, ok := ctx.Deadline(); !ok {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, s.cfg.DefCtxTimeout)
-		defer cancel()
-	}
-
+func (s *Service) sendRemotePacket(nodeId string, ph packetHead, payload any) error {
 	// 编码数据包.
 	b, err := s.encodePacket(ph, payload)
 	if err != nil {
@@ -464,7 +447,7 @@ func (s *Service) sendRemotePacket(ctx context.Context, nodeId string, ph packet
 	s.addPacket2Ack(nodeId, ph.getPt(), ph.getSeq(), b)
 
 	// 发送数据.
-	if err = s.send(ctx, nodeId, b); err != nil {
+	if err = s.send(nodeId, b); err != nil {
 		// 若发送失败, 直接移除待确认数据包.
 		s.remPacket2Ack(ph.getPt(), ph.getSeq())
 		return pkgerrors.WithMessage(err, "send packet")
@@ -474,11 +457,11 @@ func (s *Service) sendRemotePacket(ctx context.Context, nodeId string, ph packet
 }
 
 // sendPacket 编码数据包, 并发送数据包到 nodeId 指定的节点.
-func (s *Service) sendPacket(ctx context.Context, nodeId string, ph packetHead, payload any) error {
+func (s *Service) sendPacket(nodeId string, ph packetHead, payload any) error {
 	if nodeId == s.nodeId() {
-		return s.sendLocalPacket(ctx, ph, payload)
+		return s.sendLocalPacket(ph, payload)
 	} else {
-		return s.sendRemotePacket(ctx, nodeId, ph, payload)
+		return s.sendRemotePacket(nodeId, ph, payload)
 	}
 }
 

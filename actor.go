@@ -119,8 +119,8 @@ type CActor interface {
 	Session() ActorSession
 
 	// PushRawMessage 向客户端推送消息.
-	PushRawMessage(ctx context.Context, payload any) error
+	PushRawMessage(payload any) error
 
 	// Disconnect 断开与客户端的连接.
-	Disconnect(ctx context.Context)
+	Disconnect()
 }

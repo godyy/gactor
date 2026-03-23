@@ -816,7 +816,7 @@ type cactor struct {
 }
 
 func (a *cactor) stopped() {
-	a.Disconnect(context.Background())
+	a.Disconnect()
 
 	if err := a.Behavior().OnStop(); err != nil {
 		a.getLogger().ErrorFields("OnStop failed", lfdError(err))
@@ -848,12 +848,12 @@ func (a *cactor) start() error {
 	return actorStart(a)
 }
 
-func (a *cactor) updateSession(ctx context.Context, session ActorSession) {
+func (a *cactor) updateSession(session ActorSession) {
 	if a.session.IsConnected() {
 		if a.session == session {
 			return
 		}
-		a.Disconnect(ctx)
+		a.Disconnect()
 	}
 
 	a.getLogger().DebugFields("connect", lfdSession(session))
@@ -862,22 +862,22 @@ func (a *cactor) updateSession(ctx context.Context, session ActorSession) {
 }
 
 // PushRawMessage 向客户端推送消息.
-func (a *cactor) PushRawMessage(ctx context.Context, payload any) error {
+func (a *cactor) PushRawMessage(payload any) error {
 	if a.session.NodeId == "" {
 		return ErrActorNotConnected
 	}
 	ph := newRawPushHead(a.service().genSeq(), a.id, a.session.SID)
-	return a.svc.sendRemotePacket(ctx, a.session.NodeId, &ph, payload)
+	return a.svc.sendRemotePacket(a.session.NodeId, &ph, payload)
 }
 
 // Disconnect 端开与客户端的连接.
-func (a *cactor) Disconnect(ctx context.Context) {
+func (a *cactor) Disconnect() {
 	if !a.session.IsConnected() {
 		return
 	}
 
 	ph := newDisconnectHead(a.svc.genSeq(), a.id, a.session.SID)
-	if err := a.svc.sendRemotePacket(ctx, a.session.NodeId, &ph, nil); err != nil {
+	if err := a.svc.sendRemotePacket(a.session.NodeId, &ph, nil); err != nil {
 		a.getLogger().ErrorFields("send disconnect packet failed", lfdSession(a.session), lfdError(err))
 	} else {
 		a.getLogger().DebugFields("disconnect", lfdSession(a.session))

@@ -1,7 +1,6 @@
 package actors
 
 import (
-	"context"
 	"fmt"
 	"time"
 
@@ -60,7 +59,5 @@ func onNotifyTimer(args *gactor.ActorTimerArgs) {
 		Msg: fmt.Sprintf("notify at %v", time.Now()),
 	})
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	u.PushRawMessage(ctx, &notifyMsg)
+	u.PushRawMessage(&notifyMsg)
 }
