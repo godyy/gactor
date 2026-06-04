@@ -70,17 +70,41 @@ type Actor interface {
 	// StopTimer 停止定时器.
 	StopTimer(TimerId)
 
+	// RPCWithDeadline 向 to 指向的 Actor 发起 RPC 调用.
+	// deadline 为超时时间.
+	RPCWithDeadline(to ActorUID, params, reply any, deadline time.Time) error
+
+	// RPCWithTimeout 向 to 指向的 Actor 发起 RPC 调用.
+	// timeout 为超时间隔.
+	RPCWithTimeout(to ActorUID, params, reply any, timeout time.Duration) error
+
 	// RPC 向 to 指向的 Actor 发起 RPC 调用.
-	// ctx 用于控制超时时间. params 为请求参数, reply 用于接收响应参数.
-	RPC(ctx context.Context, to ActorUID, params, reply any) error
+	// 使用配置的默认超时间隔.
+	RPC(to ActorUID, params, reply any) error
+
+	// RPCWithContext 向 to 指向的 Actor 发起 RPC 调用.
+	// 超时 deadline 从 ctx 获取，若未设置, 使用默认超时时间.
+	RPCWithContext(ctx context.Context, to ActorUID, params, reply any) error
+
+	// AsyncRPCWithDeadline 向 to 指向的 Actor 发起异步 RPC 调用.
+	// deadline 为超时时间.
+	AsyncRPCWithDeadline(to ActorUID, params any, cb ActorRPCFunc, deadline time.Time) error
+
+	// AsyncRPCWithTimeout 向 to 指向的 Actor 发起异步 RPC 调用.
+	// timeout 为超时间隔.
+	AsyncRPCWithTimeout(to ActorUID, params any, cb ActorRPCFunc, timeout time.Duration) error
 
 	// AsyncRPC 向 to 指向的 Actor 发起异步 RPC 调用.
-	// ctx 用于控制超时时间. params 为请求参数. cb 为异步回调.
-	AsyncRPC(ctx context.Context, to ActorUID, params any, cb ActorRPCFunc) error
+	// 使用配置的默认超时间隔.
+	AsyncRPC(to ActorUID, params any, cb ActorRPCFunc) error
+
+	// AsyncRPCWithContext 向 to 指向的 Actor 发起异步 RPC 调用.
+	// 超时 deadline 从 ctx 获取，若未设置, 使用默认超时时间.
+	AsyncRPCWithContext(ctx context.Context, to ActorUID, params any, cb ActorRPCFunc) error
 
 	// Cast 向 to 指向的 Actor 投递消息.
-	// ctx 用于控制超时时间. payload 为投递的负载消息.
-	Cast(ctx context.Context, to ActorUID, payload any) error
+	// payload 为投递的负载消息.
+	Cast(to ActorUID, payload any) error
 }
 
 // CActorBehavior CActor 行为.

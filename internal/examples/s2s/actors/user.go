@@ -57,13 +57,13 @@ func onRandomGetServerName(args *gactor.ActorTimerArgs) {
 	u := args.Actor.Behavior().(*User)
 
 	if rand.Intn(2) > 0 {
-		if err := u.AsyncRPC(context.Background(), serverUID, &message.GetServerNameReq{}, getServerNameRPCCallback); err != nil {
+		if err := u.AsyncRPCWithContext(context.Background(), serverUID, &message.GetServerNameReq{}, getServerNameRPCCallback); err != nil {
 			logger.Logger().Errorf("User %d async get Server name, %v", u.ActorUID().ID, err)
 		}
 		randomGetServerName(u)
 	} else {
 		var reply message.GetServerNameResp
-		if err := u.RPC(context.Background(), serverUID, &message.GetServerNameReq{}, &reply); err != nil {
+		if err := u.RPCWithContext(context.Background(), serverUID, &message.GetServerNameReq{}, &reply); err != nil {
 			logger.Logger().Errorf("User %d get Server name, %v", u.ActorUID().ID, err)
 		} else {
 			logger.Logger().Debugf("User %d get Server name %s", u.ActorUID().ID, reply.ServerName)

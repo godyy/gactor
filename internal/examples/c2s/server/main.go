@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
 	"os"
 	"os/signal"
 	"strings"
@@ -132,7 +133,7 @@ func (s *server) Encode(allocator gactor.PacketAllocator, payload any) ([]byte, 
 	case gactor.PacketTypeS2SRpcResp:
 		return payload.(*message.RpcRespMessage).EncodePacket(allocator)
 	default:
-		panic("not implemented") // TODO: Implement
+		return nil, fmt.Errorf("unsupported packet type %d", allocator.PacketType())
 	}
 }
 
@@ -154,7 +155,7 @@ func (s *server) EncodePayload(pt gactor.PacketType, payload any) ([]byte, error
 	case gactor.PacketTypeS2SRpcResp:
 		return payload.(*message.RpcRespMessage).Encode()
 	default:
-		panic("not implemented") // TODO: Implement
+		return nil, fmt.Errorf("unsupported packet type %d", pt)
 	}
 }
 
@@ -179,7 +180,7 @@ func (s *server) DecodePayload(pt gactor.PacketType, b *gactor.Buffer, v any) er
 	case gactor.PacketTypeS2SRpcResp:
 		return v.(*message.RpcRespMessage).Decode(b)
 	default:
-		panic("not implemented") // TODO: Implement
+		return fmt.Errorf("unsupported packet type %d", pt)
 	}
 }
 

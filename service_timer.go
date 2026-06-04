@@ -15,9 +15,10 @@ type TimerConfig struct {
 	// MaxTimerDelay 最大定时器延迟. 默认值为 TimeWheelLevels 配置支持的最大值.
 	MaxTimerDelay time.Duration
 
-	// MaxTriggerdTimerAmount 表示能够容纳的已触发的待执行定时器的最大数量. 当容量达
-	// 到上限时, 新触发的定时器将等待先前的定时器执行后才能继续排队. 默认值 1000.
-	MaxTriggerdTimerAmount int
+	// MaxTimerAmount 最大定时器数量.
+	// 目前用于控制已完成定时器队列的大小.
+	// 默认值 1000.
+	MaxTimerAmount int
 }
 
 func (c *TimerConfig) init() {
@@ -34,8 +35,8 @@ func (c *TimerConfig) init() {
 		panic("gactor: TimerConfig: MaxTimerDelay exceeds TimeWheelLevels")
 	}
 
-	if c.MaxTriggerdTimerAmount <= 0 {
-		c.MaxTriggerdTimerAmount = 1000
+	if c.MaxTimerAmount <= 0 {
+		c.MaxTimerAmount = 1000
 	}
 }
 
@@ -43,14 +44,19 @@ func (c *TimerConfig) init() {
 func (s *Service) startTimeWheel() {
 	s.lastTickTimeWheel = s.getTimeSystem().Now()
 	s.timeWheelStop = make(chan struct{})
+	stopWait := s.getStopWait()
+	stopWait.W.Add(1)
 	go s.runTimeWheel()
-	for i := 0; i < runtime.NumCPU(); i++ {
+	workers := runtime.NumCPU()
+	stopWait.W.Add(workers)
+	for i := 0; i < workers; i++ {
 		go s.processTriggeredTimers()
 	}
 }
 
 // runTimeWheel 运行时间轮.
 func (s *Service) runTimeWheel() {
+	defer s.getStopWait().W.Done()
 	ticker := time.NewTicker(s.cfg.TimeWheelLevels[0].Span)
 	defer ticker.Stop()
 	for {
@@ -187,17 +193,23 @@ type triggeredTimer struct {
 
 // timerExecutor 定时器执行回调.
 func (s *Service) timerExecutor(tf TimerFunc, args gtimewheel.TimerArgs) {
+	const alarmThreshold = time.Millisecond * 50
+	begin := time.Now()
 	select {
 	case s.triggeredTimers <- triggeredTimer{
 		cb:   tf,
 		args: args,
 	}:
+		if d := time.Now().Sub(begin); d > alarmThreshold {
+			s.getLogger().Warnf("receive triggerd timer cost:%dms", d.Milliseconds())
+		}
 	case <-s.timeWheelStop:
 	}
 }
 
 // processTriggeredTimers 处理已触发的定时器..
 func (s *Service) processTriggeredTimers() {
+	defer s.getStopWait().W.Done()
 	for {
 		select {
 		case t := <-s.triggeredTimers:

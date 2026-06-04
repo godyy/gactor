@@ -1,9 +1,7 @@
 package gactor
 
 import (
-	"context"
 	"errors"
-	"time"
 )
 
 // ErrActorNotExists Actor 不存在.
@@ -17,9 +15,6 @@ var ErrLeaseMismatch = errors.New("gactor: lease mismatch")
 
 // actorExpireThreshold Actor 过期阈值, 单位秒.
 const actorExpireThreshold = 2
-
-// actorReigsterTimeout Actor 默认注册超时.
-const actorReigsterTimeout = 2 * time.Second
 
 // actorUnregisterThreshold Actor 默认注销阈值, 单位秒.
 const actorUnregisterThreshold = 5
@@ -88,21 +83,21 @@ type ActorRegistry interface {
 	// 时间.
 	// 若 Actor 已注册, 且所在节点ID与当前节点ID不同, 返回 ErrActorAlreadyRegistered 错误,
 	// 否则, 使用当前租约覆盖旧租约, 并更新存续时间.
-	RegisterActor(ctx context.Context, params ActorRegisterParams) (ActorRegisterResult, error)
+	RegisterActor(params ActorRegisterParams) (ActorRegisterResult, error)
 
 	// UnregisterActor 注销 Actor.
 	// 若 Actor 未注册, 返回 ErrActorNotExists 错误.
 	// 若节点ID和租约ID匹配, 则注销 Actor, 否则返回 ErrLeaseMismatch 错误.
-	UnregisterActor(ctx context.Context, params ActorUnregisterParams) error
+	UnregisterActor(params ActorUnregisterParams) error
 
 	// KeepActorAlive 保持 Actor 存续.
 	// 若 Actor 未注册, 返回 ErrActorNotExists 错误,
 	// 否则, 若节点ID和租约ID匹配, 则更新 Actor 存续时间, 否则返回 ErrLeaseMismatch 错误.
-	KeepActorAlive(ctx context.Context, params ActorKeepAliveParams) error
+	KeepActorAlive(params ActorKeepAliveParams) error
 
 	// GetActorLocation 获取 Actor 位置信息.
 	// 若 Actor 未注册, 返回 ErrActorNotExists 错误.
-	GetActorLocation(ctx context.Context, uid ActorUID) (ActorLocation, error)
+	GetActorLocation(uid ActorUID) (ActorLocation, error)
 }
 
 // ActorRouter Actor 路由.

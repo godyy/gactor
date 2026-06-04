@@ -7,11 +7,11 @@ import (
 	"github.com/godyy/gactor/internal/examples/c2s/common/message"
 )
 
-func RPC(a gactor.Actor, ctx context.Context, to gactor.ActorUID, params any, reply any) error {
+func RPCWithContext(a gactor.Actor, ctx context.Context, to gactor.ActorUID, params any, reply any) error {
 	var msgParams message.RpcMessage
 	var msgReply message.RpcRespMessage
 	msgParams = message.NewRpcMessageWithPayload(params)
-	if err := a.RPC(ctx, to, &msgParams, &msgReply); err != nil {
+	if err := a.RPCWithContext(ctx, to, &msgParams, &msgReply); err != nil {
 		return err
 	} else if err := msgReply.DecodePayload(reply); err != nil {
 		return err
@@ -20,10 +20,10 @@ func RPC(a gactor.Actor, ctx context.Context, to gactor.ActorUID, params any, re
 	}
 }
 
-func AsyncRPC(a gactor.Actor, ctx context.Context, to gactor.ActorUID, params any, callback gactor.ActorRPCFunc) error {
+func AsyncRPCWithContext(a gactor.Actor, ctx context.Context, to gactor.ActorUID, params any, callback gactor.ActorRPCFunc) error {
 	var msgParams message.RpcMessage
 	msgParams = message.NewRpcMessageWithPayload(params)
-	return a.AsyncRPC(ctx, to, &msgParams, callback)
+	return a.AsyncRPCWithContext(ctx, to, &msgParams, callback)
 }
 
 func WrapRPCCallback[AB gactor.ActorBehavior, R any](callback func(ab AB, reply *R, err error)) gactor.ActorRPCFunc {
@@ -40,7 +40,7 @@ func WrapRPCCallback[AB gactor.ActorBehavior, R any](callback func(ab AB, reply 
 	}
 }
 
-func ContextRPC(ctx *gactor.Context, to gactor.ActorUID, params any, reply any) error {
+func ContextRPCWithContext(ctx *gactor.Context, to gactor.ActorUID, params any, reply any) error {
 	var msgParams message.RpcMessage
 	var msgReply message.RpcRespMessage
 	msgParams = message.NewRpcMessageWithPayload(params)
@@ -53,7 +53,7 @@ func ContextRPC(ctx *gactor.Context, to gactor.ActorUID, params any, reply any) 
 	}
 }
 
-func ContextAsyncRPC(ctx *gactor.Context, to gactor.ActorUID, params any, callback gactor.ContextRPCFunc) error {
+func ContextAsyncRPCWithContext(ctx *gactor.Context, to gactor.ActorUID, params any, callback gactor.ContextRPCFunc) error {
 	var msgParams message.RpcMessage
 	msgParams = message.NewRpcMessageWithPayload(params)
 	return ctx.AsyncRPC(to, &msgParams, callback)

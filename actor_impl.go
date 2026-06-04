@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/godyy/glog"
+	"github.com/godyy/gmpsc"
 )
 
 // actorImpl Actor 内部实现接口封装.
@@ -48,7 +50,7 @@ func actorBeforeLoop(a actorImpl) error {
 	if err := a.Behavior().OnStart(); err != nil {
 		core.getLogger().ErrorFields("OnStart failed", lfdError(err))
 		a.core().service().monitorActorOnStartErr(a.core().category)
-		return ErrCodeStartActorFailed
+		return ErrCodeActorStartFailed
 	}
 
 	core.getLogger().DebugFields("OnStart")
@@ -73,53 +75,78 @@ func actorLoop(a actorImpl) {
 	}
 
 	core := a.core()
-
-	// 消费逻辑.
+actor_loop_for:
 	for {
-		select {
-		case msg := <-core.messageBox:
-			// 停止回收定时器.
-			core.resetRecycleTimer(true)
-
-			// 处理消息.
-			actorHandleMsg(a, msg)
-
-			// 若信箱已清空, 重置回收定时器.
-			if len(core.messageBox) == 0 {
-				core.resetRecycleTimer(false)
-			}
-
-		case timer := <-core.triggeredTimer:
-			// 处理定时器.
-			actorExecTimer(a, &timer)
-
-		case call := <-core.completedAsyncRPC:
-			// 处理异步 RPC 调用.
-			actorInvokeAsyncRPCFunc(a, &call)
-
-		case <-core.sigStop:
-			for {
-				// 清空信箱.
-				if a.core().service().isRunning() {
-					actorDrain(a, nil)
-				} else {
-					actorDrain(a, ErrCodeServiceStop)
-				}
-
-				// 检查是否可以停止.
-				if err := actorCheckCouldStopped(a); err != nil {
-					if errors.Is(err, ErrActorBeReferenced) || errors.Is(err, ErrActorMessageNotDrained) {
-						runtime.Gosched()
-						continue
-					}
-
-					core.getLogger().ErrorFields("check could stopped failed", lfdError(err))
-				}
-
-				actorStopped(a)
-				return
+		// 优先处理定时器和异步RPC回调.
+	handle_timer_rpc:
+		for {
+			select {
+			case timer := <-core.triggeredTimer:
+				actorExecTimer(a, &timer)
+			case call := <-core.completedAsyncRPC:
+				actorInvokeAsyncRPCFunc(a, &call)
+			case <-core.sigStop:
+				break actor_loop_for
+			default:
+				break handle_timer_rpc
 			}
 		}
+
+		// 处理消息, 等待前.
+		if msg, ok := core.messageBox.Dequeue(); ok {
+			core.waitMessage.Store(false)
+			actorHandleMsg(a, msg)
+			if core.messageBox.Size() <= 0 {
+				core.resetRecycleTimer(false)
+			}
+			continue
+		}
+
+		core.waitMessage.Store(true)
+
+		// 处理消息, 等待后.
+		if msg, ok := core.messageBox.Dequeue(); ok {
+			core.waitMessage.Store(false)
+			actorHandleMsg(a, msg)
+			if core.messageBox.Size() <= 0 {
+				core.resetRecycleTimer(false)
+			}
+			continue
+		}
+
+		// 等待新消息的到来.
+		select {
+		case timer := <-core.triggeredTimer:
+			actorExecTimer(a, &timer)
+		case call := <-core.completedAsyncRPC:
+			actorInvokeAsyncRPCFunc(a, &call)
+		case <-core.messageNotify:
+		case <-core.sigStop:
+			break actor_loop_for
+		}
+	}
+
+	// 停机处理.
+	for {
+		// 清空信箱.
+		if a.core().service().isRunning() {
+			actorDrain(a, nil)
+		} else {
+			actorDrain(a, ErrCodeServiceStopped)
+		}
+
+		// 检查是否可以停止.
+		if err := actorCheckCouldStopped(a); err != nil {
+			if errors.Is(err, errActorBeReferenced) || errors.Is(err, errActorMessageNotDrained) {
+				runtime.Gosched()
+				continue
+			}
+
+			core.getLogger().ErrorFields("check could stopped failed", lfdError(err))
+		}
+
+		actorStopped(a)
+		return
 	}
 }
 
@@ -149,10 +176,10 @@ func actorCheckCouldStopped(a actorImpl) error {
 	defer core.unlock(true)
 
 	if core.refCount > 0 {
-		return ErrActorBeReferenced
+		return errActorBeReferenced
 	}
-	if len(core.messageBox) > 0 || len(core.completedAsyncRPC) > 0 {
-		return ErrActorMessageNotDrained
+	if core.messageBox.Size() > 0 || len(core.completedAsyncRPC) > 0 {
+		return errActorMessageNotDrained
 	}
 
 	return nil
@@ -185,9 +212,7 @@ func actorUnregister(a actorImpl) {
 	// 若设置 actorFlagShutdown 标志, 或服务即将停机. 直接注销.
 	// 否则, 使其在注册表中再存续一小段时间, 方便再次唤醒.
 	if core.hasFlag(actorFlagShutdown) || !svc.isRunning() {
-		ctx, cancel := context.WithTimeout(context.Background(), actorReigsterTimeout)
-		defer cancel()
-		if err := reg.UnregisterActor(ctx, ActorUnregisterParams{
+		if err := reg.UnregisterActor(ActorUnregisterParams{
 			UID:     core.ActorUID(),
 			NodeId:  svc.nodeId(),
 			LeaseId: core.leaseID,
@@ -195,9 +220,7 @@ func actorUnregister(a actorImpl) {
 			core.getLogger().ErrorFields("unregister actor failed", lfdError(err))
 		}
 	} else {
-		ctx, cancel := context.WithTimeout(context.Background(), actorReigsterTimeout)
-		defer cancel()
-		if err := reg.KeepActorAlive(ctx, ActorKeepAliveParams{
+		if err := reg.KeepActorAlive(ActorKeepAliveParams{
 			UID:     core.ActorUID(),
 			NodeId:  svc.nodeId(),
 			LeaseId: core.leaseID,
@@ -211,19 +234,23 @@ func actorUnregister(a actorImpl) {
 // actorDrain Actor 清空消息.
 func actorDrain(a actorImpl, err error) {
 	core := a.core()
-	drained := false
-	for !drained {
+	drained := 0
+	for drained < 2 {
 		select {
-		case msg := <-core.messageBox:
+		case call := <-core.completedAsyncRPC:
+			actorInvokeAsyncRPCFunc(a, &call)
+		default:
+			drained++
+		}
+
+		if msg, ok := core.messageBox.Dequeue(); ok {
 			if err == nil {
 				actorHandleMsg(a, msg)
 			} else {
 				actorHandleMsgErr(a, msg, err)
 			}
-		case call := <-core.completedAsyncRPC:
-			actorInvokeAsyncRPCFunc(a, &call)
-		default:
-			drained = true
+		} else if core.messageBox.Size() <= 0 {
+			drained++
 		}
 	}
 }
@@ -295,9 +322,7 @@ func actorOnKeepAlive(args *ActorTimerArgs) {
 	core := a.core()
 	svc := core.service()
 	reg := svc.getCfg().Handler.GetActorRegistry()
-	ctx, cancel := context.WithTimeout(context.Background(), actorReigsterTimeout)
-	defer cancel()
-	if err := reg.KeepActorAlive(ctx, ActorKeepAliveParams{
+	if err := reg.KeepActorAlive(ActorKeepAliveParams{
 		UID:     core.ActorUID(),
 		NodeId:  svc.nodeId(),
 		TTL:     svc.getCfg().RegistryTTL,
@@ -308,35 +333,34 @@ func actorOnKeepAlive(args *ActorTimerArgs) {
 }
 
 var (
+	// errActorBeReferenced 表示 Actor 被引用.
+	errActorBeReferenced = errors.New("gactor: actor be referenced")
 
-	// ErrActorNotConnected 表示 Actor 未连接.
-	ErrActorNotConnected = errors.New("gactor: actor not connected")
+	// errActorNotBeReferenced 表示 Actor 未被引用.
+	errActorNotBeReferenced = errors.New("gactor: actor not be referenced")
 
-	// ErrActorBeReferenced 表示 Actor 被引用.
-	ErrActorBeReferenced = errors.New("gactor: actor be referenced")
+	// errActorNotStarted 表示 Actor 未启动.
+	errActorNotStarted = errors.New("gactor: actor not started")
 
-	// ErrActorNotBeReferenced 表示 Actor 未被引用.
-	ErrActorNotBeReferenced = errors.New("gactor: actor not be referenced")
+	// errActorStarted 表示 Actor 已启动.
+	errActorStarted = errors.New("gactor: actor started")
 
-	// ErrActorNotStarted 表示 Actor 未启动.
-	ErrActorNotStarted = errors.New("gactor: actor not started")
+	// errActorStopping 表示 Actor 正在停机.
+	errActorStopping = errors.New("gactor: actor stopping")
 
-	// ErrActorStarted 表示 Actor 已启动.
-	ErrActorStarted = errors.New("gactor: actor started")
+	// errActorStopped 表示 Actor 已停机.
+	errActorStopped = errors.New("gactor: actor stopped")
 
-	// ErrActorStopping 表示 Actor 正在停机.
-	ErrActorStopping = errors.New("gactor: actor stopping")
+	// errActorMessageNotDrained 表示 Actor 消息未被处理完.
+	errActorMessageNotDrained = errors.New("gactor: actor message not drained")
 
-	// ErrActorStopped 表示 Actor 已停机.
-	ErrActorStopped = errors.New("gactor: actor stopped")
-
-	// ErrActorMessageNotDrained 表示 Actor 消息未被处理完.
-	ErrActorMessageNotDrained = errors.New("gactor: actor message not drained")
+	// errActorAsyncRPCLimitExceeded 表示异步RPC调用数量已达到上限
+	errActorAsyncRPCLimitExceeded = errors.New("gactor: actor async rpc amount exceeded limit")
 )
 
 // ErrIsActorStop error 是否表示 Actor 停机.
 func ErrIsActorStop(err error) bool {
-	return errors.Is(err, ErrActorStopping) || errors.Is(err, ErrActorStopped)
+	return errors.Is(err, errActorStopping) || errors.Is(err, errActorStopped)
 }
 
 const (
@@ -348,10 +372,10 @@ const (
 
 // actorStateErrs Actor State error 映射.
 var actorStateErrs = map[int8]error{
-	actorStateInit:     ErrActorNotStarted,
-	actorStateStarted:  ErrActorStarted,
-	actorStateStopping: ErrActorStopping,
-	actorStateStopped:  ErrActorStopped,
+	actorStateInit:     errActorNotStarted,
+	actorStateStarted:  errActorStarted,
+	actorStateStopping: errActorStopping,
+	actorStateStopped:  errActorStopped,
 }
 
 func actorStateErr(state int8) error {
@@ -388,7 +412,9 @@ type actorCore struct {
 	id                int64                       // Actor 分类实例ID.
 	leaseID           string                      // 租约ID.
 	svc               *Service                    // 隶属的 Service.
-	messageBox        chan message                // 信箱.
+	messageBox        *gmpsc.Queue[message]       // 信箱.
+	messageNotify     chan struct{}               // 信箱通知.
+	waitMessage       atomic.Bool                 // 是否等待消息.
 	triggeredTimer    chan actorTriggeredTimer    // 已触发的定时器.
 	completedAsyncRPC chan actorCompletedAsyncRPC // 已完成的异步 RPC 调用.
 	sigStop           chan struct{}               // 停机信号.
@@ -409,9 +435,10 @@ func newActorCore(ad *actorDefineBase, id int64, leaseId string, svc *Service) *
 		id:                id,
 		leaseID:           leaseId,
 		svc:               svc,
-		messageBox:        make(chan message, ad.messageBoxSize),
-		triggeredTimer:    make(chan actorTriggeredTimer, ad.maxTriggeredTimerAmount),
-		completedAsyncRPC: make(chan actorCompletedAsyncRPC, ad.maxCompletedAsyncRPCAmount),
+		messageBox:        gmpsc.NewQueue[message](256, ad.messageBoxSize),
+		messageNotify:     make(chan struct{}, 1),
+		triggeredTimer:    make(chan actorTriggeredTimer, ad.maxTimerAmount),
+		completedAsyncRPC: make(chan actorCompletedAsyncRPC, ad.maxAsyncRPCAmount),
 		sigStop:           make(chan struct{}),
 		logger: svc.oriLogger.Named("actor").
 			WithFields(lfdCategoryName(ad.name), lfdId(id)),
@@ -587,8 +614,10 @@ func (a *actorCore) stopped(f func()) {
 		return
 	}
 	a.svc = nil
-	close(a.messageBox)
+	a.messageBox.Close()
 	a.messageBox = nil
+	close(a.messageNotify)
+	a.messageNotify = nil
 	a.sigStop = nil
 	if a.completedAsyncRPC != nil {
 		close(a.completedAsyncRPC)
@@ -620,7 +649,7 @@ func (a *actorCore) deref() error {
 	defer a.unlock(false)
 
 	if a.refCount <= 0 {
-		return ErrActorNotBeReferenced
+		return errActorNotBeReferenced
 	}
 
 	a.refCount -= 1
@@ -629,31 +658,27 @@ func (a *actorCore) deref() error {
 }
 
 // receiveMessage 接收消息.
-func (a *actorCore) receiveMessage(ctx context.Context, msg message) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-
+func (a *actorCore) receiveMessage(msg message) error {
 	if err := a.checkStarted(); err != nil {
 		return err
 	}
 
-	select {
-	case a.messageBox <- msg:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-a.sigStop:
-		return a.checkStarted()
+	if !a.messageBox.Enqueue(msg) {
+		return ErrCodeActorBusy
 	}
+
+	if a.waitMessage.Load() {
+		select {
+		case a.messageNotify <- struct{}{}:
+		default:
+		}
+	}
+
+	return nil
 }
 
 // receiveCompletedAsyncRPC 接收已完成的异步 RPC 调用.
-func (a *actorCore) receiveCompletedAsyncRPC(ctx context.Context, resp *RPCResp, cb ActorRPCFunc) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-
+func (a *actorCore) receiveCompletedAsyncRPC(resp *RPCResp, cb ActorRPCFunc) error {
 	if err := a.checkNotStopped(); err != nil {
 		return err
 	}
@@ -665,12 +690,13 @@ func (a *actorCore) receiveCompletedAsyncRPC(ctx context.Context, resp *RPCResp,
 	}
 	resp.payload.SetBuf(nil)
 
-	select {
-	case a.completedAsyncRPC <- asyncCall:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
+	const alarmThreshold = time.Millisecond * 50
+	begin := time.Now()
+	a.completedAsyncRPC <- asyncCall
+	if d := time.Now().Sub(begin); d > alarmThreshold {
+		a.getLogger().Warnf("receiveCompletedAsyncRPC cost:%dms", d.Milliseconds())
 	}
+	return nil
 }
 
 // resetRecycleTimer 重置回收定时器.
@@ -709,22 +735,46 @@ func (a *actorCore) receiveTriggerdTimer(tid TimerId, args any, cb ActorTimerFun
 		return
 	}
 
+	const alarmThreshold = time.Millisecond * 50
 	timer := actorTriggeredTimer{
 		tid:  tid,
 		f:    cb,
 		args: args,
 	}
+	begin := time.Now()
 	select {
 	case a.triggeredTimer <- timer:
+		if d := time.Now().Sub(begin); d > alarmThreshold {
+			a.getLogger().Warnf("receive triggerd timer cost:%dms", d.Milliseconds())
+		}
 		return
 	case <-a.sigStop:
 		return
 	}
 }
 
+// RPCWithDeadline 发起同步 RPC 调用.
+// deadline 为超时时间.
+func (a *actorCore) RPCWithDeadline(to ActorUID, params, reply any, deadline time.Time) error {
+	return a.svc.rpcWithDeadline(a.ActorUID(), to, params, reply, deadline)
+}
+
+// RPCWithTimeout 发起同步 RPC 调用.
+// timeout 为超时间隔.
+func (a *actorCore) RPCWithTimeout(to ActorUID, params, reply any, timeout time.Duration) error {
+	return a.svc.rpcWithTimeout(a.ActorUID(), to, params, reply, timeout)
+}
+
 // RPC 发起同步 RPC 调用.
-func (a *actorCore) RPC(ctx context.Context, to ActorUID, params, reply any) error {
-	return a.svc.rpc(ctx, a.ActorUID(), to, params, reply)
+// 使用配置的默认超时间隔.
+func (a *actorCore) RPC(to ActorUID, params, reply any) error {
+	return a.svc.rpc(a.ActorUID(), to, params, reply)
+}
+
+// RPCWithContext 发起同步 RPC 调用.
+// 超时 deadline 从 ctx 获取，若未设置, 使用默认超时时间.
+func (a *actorCore) RPCWithContext(ctx context.Context, to ActorUID, params, reply any) error {
+	return a.svc.rpcWithContext(ctx, a.ActorUID(), to, params, reply)
 }
 
 // actorAsyncRPCFunc Actor 异步 RPC 回调封装.
@@ -741,17 +791,16 @@ func (f *actorAsyncRPCFunc) invoke(resp *RPCResp) {
 		f.svc.getLogger().WarnFields("actor not found inside actorAsyncRPCFunc", f.svc.lfdActorUID("uid", f.uid))
 	} else {
 		defer actor.core().deref()
-		ctx, cancel := context.WithTimeout(context.Background(), f.svc.cfg.DefRPCTimeout/2)
-		defer cancel()
-		if err := actor.core().receiveCompletedAsyncRPC(ctx, resp, f.cb); err != nil {
+		if err := actor.core().receiveCompletedAsyncRPC(resp, f.cb); err != nil {
 			actor.core().getLogger().ErrorFields("receive async rpc call failed", lfdError(err))
 		}
 	}
 }
 
-// asyncRPC 异步 RPC 调用核心实现.
-func (a *actorCore) asyncRPC(ctx context.Context, impl actorImpl, to ActorUID, params any, cb ActorRPCFunc) error {
-	if err := impl.core().ref(); err != nil {
+// AsyncRPCWithDeadline 发起异步 RPC 调用.
+// deadline 为超时时间.
+func (a *actorCore) AsyncRPCWithDeadline(to ActorUID, params any, cb ActorRPCFunc, deadline time.Time) error {
+	if err := a.ref(); err != nil {
 		return err
 	}
 
@@ -761,8 +810,41 @@ func (a *actorCore) asyncRPC(ctx context.Context, impl actorImpl, to ActorUID, p
 		cb:  cb,
 	}
 
-	if err := a.svc.asyncRPC(ctx, a.ActorUID(), to, params, asyncFunc.invoke); err != nil {
-		_ = impl.core().deref()
+	if err := a.svc.asyncRPCWithDeadline(a.ActorUID(), to, params, asyncFunc.invoke, deadline); err != nil {
+		_ = a.deref()
+		return err
+	}
+
+	return nil
+}
+
+// AsyncRPCWithTimeout 发起异步 RPC 调用.
+// timeout 为超时间隔.
+func (a *actorCore) AsyncRPCWithTimeout(to ActorUID, params any, cb ActorRPCFunc, timeout time.Duration) error {
+	return a.AsyncRPCWithDeadline(to, params, cb, time.Now().Add(timeout))
+}
+
+// AsyncRPC 发起异步 RPC 调用.
+// 使用配置的默认超时间隔.
+func (a *actorCore) AsyncRPC(to ActorUID, params any, cb ActorRPCFunc) error {
+	return a.AsyncRPCWithDeadline(to, params, cb, time.Now().Add(a.svc.cfg.DefRPCTimeout))
+}
+
+// AsyncRPCWithContext 发起异步 RPC 调用.
+// 超时 deadline 从 ctx 获取，若未设置, 使用默认超时时间.
+func (a *actorCore) AsyncRPCWithContext(ctx context.Context, to ActorUID, params any, cb ActorRPCFunc) error {
+	if err := a.ref(); err != nil {
+		return err
+	}
+
+	asyncFunc := &actorAsyncRPCFunc{
+		svc: a.svc,
+		uid: a.ActorUID(),
+		cb:  cb,
+	}
+
+	if err := a.svc.asyncRPCWithContext(ctx, a.ActorUID(), to, params, asyncFunc.invoke); err != nil {
+		_ = a.deref()
 		return err
 	}
 
@@ -770,8 +852,8 @@ func (a *actorCore) asyncRPC(ctx context.Context, impl actorImpl, to ActorUID, p
 }
 
 // Cast 投递消息.
-func (a *actorCore) Cast(ctx context.Context, to ActorUID, payload any) error {
-	return a.svc.cast(ctx, a.ActorUID(), to, payload)
+func (a *actorCore) Cast(to ActorUID, payload any) error {
+	return a.svc.cast(a.ActorUID(), to, payload)
 }
 
 // actor Actor 内部实现.
@@ -801,11 +883,6 @@ func (a *actor) onStopped() {
 
 func (a *actor) Behavior() ActorBehavior {
 	return a.behavior
-}
-
-// AsyncRPC 发起异步 RPC 调用.
-func (a *actor) AsyncRPC(ctx context.Context, to ActorUID, params any, cb ActorRPCFunc) error {
-	return a.asyncRPC(ctx, a, to, params, cb)
 }
 
 // cactor CActor 内部实现.
@@ -839,11 +916,6 @@ func (a *cactor) Session() ActorSession {
 	return a.session
 }
 
-// AsyncRPC 发起异步 RPC 调用.
-func (a *cactor) AsyncRPC(ctx context.Context, to ActorUID, params any, cb ActorRPCFunc) error {
-	return a.asyncRPC(ctx, a, to, params, cb)
-}
-
 func (a *cactor) start() error {
 	return actorStart(a)
 }
@@ -864,7 +936,7 @@ func (a *cactor) updateSession(session ActorSession) {
 // PushRawMessage 向客户端推送消息.
 func (a *cactor) PushRawMessage(payload any) error {
 	if a.session.NodeId == "" {
-		return ErrActorNotConnected
+		return ErrCodeActorNotConnected
 	}
 	ph := newRawPushHead(a.service().genSeq(), a.id, a.session.SID)
 	return a.svc.sendRemotePacket(a.session.NodeId, &ph, payload)

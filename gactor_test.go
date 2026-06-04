@@ -1,7 +1,6 @@
 package gactor
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -51,7 +50,7 @@ func TestService(t *testing.T) {
 				return &testActor{Actor: a}
 			},
 		},
-			WithMaxCompletedAsyncRPCAmount(1),
+			WithMaxAsyncRPCAmount(1),
 		),
 	}
 
@@ -105,11 +104,8 @@ func TestService(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
 	for _, uid := range actorUIDs {
-		ta, err := svc.startActor(ctx, uid, "")
+		ta, err := svc.startActor(uid, "")
 		if err != nil {
 			t.Fatalf("start actor %s, %v", uid, err)
 		}
@@ -145,7 +141,7 @@ func (r *testActorRegistry) MakeLeaseID() string {
 // 时间.
 // 若 Actor 已注册, 且所在节点ID与当前节点ID不同, 返回 ErrActorAlreadyRegistered 错误,
 // 否则, 使用当前租约覆盖旧租约, 并更新存续时间.
-func (r *testActorRegistry) RegisterActor(ctx context.Context, params ActorRegisterParams) (ActorRegisterResult, error) {
+func (r *testActorRegistry) RegisterActor(params ActorRegisterParams) (ActorRegisterResult, error) {
 	r.mtx.Lock()
 	defer r.mtx.Unlock()
 	// fmt.Printf("registe %+v\n", params)
@@ -183,7 +179,7 @@ func (r *testActorRegistry) RegisterActor(ctx context.Context, params ActorRegis
 // UnregisterActor 注销 Actor.
 // 若 Actor 未注册, 返回 ErrActorNotExists 错误.
 // 若节点ID和租约ID匹配, 则注销 Actor, 否则返回 ErrLeaseMismatch 错误.
-func (r *testActorRegistry) UnregisterActor(ctx context.Context, params ActorUnregisterParams) error {
+func (r *testActorRegistry) UnregisterActor(params ActorUnregisterParams) error {
 	r.mtx.Lock()
 	defer r.mtx.Unlock()
 	location := r.actorMap[params.UID]
@@ -204,7 +200,7 @@ func (r *testActorRegistry) UnregisterActor(ctx context.Context, params ActorUnr
 // KeepActorAlive 保持 Actor 存续.
 // 若 Actor 未注册, 返回 ErrActorNotExists 错误,
 // 否则, 若节点ID和租约ID匹配, 则更新 Actor 存续时间, 否则返回 ErrLeaseMismatch 错误.
-func (r *testActorRegistry) KeepActorAlive(ctx context.Context, params ActorKeepAliveParams) error {
+func (r *testActorRegistry) KeepActorAlive(params ActorKeepAliveParams) error {
 	r.mtx.Lock()
 	defer r.mtx.Unlock()
 	location := r.actorMap[params.UID]
@@ -223,7 +219,7 @@ func (r *testActorRegistry) KeepActorAlive(ctx context.Context, params ActorKeep
 
 // GetActorLocation 获取 Actor 位置信息.
 // 若 Actor 未注册, 返回 ErrActorNotExists 错误.
-func (r *testActorRegistry) GetActorLocation(ctx context.Context, uid ActorUID) (ActorLocation, error) {
+func (r *testActorRegistry) GetActorLocation(uid ActorUID) (ActorLocation, error) {
 	r.mtx.RLock()
 	defer r.mtx.RUnlock()
 	location := r.actorMap[uid]
@@ -404,7 +400,7 @@ func (a *testActor) OnStart() error {
 			targetUID = actorUIDs[rand.Intn(len(actorUIDs))]
 		}
 
-		if err := ta.Cast(context.Background(), targetUID, &testS2SMessage{
+		if err := ta.Cast(targetUID, &testS2SMessage{
 			msgId:   msgIdCast,
 			payload: &testMessageCast{Msg: fmt.Sprintf("hello, i am %s", ta.ActorUID())},
 		}); err != nil {
@@ -418,7 +414,7 @@ func (a *testActor) OnStart() error {
 				msgId:   msgIdPing,
 				payload: &testMessagePing{Time: time.Now()},
 			}
-			if err := ta.AsyncRPC(context.Background(), targetUID, &params, func(_ Actor, resp *RPCResp) {
+			if err := ta.AsyncRPC(targetUID, &params, func(_ Actor, resp *RPCResp) {
 				reply := testS2SMessage{}
 				if err := resp.DecodeReply(&reply); err != nil {
 					logger.Errorf("actor %s decode rpc async payload, %v", a.ActorUID(), err)

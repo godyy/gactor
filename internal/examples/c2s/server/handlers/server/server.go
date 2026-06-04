@@ -53,7 +53,7 @@ func (h *handler) wrapHandler(handlers ...gactor.HandlerFunc) gactor.HandlersCha
 
 func (h *handler) handleServerName(ctx *gactor.Context, msg *message.GetNameReq) {
 	logger.Logger().DebugFields("server handle serverName", zap.Int64("id", ctx.Actor().ActorUID().ID))
-	if err := actors.ContextAsyncRPC(
+	if err := actors.ContextAsyncRPCWithContext(
 		ctx,
 		gactor.ActorUID{Category: consts.CategoryUser, ID: 1},
 		&message.GetNameReq{},

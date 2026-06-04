@@ -9,9 +9,6 @@ import (
 	pkgerrors "github.com/pkg/errors"
 )
 
-// ErrActorDefineNotExists Actor 定义不存在.
-var ErrActorDefineNotExists = errors.New("gactor: actor define not exists")
-
 // ActorDefine Actor 定义接口.
 type ActorDefine interface {
 	// Name Actor 名称.
@@ -99,15 +96,15 @@ type actorDefineBase struct {
 	// messageBoxSize 表示 Actor 的信箱大小.
 	messageBoxSize int
 
-	// maxTriggeredTimerAmount 表示 Actor 能够容纳的已触发的待执行定时器的最
-	// 大数量. 当容量达到上限时, 新触发的定时器将等待先前的定时器执行后才能继续排
-	// 队. 默认值 10.
-	maxTriggeredTimerAmount int
+	// maxTimerAmount 最大定时器数量.
+	// 目前用于控制接收已触发的定时器的队列大小.
+	// 默认值 10.
+	maxTimerAmount int
 
-	// maxCompletedAsyncRPCAmount 表示能够容纳的已完成异步 RPC 调用的最大数
-	// 量. 当容量达到上限时, 新完成的异步 RPC 调用将等待先前的异步 RPC 调用执行
-	// 后才能继续排队. 默认值 1.
-	maxCompletedAsyncRPCAmount int
+	// maxAsyncRPCAmount 最大异步RPC调用数量.
+	// 目前用于控制接收已完成异步RPC调用的队列大小.
+	// 默认值 10.
+	maxAsyncRPCAmount int
 
 	// recycleTime 表示 Actor 的回收时间.
 	// 若大于0, Actor 空闲超过该时间后会被系统回收.
@@ -134,12 +131,12 @@ func (ad *actorDefineBase) init() error {
 		return errors.New("messageBoxSize must be greater than 0")
 	}
 
-	if ad.maxTriggeredTimerAmount <= 0 {
-		ad.maxTriggeredTimerAmount = 10
+	if ad.maxTimerAmount <= 0 {
+		ad.maxTimerAmount = 10
 	}
 
-	if ad.maxCompletedAsyncRPCAmount <= 0 {
-		ad.maxCompletedAsyncRPCAmount = 1
+	if ad.maxAsyncRPCAmount <= 0 {
+		ad.maxAsyncRPCAmount = 10
 	}
 
 	return nil
@@ -204,17 +201,17 @@ func NewCActorDefine(config CActorDefineConfig, ops ...func(ActorDefine)) ActorD
 	return def
 }
 
-// WithMaxTriggeredTimerAmount 设置最大触发定时器数量.
-func WithMaxTriggeredTimerAmount(maxTriggeredTimerAmount int) func(ActorDefine) {
+// WithMaxTimerAmount 设置最大定时器数量.
+func WithMaxTimerAmount(maxTriggeredTimerAmount int) func(ActorDefine) {
 	return func(ad ActorDefine) {
-		ad.base().maxTriggeredTimerAmount = maxTriggeredTimerAmount
+		ad.base().maxTimerAmount = maxTriggeredTimerAmount
 	}
 }
 
-// WithMaxCompletedAsyncRPCAmount 设置最大已完成异步 RPC 调用数量.
-func WithMaxCompletedAsyncRPCAmount(maxCompletedAsyncRPCAmount int) func(ActorDefine) {
+// WithMaxAsyncRPCAmount 设置最大未完成的异步RPC调用数量.
+func WithMaxAsyncRPCAmount(maxAsyncRPCAmount int) func(ActorDefine) {
 	return func(ad ActorDefine) {
-		ad.base().maxCompletedAsyncRPCAmount = maxCompletedAsyncRPCAmount
+		ad.base().maxAsyncRPCAmount = maxAsyncRPCAmount
 	}
 }
 

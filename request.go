@@ -3,6 +3,7 @@ package gactor
 import (
 	"errors"
 	"sync"
+	"time"
 
 	"go.uber.org/zap/zapcore"
 )
@@ -38,8 +39,11 @@ type request interface {
 	// fromActorUID 请求来源Actor ID.
 	fromActorUID() ActorUID
 
+	// deadline 获取 deadline
+	deadline() (time.Time, bool)
+
 	// isTimeout 是否超时.
-	isTimeout(nowMs int64) bool
+	isTimeout(now time.Time) bool
 
 	// decode 解码负载数据到 v 指向的数据结构中.
 	// * 不可重入, 只能调用一次.
@@ -73,7 +77,11 @@ type requestCom struct {
 	payload    Buffer // 负载数据
 }
 
-func (req *requestCom) isTimeout(nowMs int64) bool {
+func (req *requestCom) deadline() (time.Time, bool) {
+	return time.Time{}, false
+}
+
+func (req *requestCom) isTimeout(now time.Time) bool {
 	return false
 }
 
@@ -111,22 +119,22 @@ func (req *requestCom) beforeHandle(ctx *Context) error {
 // rawRequest 对应 PacketTypeRawReq.
 type rawRequest struct {
 	requestCom
-	seq         uint32 // 包序
-	sid         uint32 // 会话ID
-	timeoutAtMs int64  // 超时时刻, 毫秒级
+	seq        uint32 // 包序
+	sid        uint32 // 会话ID
+	deadlineMs int64  // 超时时刻, 毫秒级
 }
 
 var poolOfRawRequest = &sync.Pool{New: func() interface{} {
 	return &rawRequest{}
 }}
 
-func newRawRequest(fromNodeId string, seq, sid uint32, payload Buffer, timeoutAtMs int64) *rawRequest {
+func newRawRequest(fromNodeId string, seq, sid uint32, payload Buffer, deadlineMs int64) *rawRequest {
 	req := poolOfRawRequest.Get().(*rawRequest)
 	req.fromNodeId = fromNodeId
 	req.payload = payload
 	req.seq = seq
 	req.sid = sid
-	req.timeoutAtMs = timeoutAtMs
+	req.deadlineMs = deadlineMs
 	return req
 }
 
@@ -138,8 +146,12 @@ func (req *rawRequest) fromActorUID() ActorUID {
 	return ActorUID{}
 }
 
-func (req *rawRequest) isTimeout(nowMs int64) bool {
-	return nowMs >= req.timeoutAtMs
+func (req *rawRequest) deadline() (time.Time, bool) {
+	return time.UnixMilli(req.deadlineMs), true
+}
+
+func (req *rawRequest) isTimeout(now time.Time) bool {
+	return now.UnixMilli() >= req.deadlineMs
 }
 
 func (req *rawRequest) decode(ctx *Context, v any) error {
@@ -177,7 +189,7 @@ func (req *rawRequest) clone(ctx *Context) request {
 	cp.requestCom = req.requestCom.clone(ctx)
 	cp.seq = req.seq
 	cp.sid = req.sid
-	cp.timeoutAtMs = req.timeoutAtMs
+	cp.deadlineMs = req.deadlineMs
 	return cp
 }
 
@@ -193,7 +205,7 @@ func (req *rawRequest) beforeHandle(ctx *Context) error {
 	}
 
 	if !ca.session.IsConnected() {
-		_ = req.reply(ctx, nil, ErrCodeActorNotConnect)
+		_ = req.reply(ctx, nil, ErrCodeActorNotConnected)
 		return errSkipHandleRequest
 	}
 
@@ -202,7 +214,7 @@ func (req *rawRequest) beforeHandle(ctx *Context) error {
 		SID:    req.sid,
 	}
 	if reqSession != ca.session {
-		_ = req.reply(ctx, nil, ErrCodeActorOtherConnect)
+		_ = req.reply(ctx, nil, ErrCodeActorConnectedByAnother)
 		return errSkipHandleRequest
 	}
 
@@ -214,31 +226,31 @@ func (req *rawRequest) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 	enc.AddString("fromNode", req.fromNodeId)
 	enc.AddUint32("seq", req.seq)
 	enc.AddUint32("sid", req.sid)
-	enc.AddInt64("timeoutAtMs", req.timeoutAtMs)
+	enc.AddInt64("deadlineMs", req.deadlineMs)
 	return nil
 }
 
 // rpcRequest 对应 PacketTypeS2SRpc.
 type rpcRequest struct {
 	requestCom
-	seq         uint32   // 包序
-	reqId       uint32   // 请求ID
-	fromId      ActorUID // 来源 Actor ID.
-	timeoutAtMs int64    // 超时时刻, 毫秒级.
+	seq        uint32   // 包序
+	reqId      uint32   // 请求ID
+	fromId     ActorUID // 来源 Actor ID.
+	deadlineMs int64    // 超时时刻, 毫秒级.
 }
 
 var poolOfRpcRequest = &sync.Pool{New: func() interface{} {
 	return &rpcRequest{}
 }}
 
-func newRPCRequest(remoteNodeId string, seq, reqId uint32, fromId ActorUID, payload Buffer, timeoutAtMs int64) *rpcRequest {
+func newRPCRequest(remoteNodeId string, seq, reqId uint32, fromId ActorUID, payload Buffer, deadlineMs int64) *rpcRequest {
 	req := poolOfRpcRequest.Get().(*rpcRequest)
 	req.fromNodeId = remoteNodeId
 	req.payload = payload
 	req.seq = seq
 	req.reqId = reqId
 	req.fromId = fromId
-	req.timeoutAtMs = timeoutAtMs
+	req.deadlineMs = deadlineMs
 	return req
 }
 
@@ -250,8 +262,12 @@ func (req *rpcRequest) fromActorUID() ActorUID {
 	return req.fromId
 }
 
-func (req *rpcRequest) isTimeout(nowMs int64) bool {
-	return nowMs >= req.timeoutAtMs
+func (req *rpcRequest) deadline() (time.Time, bool) {
+	return time.UnixMilli(req.deadlineMs), true
+}
+
+func (req *rpcRequest) isTimeout(now time.Time) bool {
+	return now.UnixMilli() >= req.deadlineMs
 }
 
 func (req *rpcRequest) decode(ctx *Context, v any) error {
@@ -290,7 +306,7 @@ func (req *rpcRequest) clone(ctx *Context) request {
 	cp.seq = req.seq
 	cp.reqId = req.reqId
 	cp.fromId = req.fromId
-	cp.timeoutAtMs = req.timeoutAtMs
+	cp.deadlineMs = req.deadlineMs
 	return cp
 }
 
@@ -305,7 +321,7 @@ func (req *rpcRequest) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 	enc.AddUint32("seq", req.seq)
 	enc.AddUint32("reqId", req.reqId)
 	enc.AddObject("fromId", &req.fromId)
-	enc.AddInt64("timeoutAtMs", req.timeoutAtMs)
+	enc.AddInt64("deadlineMs", req.deadlineMs)
 	return nil
 }
 

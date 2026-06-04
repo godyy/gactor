@@ -1,7 +1,6 @@
 package gactor
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"time"
@@ -68,7 +67,7 @@ func svcHandlePacketConnect(s *Service, nodeId string, b *Buffer) error {
 	}
 
 	// 发送消息.
-	if err := s.send2LocalActor(context.Background(), uid, newMessageConnect(nodeId, head.sid), ""); err != nil {
+	if err := s.send2LocalActor(uid, newMessageConnect(nodeId, head.sid), ""); err != nil {
 		s.getLogger().ErrorFields("[HandlePacketConnect] send message to actor failed",
 			lfdRemoteNodeId(nodeId),
 			lfdSeq(head.getSeq()),
@@ -115,7 +114,7 @@ func svcHandlePacketDisconnect(s *Service, nodeId string, b *Buffer) error {
 		return nil
 	}
 
-	if err := s.send2LocalActor(context.Background(), uid, newMessageDisconnected(nodeId, head.sid), ""); err != nil {
+	if err := s.send2LocalActor(uid, newMessageDisconnected(nodeId, head.sid), ""); err != nil {
 		s.getLogger().ErrorFields("[HandlePacketDisconnect] send message to actor failed",
 			lfdRemoteNodeId(nodeId),
 			lfdSeq(head.getSeq()),
@@ -159,22 +158,17 @@ func svcHandlePacketRawReq(s *Service, nodeId string, b *Buffer) error {
 		return nil
 	}
 
-	// 根据超时时间创建上下文.
-	deadline := time.Now().Add(timeout)
-	ctx, cancel := context.WithDeadline(context.Background(), deadline)
-	defer cancel()
-
 	// 服务必须处于运行状态，否则返回停机错误.
 	if s.checkStarted() != nil {
 		// 编码发送错误响应数据包
-		respHead := newRawRespHeadFromReq(s.genSeq(), ErrCodeServiceStop, &head)
+		respHead := newRawRespHeadFromReq(s.genSeq(), ErrCodeServiceStopped, &head)
 		_ = s.sendRemotePacket(nodeId, &respHead, nil)
 		return nil
 	}
 
 	// 创建并发送请求.
-	request := newContext(s, newRawRequest(nodeId, head.getSeq(), head.sid, *b, deadline.UnixMilli()))
-	if err := s.send2LocalActor(ctx, uid, request, ""); err != nil {
+	request := newContext(s, newRawRequest(nodeId, head.getSeq(), head.sid, *b, time.Now().Add(timeout).UnixMilli()))
+	if err := s.send2LocalActor(uid, request, ""); err != nil {
 		request.release()
 		s.getLogger().ErrorFields("[HandlePacketRawReq] send request to actor failed",
 			lfdRemoteNodeId(nodeId), lfdSeq(head.getSeq()), s.lfdActorUID("uid", uid), lfdSid(head.sid), lfdTimeout(int64(head.timeout)), lfdError(err))
@@ -220,22 +214,17 @@ func svcHandlePacketS2SRpc(s *Service, nodeId string, b *Buffer) error {
 		return nil
 	}
 
-	// 根据超时时间创建上下文.
-	deadline := time.Now().Add(timeout)
-	ctx, cancel := context.WithDeadline(context.Background(), deadline)
-	defer cancel()
-
 	// 服务必须处于运行状态，否则返回停机错误.
 	if s.checkStarted() != nil {
 		// 编码发送错误响应数据包
-		respHead := newS2SRpcRespHeadFromReq(s.genSeq(), ErrCodeServiceStop, &head)
+		respHead := newS2SRpcRespHeadFromReq(s.genSeq(), ErrCodeServiceStopped, &head)
 		_ = s.sendRemotePacket(nodeId, &respHead, nil)
 		return nil
 	}
 
 	// 创建并发送请求.
-	request := newContext(s, newRPCRequest(nodeId, head.getSeq(), head.reqId, head.fromId, *b, deadline.UnixMilli()))
-	if err := s.send2LocalActor(ctx, head.toId, request, ""); err != nil {
+	request := newContext(s, newRPCRequest(nodeId, head.getSeq(), head.reqId, head.fromId, *b, time.Now().Add(timeout).UnixMilli()))
+	if err := s.send2LocalActor(head.toId, request, ""); err != nil {
 		request.release()
 		s.getLogger().ErrorFields("[HandlePacketS2SRpc] send request to actor failed",
 			lfdRemoteNodeId(nodeId), lfdSeq(head.getSeq()), lfdReqId(head.reqId), s.lfdActorUID("fromId", head.fromId), s.lfdActorUID("toId", head.toId), lfdTimeout(int64(head.timeout)), lfdError(err))
@@ -308,9 +297,8 @@ func svcHandlePacketS2SCast(s *Service, nodeId string, b *Buffer) error {
 	}
 
 	// 创建并发送请求.
-	ctx := context.Background()
 	request := newContext(s, newCastRequest(nodeId, head.getSeq(), head.fromId, *b))
-	if err := s.send2LocalActor(ctx, head.toId, request, ""); err != nil {
+	if err := s.send2LocalActor(head.toId, request, ""); err != nil {
 		request.release()
 		s.getLogger().ErrorFields("[HandlePacketS2SCast] send request to actor failed",
 			lfdRemoteNodeId(nodeId), lfdSeq(head.getSeq()), s.lfdActorUID("fromId", head.fromId), s.lfdActorUID("toId", head.toId), lfdError(err))

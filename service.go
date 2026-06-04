@@ -52,10 +52,6 @@ type ServiceConfig struct {
 	// 默认值 50ms.
 	MaxRTT int
 
-	// DefCtxTimeout 默认上下文超时时间.
-	// 默认值 5s.
-	DefCtxTimeout time.Duration
-
 	// Handler Service 处理器.
 	// required.
 	Handler ServiceHandler
@@ -72,10 +68,6 @@ func (c *ServiceConfig) init() {
 
 	if c.MaxRTT <= 0 {
 		c.MaxRTT = 50
-	}
-
-	if c.DefCtxTimeout <= 0 {
-		c.DefCtxTimeout = 5 * time.Second
 	}
 
 	if c.Handler == nil {
@@ -103,24 +95,27 @@ func (c *ServiceConfig) init() {
 }
 
 var (
-	// ErrServiceNotStarted 服务未启动.
-	ErrServiceNotStarted = errors.New("gactor: service not started")
+	// ErrServiceBusy 服务繁忙.
+	ErrServiceBusy = errors.New("gactor: service busy")
 
-	// ErrServiceStarted 服务已启动.
-	ErrServiceStarted = errors.New("gactor: service started")
+	// errServiceNotStarted 服务未启动.
+	errServiceNotStarted = errors.New("gactor: service not started")
 
-	// ErrServiceStopping 服务正在停机.
-	ErrServiceStopping = errors.New("gactor: service stopping")
+	// errServiceStarted 服务已启动.
+	errServiceStarted = errors.New("gactor: service started")
 
-	// ErrServiceStopped 服务已停机.
-	ErrServiceStopped = errors.New("gactor: service stopped")
+	// errServiceStopping 服务正在停机.
+	errServiceStopping = errors.New("gactor: service stopping")
+
+	// errServiceStopped 服务已停机.
+	errServiceStopped = errors.New("gactor: service stopped")
 )
 
 // ErrIsServiceStop error 是否表示服务停机.
 func ErrIsServiceStop(err error) bool {
-	return errors.Is(err, ErrServiceStopping) ||
-		errors.Is(err, ErrServiceStopped) ||
-		errors.Is(err, ErrCodeServiceStop)
+	return errors.Is(err, errServiceStopping) ||
+		errors.Is(err, errServiceStopped) ||
+		errors.Is(err, ErrCodeServiceStopped)
 }
 
 const (
@@ -132,10 +127,10 @@ const (
 
 // serviceStateErrs Service State error 映射.
 var serviceStateErrs = map[int8]error{
-	serviceStateInit:     ErrServiceNotStarted,
-	serviceStateStarted:  ErrServiceStarted,
-	serviceStateStopping: ErrServiceStopping,
-	serviceStateStopped:  ErrServiceStopped,
+	serviceStateInit:     errServiceNotStarted,
+	serviceStateStarted:  errServiceStarted,
+	serviceStateStopping: errServiceStopping,
+	serviceStateStopped:  errServiceStopped,
 }
 
 func serviceStateErr(state int8) error {
@@ -191,7 +186,7 @@ func NewService(cfg *ServiceConfig, option ...ServiceOption) *Service {
 		stopWait:              utils.NewStopWait(),
 		priorityActors:        priorityActors,
 		maxActorPriorityIndex: -1,
-		triggeredTimers:       make(chan triggeredTimer, cfg.MaxTriggerdTimerAmount),
+		triggeredTimers:       make(chan triggeredTimer, cfg.MaxTimerAmount),
 	}
 
 	s.rpcManager = newRPCManager(s)

@@ -93,7 +93,7 @@ func (h *handler) handleLogin(ctx *gactor.Context, params *message.LoginReq) {
 
 func (h *handler) handleHeartbeat(ctx *gactor.Context, params *message.HeartbeatReq) {
 	logger.Logger().DebugFields("user handle heartbeat", zap.Int64("id", ctx.Actor().ActorUID().ID))
-	if err := actors.ContextAsyncRPC(
+	if err := actors.ContextAsyncRPCWithContext(
 		ctx,
 		gactor.ActorUID{Category: consts.CategoryServer, ID: actors.ServerId},
 		&message.GetNameReq{},

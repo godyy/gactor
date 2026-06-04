@@ -1,7 +1,6 @@
 package gactor
 
 import (
-	"context"
 	"errors"
 	"sync"
 	"sync/atomic"
@@ -262,12 +261,7 @@ func (c *Client) send(nodeId string, b []byte) error {
 }
 
 // sendPacket 编码数据包并发送到 nodeId 指定的节点. payload 为已编码的自定义负载数据.
-func (c *Client) sendPacket(ctx context.Context, nodeId string, ph packetHead, payload []byte) error {
-	// 优先检查 ctx 是否已取消.
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-
+func (c *Client) sendPacket(nodeId string, ph packetHead, payload []byte) error {
 	// 编码数据.
 	b, err := c.encodePacket(ph, payload)
 	if err != nil {
@@ -288,10 +282,10 @@ func (c *Client) sendPacket(ctx context.Context, nodeId string, ph packetHead, p
 }
 
 // getNodeIdOfActor 获取 Actor 所在的节点ID.
-func (c *Client) getNodeIdOfActor(ctx context.Context, id int64) (string, error) {
+func (c *Client) getNodeIdOfActor(id int64) (string, error) {
 	uid := c.makeActorUID(id)
 	reg := c.cfg.Handler.GetActorRegistry()
-	location, err := reg.GetActorLocation(ctx, uid)
+	location, err := reg.GetActorLocation(uid)
 	if err != nil {
 		return "", err
 	}
@@ -328,16 +322,9 @@ func (c *Client) makeActorUID(id int64) ActorUID {
 }
 
 // Connnect 连接 uid 指定的 Actor.
-func (c *Client) Connect(ctx context.Context, id int64, sid uint32) error {
-	// 若 ctx 未设置deadline, 附加默认超时.
-	if _, ok := ctx.Deadline(); !ok {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, c.cfg.DefCtxTimeout)
-		defer cancel()
-	}
-
+func (c *Client) Connect(id int64, sid uint32) error {
 	// 获取目标节点.
-	nodeId, err := c.getNodeIdOfActor(ctx, id)
+	nodeId, err := c.getNodeIdOfActor(id)
 	if err != nil {
 		return err
 	}
@@ -350,20 +337,13 @@ func (c *Client) Connect(ctx context.Context, id int64, sid uint32) error {
 
 	// 编码并发送消息.
 	ph := newConnectHead(c.genSeq(), id, sid)
-	return c.sendPacket(ctx, nodeId, &ph, nil)
+	return c.sendPacket(nodeId, &ph, nil)
 }
 
 // Disconnect 通知 uid 指定的 Actor 断开连接.
-func (c *Client) Disconnect(ctx context.Context, id int64, sid uint32) error {
-	// 若 ctx 未设置deadline, 附加默认超时.
-	if _, ok := ctx.Deadline(); !ok {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, c.cfg.DefCtxTimeout)
-		defer cancel()
-	}
-
+func (c *Client) Disconnect(id int64, sid uint32) error {
 	// 获取目标节点.
-	nodeId, err := c.getNodeIdOfActor(ctx, id)
+	nodeId, err := c.getNodeIdOfActor(id)
 	if err != nil {
 		return err
 	}
@@ -376,26 +356,19 @@ func (c *Client) Disconnect(ctx context.Context, id int64, sid uint32) error {
 
 	// 编码并发送消息.
 	ph := newDisconnectHead(c.genSeq(), id, sid)
-	return c.sendPacket(ctx, nodeId, &ph, nil)
+	return c.sendPacket(nodeId, &ph, nil)
 }
 
 // SendRequest 发送请求.
 // ctx 只协同到请求的发送, 请求超时独立设置.
-func (c *Client) SendRequest(ctx context.Context, req ClientRequest) error {
-	// 若 ctx 未设置deadline, 附加默认超时.
-	if _, ok := ctx.Deadline(); !ok {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, c.cfg.DefCtxTimeout)
-		defer cancel()
-	}
-
+func (c *Client) SendRequest(req ClientRequest) error {
 	// 若未设置超时, 采用默认值
 	if req.Timeout <= 0 {
 		req.Timeout = c.cfg.DefRequestTimeout
 	}
 
 	// 获取目标节点.
-	nodeId, err := c.getNodeIdOfActor(ctx, req.ID)
+	nodeId, err := c.getNodeIdOfActor(req.ID)
 	if err != nil {
 		return err
 	}
@@ -408,7 +381,7 @@ func (c *Client) SendRequest(ctx context.Context, req ClientRequest) error {
 
 	// 编码并发送消息.
 	ph := newRawReqHead(c.genSeq(), req.ID, req.SID, uint32(req.Timeout.Milliseconds()))
-	return c.sendPacket(ctx, nodeId, &ph, req.Payload)
+	return c.sendPacket(nodeId, &ph, req.Payload)
 }
 
 // handleResponse 处理响应.

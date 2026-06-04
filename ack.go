@@ -143,8 +143,13 @@ func (m *ackManager) getCfg() *AckConfig {
 // enqueueCmd 入队指令.
 func (m *ackManager) enqueueCmd(c ackCmd) {
 	chStop := m.handler.getStopWait().C
+	const alarmThreshold = time.Millisecond * 50
+	begin := time.Now()
 	select {
 	case m.chCmds <- c:
+		if d := time.Now().Sub(begin); d > alarmThreshold {
+			m.handler.getLogger().Warnf("ack enqueueCmd cost:%dms", d.Milliseconds())
+		}
 	case <-chStop:
 	}
 }
@@ -156,11 +161,14 @@ func (m *ackManager) addPacket(ap ackPacket) {
 
 	// 添加指令.
 	chStop := m.handler.getStopWait().C
+	const alarmThreshold = time.Millisecond * 50
+	begin := time.Now()
 	select {
 	case m.chCmds <- newAckCmdAdd(p):
+		if d := time.Now().Sub(begin); d > alarmThreshold {
+			m.handler.getLogger().Warnf("ack add packet cost:%dms", d.Milliseconds())
+		}
 	case <-chStop:
-	default:
-		m.handler.getLogger().ErrorFields("add packet2Ack but chan is full", lfdPacketType(ap.pt), lfdSeq(ap.seq))
 	}
 }
 

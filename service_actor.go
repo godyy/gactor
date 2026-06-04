@@ -143,13 +143,6 @@ func (s *Service) StartActor(ctx context.Context, uid ActorUID) error {
 		return ctx.Err()
 	}
 
-	// 若 ctx 未设置deadline, 附加默认超时.
-	if _, ok := ctx.Deadline(); !ok {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, s.cfg.DefCtxTimeout)
-		defer cancel()
-	}
-
 	if err := s.lockState(serviceStateStarted, true); err != nil {
 		return err
 	}
@@ -159,7 +152,7 @@ func (s *Service) StartActor(ctx context.Context, uid ActorUID) error {
 	msg := &messageCheckAlive{
 		done: make(chan error, 1),
 	}
-	if err := s.send2LocalActor(ctx, uid, msg, ""); err != nil {
+	if err := s.send2LocalActor(uid, msg, ""); err != nil {
 		return err
 	}
 
@@ -203,7 +196,7 @@ func (s *Service) getCategoryActorsByCategory(category uint16) *categoryActors {
 
 // startActor 启动 uid 指定的 Actor.
 // 如果 leaseId 为空, 需要同时注册 Actor.
-func (s *Service) startActor(ctx context.Context, uid ActorUID, leaeId string) (actorImpl, error) {
+func (s *Service) startActor(uid ActorUID, leaeId string) (actorImpl, error) {
 	// 检查装运行状态
 	if err := s.checkStarted(); err != nil {
 		return nil, err
@@ -212,7 +205,7 @@ func (s *Service) startActor(ctx context.Context, uid ActorUID, leaeId string) (
 	// 获取 Actor 定义.
 	define := s.getDefine(uid.Category)
 	if define == nil {
-		return nil, ErrActorDefineNotExists
+		return nil, ErrCodeActorUndefined
 	}
 
 	defineBase := define.base()
@@ -282,22 +275,17 @@ func (s *Service) startActor(ctx context.Context, uid ActorUID, leaeId string) (
 
 	defer starter.deref()
 
-	select {
-	case <-starter.done:
-		// 等待启动完成.
-		actor, err := starter.actor, starter.err
-		if err == nil {
-			// 引用.
-			err = actor.core().ref()
-		}
-		if err != nil {
-			return nil, err
-		}
-		return actor, err
-	case <-ctx.Done():
-		// context 逻辑.
-		return nil, ctx.Err()
+	// 等待启动完成.
+	// 随后获取启动结果, 若启动成功, 引用 Actor.
+	<-starter.done
+	actor, err := starter.actor, starter.err
+	if err == nil {
+		err = actor.core().ref()
 	}
+	if err != nil {
+		return nil, err
+	}
+	return actor, err
 }
 
 // refActor 引用 Actor.
@@ -310,7 +298,7 @@ func (s *Service) refActor(uid ActorUID) (actorImpl, error) {
 	// 获取 Actor 定义.
 	define := s.getDefine(uid.Category)
 	if define == nil {
-		return nil, ErrActorDefineNotExists
+		return nil, ErrCodeActorUndefined
 	}
 	defineBase := define.base()
 
@@ -338,7 +326,7 @@ func (s *Service) getActor(uid ActorUID) (actorImpl, error) {
 	// 获取 Actor 定义.
 	define := s.getDefine(uid.Category)
 	if define == nil {
-		return nil, ErrActorDefineNotExists
+		return nil, ErrCodeActorUndefined
 	}
 	defineBase := define.base()
 
@@ -373,10 +361,10 @@ const (
 )
 
 // resolveNodeOfActor 解析 Actor 所在节点ID.
-func (s *Service) resolveNodeOfActor(ctx context.Context, mode int, uid ActorUID) (nodeId string, leaseId string, err error) {
+func (s *Service) resolveNodeOfActor(mode int, uid ActorUID) (nodeId string, leaseId string, err error) {
 	define := s.getDefine(uid.Category)
 	if define == nil {
-		return "", "", ErrActorDefineNotExists
+		return "", "", ErrCodeActorUndefined
 	}
 
 	registry := s.cfg.Handler.GetActorRegistry()
@@ -393,16 +381,16 @@ func (s *Service) resolveNodeOfActor(ctx context.Context, mode int, uid ActorUID
 		if define.base().needRecycle() {
 			params.TTL = s.cfg.RegistryTTL
 		}
-		if result, err = registry.RegisterActor(ctx, params); err != nil {
+		if result, err = registry.RegisterActor(params); err != nil {
 			if errors.Is(err, ErrActorAlreadyRegistered) {
-				err = ErrCodeActorRegisterByOther
+				err = ErrCodeActorRegisteredByAnother
 			}
 			return "", "", err
 		}
 		nodeId = result.NodeId
 
 	case actorNodeModeRouter:
-		location, err := registry.GetActorLocation(ctx, uid)
+		location, err := registry.GetActorLocation(uid)
 		if location.ExpireAt <= 0 {
 			return location.NodeId, "", nil
 		}
@@ -428,7 +416,7 @@ func (s *Service) resolveNodeOfActor(ctx context.Context, mode int, uid ActorUID
 		if define.base().needRecycle() {
 			params.TTL = s.cfg.RegistryTTL
 		}
-		result, err = registry.RegisterActor(ctx, params)
+		result, err = registry.RegisterActor(params)
 		if err != nil {
 			if errors.Is(err, ErrActorAlreadyRegistered) {
 				return result.NodeId, "", nil
@@ -445,19 +433,7 @@ func (s *Service) resolveNodeOfActor(ctx context.Context, mode int, uid ActorUID
 // send2LocalActor 发送消息 msg 到 uid 指定的本地 Actor.
 // leaseId 表示 actor 当前的租约ID. 若 leaseId 为空, 并且 actor 未启动,
 // 则需要先注册 actor, 注册成功方可启动 actor.
-func (s *Service) send2LocalActor(ctx context.Context, uid ActorUID, msg message, leaseId string) error {
-	// 若 ctx 已超时, 中断后续逻辑.
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-
-	// 若ctx未设置deadline, 设置默认超时.
-	if _, ok := ctx.Deadline(); !ok {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, s.cfg.DefCtxTimeout)
-		defer cancel()
-	}
-
+func (s *Service) send2LocalActor(uid ActorUID, msg message, leaseId string) error {
 	for {
 		// 尝试引用本地的actor.
 		actor, err := s.refActor(uid)
@@ -467,23 +443,20 @@ func (s *Service) send2LocalActor(ctx context.Context, uid ActorUID, msg message
 
 		// 若 Actor 不存在, 尝试启动 Actor.
 		if actor == nil {
-			actor, err = s.startActor(ctx, uid, leaseId)
+			actor, err = s.startActor(uid, leaseId)
 			if err != nil {
 				return err
 			}
 		}
 
 		// 投递消息
-		if err := actor.core().receiveMessage(ctx, msg); err == nil {
+		if err := actor.core().receiveMessage(msg); err == nil {
 			// 投递成功
 			actor.core().deref()
 			return nil
 		} else if ErrIsServiceStop(err) {
 			// 投递失败，Actor停机
 			actor.core().deref()
-			if err := ctx.Err(); err != nil {
-				return err
-			}
 			continue
 		} else {
 			// 投递失败, 其它错误
@@ -514,25 +487,12 @@ func (s *Service) onActorStopped(actor actorImpl) {
 // cast 代理 from, 向 to 指向的目标 Actor 投递消息.
 // ctx 若未设置deadline, 底层会设置默认的超时时间.
 // ctx 只会影响消息的投送, 不会涉及请求的处理.
-func (s *Service) cast(ctx context.Context, from, to ActorUID, payload any) error {
+func (s *Service) cast(from, to ActorUID, payload any) error {
 	var (
 		toNodeId string
 		leaseId  string
 		err      error
 	)
-
-	// 优先检查 ctx 是否已取消.
-	if err := ctx.Err(); err != nil {
-		s.monitorCastActionContextErr(err)
-		return err
-	}
-
-	// 若 ctx 未设置deadline, 附加默认超时.
-	if _, ok := ctx.Deadline(); !ok {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, s.cfg.DefCtxTimeout)
-		defer cancel()
-	}
 
 	// 检查服务状态
 	if err := s.checkNotStopped(); err != nil {
@@ -540,7 +500,7 @@ func (s *Service) cast(ctx context.Context, from, to ActorUID, payload any) erro
 	}
 
 	// 获取目标 Actor 所在节点信息.
-	toNodeId, leaseId, err = s.resolveNodeOfActor(ctx, actorNodeModeRouter, to)
+	toNodeId, leaseId, err = s.resolveNodeOfActor(actorNodeModeRouter, to)
 	if err != nil {
 		s.monitorCastAction(MonitorCANodeInfoErr)
 		return err
@@ -575,7 +535,7 @@ func (s *Service) cast(ctx context.Context, from, to ActorUID, payload any) erro
 	buf := Buffer{}
 	buf.SetBuf(encodedPayload)
 	request := newContext(s, newCastRequest(s.nodeId(), seq, from, buf))
-	if err := s.send2LocalActor(ctx, to, request, leaseId); err != nil {
+	if err := s.send2LocalActor(to, request, leaseId); err != nil {
 		request.release()
 		s.monitorCastActionSend2LocalErr(err)
 		return err
@@ -586,8 +546,8 @@ func (s *Service) cast(ctx context.Context, from, to ActorUID, payload any) erro
 }
 
 // Cast 向 to 指向的 Actor 投递消息. 若 Service 未启动或停机, 返回错误.
-func (s *Service) Cast(ctx context.Context, to ActorUID, payload any) error {
-	return s.cast(ctx, ActorUID{}, to, payload)
+func (s *Service) Cast(to ActorUID, payload any) error {
+	return s.cast(ActorUID{}, to, payload)
 }
 
 // makeClientActorUID 构造客户端通信的目标ActorUID
@@ -711,9 +671,7 @@ func (s *actorStarter) registerActor(svc *Service) error {
 		return nil
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), actorReigsterTimeout)
-	defer cancel()
-	_, leasId, err := svc.resolveNodeOfActor(ctx, actorNodeModeLocal, s.uid)
+	_, leasId, err := svc.resolveNodeOfActor(actorNodeModeLocal, s.uid)
 	if err != nil {
 		return err
 	}
@@ -729,10 +687,7 @@ func (s *actorStarter) unreigsterActor(svc *Service) error {
 
 	reg := svc.getCfg().Handler.GetActorRegistry()
 
-	ctx, cancel := context.WithTimeout(context.Background(), actorReigsterTimeout)
-	defer cancel()
-
-	if err := reg.UnregisterActor(ctx, ActorUnregisterParams{
+	if err := reg.UnregisterActor(ActorUnregisterParams{
 		UID:     s.uid,
 		NodeId:  svc.nodeId(),
 		LeaseId: s.leaseId,

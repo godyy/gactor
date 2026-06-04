@@ -99,6 +99,8 @@ type rpcManager struct {
 	completedCalls chan *rpcCall // 已完成等待执行回调的 rpcCall.
 
 	reqIdIncr uint32               // req id 自增键.
+	enqueueMu sync.RWMutex         // enqueue 屏障.
+	stopping  bool                 // 停机标记.
 	callMap   map[uint32]*rpcCall  // call map.
 	callHeap  *heap.Heap[*rpcCall] // call heap, 按照过期时间排序.
 	timerId   TimerId              // 定时器ID.
@@ -130,10 +132,22 @@ func (m *rpcManager) start() {
 func (m *rpcManager) stop() {
 	m.stopTimer()
 	for _, call := range m.callMap {
-		m.handleCallDone(call, nil, ErrServiceStopped)
+		m.handleCallDone(call, nil, errServiceStopped)
 	}
 	m.callMap = nil
 	m.callHeap.Init()
+}
+
+func (m *rpcManager) drainCmds() {
+	for {
+		select {
+		case c := <-m.chCmds:
+			c.exec(m)
+			c.release()
+		default:
+			return
+		}
+	}
 }
 
 // startDoneCallWorkers 启动已完成 RPC 调用的回调执行工作器.
@@ -144,22 +158,8 @@ func (m *rpcManager) startDoneCallWorkers() {
 	for i := 0; i < workers; i++ {
 		go func() {
 			defer stopWait.W.Done()
-			for {
-				select {
-				case call := <-m.completedCalls:
-					m.invokeCallback(call)
-				case <-stopWait.C:
-					drain := false
-					for !drain {
-						select {
-						case call := <-m.completedCalls:
-							m.invokeCallback(call)
-						default:
-							drain = true
-						}
-					}
-					return
-				}
+			for call := range m.completedCalls {
+				m.invokeCallback(call)
 			}
 		}()
 	}
@@ -175,20 +175,51 @@ func (m *rpcManager) run() {
 			c.exec(m)
 			c.release()
 		case <-stopWait.C:
+			m.enqueueMu.Lock()
+			m.stopping = true
+			m.enqueueMu.Unlock()
+			m.drainCmds()
 			m.stop()
+			close(m.completedCalls)
 			return
 		}
 	}
 }
 
 // enqueueCmd 入队指令.
-func (m *rpcManager) enqueueCmd(c rpcCmd) error {
+func (m *rpcManager) enqueueCmd(c rpcCmd, ignoreBusy bool) error {
+	m.enqueueMu.RLock()
+	defer m.enqueueMu.RUnlock()
+	if m.stopping {
+		c.discard()
+		return errServiceStopped
+	}
 	chStop := m.svc.getStopWait().C
+	if ignoreBusy {
+		const alarmThreshold = time.Millisecond * 50
+		begin := time.Now()
+		select {
+		case m.chCmds <- c:
+			if cost := time.Since(begin); cost > alarmThreshold {
+				m.svc.getLogger().Warnf("rpc enqueue slowly, cost:%dms", cost.Milliseconds())
+				return ErrRPCTimeout
+			}
+			return nil
+		case <-chStop:
+			c.discard()
+			return errServiceStopped
+		}
+	}
 	select {
 	case m.chCmds <- c:
 		return nil
 	case <-chStop:
-		return ErrServiceStopped
+		c.discard()
+		return errServiceStopped
+	default:
+		m.svc.getLogger().Warn("rpc enqueue failed, service busy")
+		c.discard()
+		return ErrServiceBusy
 	}
 }
 
@@ -207,19 +238,6 @@ func (m *rpcManager) add(call *rpcCall) {
 func (m *rpcManager) rem(call *rpcCall) {
 	m.callHeap.Remove(call.heapIndex)
 	delete(m.callMap, call.reqId)
-}
-
-// addCall 添加新的 Call.
-func (m *rpcManager) addCall(call *rpcCall) {
-	if _, exists := m.callMap[call.reqId]; exists {
-		m.svc.getLogger().ErrorFields("rpc call reqId:%d duplicate", lfdReqId(call.reqId))
-		m.handleCallDone(call, nil, errRPCCallDuplicate)
-		return
-	}
-	m.add(call)
-	if call == m.callHeap.Top() {
-		m.resetTimer(call.expiredAt)
-	}
 }
 
 // invokeCallback 调用 RPC 回调.
@@ -262,7 +280,7 @@ func (m *rpcManager) stopTimer() {
 
 // onTimer 定时器回调.
 func (m *rpcManager) onTimer(args TimerArgs) {
-	m.enqueueCmd(&rpcCmdTick{tid: args.TID})
+	m.enqueueCmd(&rpcCmdTick{tid: args.TID}, true)
 }
 
 // tick 处理已过期的 Call.
@@ -273,7 +291,7 @@ func (m *rpcManager) tick() {
 		}
 
 		call := m.callHeap.Top()
-		if m.svc.getTimeSystem().Now().UnixNano() < call.expiredAt {
+		if time.Now().UnixNano() < call.expiredAt {
 			m.resetTimer(call.expiredAt)
 			break
 		}
@@ -292,8 +310,7 @@ func (m *rpcManager) createCall(from, to ActorUID, expiredAt time.Time, cb RPCFu
 	call.to = to
 	call.expiredAt = expiredAt.UnixNano()
 	call.cb = cb
-
-	if err := m.enqueueCmd(newRPCCmdAdd(call)); err != nil {
+	if err := m.enqueueCmd(newRPCCmdAdd(call), false); err != nil {
 		return 0, err
 	}
 	return call.reqId, nil
@@ -302,7 +319,7 @@ func (m *rpcManager) createCall(from, to ActorUID, expiredAt time.Time, cb RPCFu
 // removeCall 通过 reqId 移除 Call.
 // 通常在出现错误需要直接移除 Call 的情况下调用.
 func (m *rpcManager) removeCall(reqId uint32, from, to ActorUID) {
-	m.enqueueCmd(&rpcCmdRem{reqId: reqId, from: from, to: to})
+	m.enqueueCmd(&rpcCmdRem{reqId: reqId, from: from, to: to}, true)
 }
 
 // popCall 移除 reqId 指定的 Call. 并重置定时器.
@@ -337,23 +354,19 @@ func (m *rpcManager) handleCallDone(call *rpcCall, payload *Buffer, err error) {
 	}
 
 	call.onResponse(payload, err)
-
-	chStop := m.svc.getStopWait().C
-	select {
-	case m.completedCalls <- call:
-	case <-chStop:
-	}
+	m.completedCalls <- call
 }
 
 // handleResponse 处理 RPC Response. 返回对应的 rpcCall 是否存在.
 func (m *rpcManager) handleResponse(reqId uint32, from, to ActorUID, payload *Buffer, err error) {
-	m.enqueueCmd(newRPCCmdResp(reqId, from, to, payload, err))
+	_ = m.enqueueCmd(newRPCCmdResp(reqId, from, to, payload, err), true)
 }
 
 // rpcCmd RPC 指令.
 type rpcCmd interface {
 	exec(rm *rpcManager)
 	release()
+	discard()
 }
 
 // rpcCmdAdd 添加 Call 指令.
@@ -374,12 +387,27 @@ func newRPCCmdAdd(call *rpcCall) *rpcCmdAdd {
 }
 
 func (c *rpcCmdAdd) exec(rm *rpcManager) {
-	rm.addCall(c.call)
+	call := c.call
+	if _, exists := rm.callMap[call.reqId]; exists {
+		rm.svc.getLogger().ErrorFields("rpc call reqId:%d duplicate", lfdReqId(call.reqId))
+		rm.handleCallDone(call, nil, errRPCCallDuplicate)
+		return
+	}
+	rm.add(call)
+	if call == rm.callHeap.Top() {
+		rm.resetTimer(call.expiredAt)
+	}
 }
 
 func (c *rpcCmdAdd) release() {
 	c.call = nil
 	poolOfRPCCmdAdd.Put(c)
+}
+func (c *rpcCmdAdd) discard() {
+	if c.call != nil {
+		c.call.release()
+	}
+	c.release()
 }
 
 // rpcCmdRem 移除 Call 指令.
@@ -396,6 +424,7 @@ func (c *rpcCmdRem) exec(rm *rpcManager) {
 }
 
 func (c *rpcCmdRem) release() {}
+func (c *rpcCmdRem) discard() {}
 
 // rpcCmdResp Response 指令.
 type rpcCmdResp struct {
@@ -437,6 +466,7 @@ func (c *rpcCmdResp) release() {
 	c.err = nil
 	poolOfRPCCmdResp.Put(c)
 }
+func (c *rpcCmdResp) discard() { c.release() }
 
 // rpcCmdTick tick 指令.
 type rpcCmdTick struct {
@@ -452,3 +482,4 @@ func (c *rpcCmdTick) exec(rm *rpcManager) {
 }
 
 func (c *rpcCmdTick) release() {}
+func (c *rpcCmdTick) discard() {}

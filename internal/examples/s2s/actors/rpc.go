@@ -21,11 +21,11 @@ func WrapRPCCallback[AB gactor.ActorBehavior, R any](callback func(ab AB, reply 
 	}
 }
 
-func RPC(a gactor.Actor, ctx context.Context, to gactor.ActorUID, params any, reply any) error {
+func RPCWithContext(a gactor.Actor, ctx context.Context, to gactor.ActorUID, params any, reply any) error {
 	var msgParams message.Msg
 	var msgReply message.Msg
 	msgParams = message.NewMsgWithPayload(params)
-	if err := a.RPC(ctx, to, &msgParams, &msgReply); err != nil {
+	if err := a.RPCWithContext(ctx, to, &msgParams, &msgReply); err != nil {
 		return err
 	} else if err := msgReply.DecodePayload(reply); err != nil {
 		return err
@@ -34,8 +34,8 @@ func RPC(a gactor.Actor, ctx context.Context, to gactor.ActorUID, params any, re
 	}
 }
 
-func RPCAsync(a gactor.Actor, ctx context.Context, to gactor.ActorUID, params any, callback gactor.ActorRPCFunc) error {
+func AsyncRPCWithContext(a gactor.Actor, ctx context.Context, to gactor.ActorUID, params any, callback gactor.ActorRPCFunc) error {
 	var msgParams message.Msg
 	msgParams = message.NewMsgWithPayload(params)
-	return a.AsyncRPC(ctx, to, &msgParams, callback)
+	return a.AsyncRPCWithContext(ctx, to, &msgParams, callback)
 }

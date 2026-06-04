@@ -1,9 +1,9 @@
 module github.com/godyy/gactor
 
-go 1.22
+go 1.23
 
 require (
-	github.com/godyy/gcluster v0.0.10
+	github.com/godyy/gcluster v0.0.11
 	github.com/godyy/glog v0.1.1
 	github.com/godyy/gnet v0.3.0
 	github.com/godyy/gtimewheel v0.1.1
@@ -14,6 +14,7 @@ require (
 )
 
 require (
+	github.com/godyy/gmpsc v0.0.4 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	google.golang.org/protobuf v1.36.6 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect

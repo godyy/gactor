@@ -1,7 +1,6 @@
 package common
 
 import (
-	"context"
 	"fmt"
 	"sync"
 
@@ -37,7 +36,7 @@ func (r *ActorRegistry) MakeLeaseID() string {
 // 时间.
 // 若 Actor 已注册, 且所在节点ID与当前节点ID不同, 返回 ErrActorAlreadyRegistered 错误,
 // 否则, 使用当前租约覆盖旧租约, 并更新存续时间.
-func (r *ActorRegistry) RegisterActor(ctx context.Context, params gactor.ActorRegisterParams) (gactor.ActorRegisterResult, error) {
+func (r *ActorRegistry) RegisterActor(params gactor.ActorRegisterParams) (gactor.ActorRegisterResult, error) {
 	r.mtx.Lock()
 	defer r.mtx.Unlock()
 	// fmt.Printf("registe %+v\n", params)
@@ -69,7 +68,7 @@ func (r *ActorRegistry) RegisterActor(ctx context.Context, params gactor.ActorRe
 // UnregisterActor 注销 Actor.
 // 若 Actor 未注册, 返回 ErrActorNotExists 错误.
 // 若节点ID和租约ID匹配, 则注销 Actor, 否则返回 ErrLeaseMismatch 错误.
-func (r *ActorRegistry) UnregisterActor(ctx context.Context, params gactor.ActorUnregisterParams) error {
+func (r *ActorRegistry) UnregisterActor(params gactor.ActorUnregisterParams) error {
 	r.mtx.Lock()
 	defer r.mtx.Unlock()
 	location := r.actorMap[params.UID]
@@ -86,7 +85,7 @@ func (r *ActorRegistry) UnregisterActor(ctx context.Context, params gactor.Actor
 // KeepActorAlive 保持 Actor 存续.
 // 若 Actor 未注册, 返回 ErrActorNotExists 错误,
 // 否则, 若节点ID和租约ID匹配, 则更新 Actor 存续时间, 否则返回 ErrLeaseMismatch 错误.
-func (r *ActorRegistry) KeepActorAlive(ctx context.Context, params gactor.ActorKeepAliveParams) error {
+func (r *ActorRegistry) KeepActorAlive(params gactor.ActorKeepAliveParams) error {
 	r.mtx.Lock()
 	defer r.mtx.Unlock()
 	location := r.actorMap[params.UID]
@@ -106,7 +105,7 @@ func (r *ActorRegistry) KeepActorAlive(ctx context.Context, params gactor.ActorK
 
 // GetActorLocation 获取 Actor 位置信息.
 // 若 Actor 未注册, 返回 ErrActorNotExists 错误.
-func (r *ActorRegistry) GetActorLocation(ctx context.Context, uid gactor.ActorUID) (gactor.ActorLocation, error) {
+func (r *ActorRegistry) GetActorLocation(uid gactor.ActorUID) (gactor.ActorLocation, error) {
 	r.mtx.RLock()
 	defer r.mtx.RUnlock()
 	location := r.actorMap[uid]

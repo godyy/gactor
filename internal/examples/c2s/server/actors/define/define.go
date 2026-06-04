@@ -19,7 +19,7 @@ var Defines = []gactor.ActorDefine{
 			return actors.NewUser(c)
 		},
 	},
-		gactor.WithMaxCompletedAsyncRPCAmount(1),
+		gactor.WithMaxAsyncRPCAmount(1),
 	),
 
 	gactor.NewActorDefine(gactor.ActorDefineConfig{
@@ -31,6 +31,6 @@ var Defines = []gactor.ActorDefine{
 			return actors.NewServer(a)
 		},
 	},
-		gactor.WithMaxCompletedAsyncRPCAmount(10),
+		gactor.WithMaxAsyncRPCAmount(10),
 	),
 }

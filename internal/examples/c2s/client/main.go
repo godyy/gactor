@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"flag"
 	"os"
@@ -235,7 +234,7 @@ func (u *user) genReqId() uint32 {
 
 func (u *user) login() error {
 	u.sid = cli.cli.GenSessionId()
-	if err := cli.cli.Connect(context.Background(), u.uid, u.sid); err != nil {
+	if err := cli.cli.Connect(u.uid, u.sid); err != nil {
 		return pkgerrors.WithMessage(err, "connect failed")
 	}
 
@@ -248,12 +247,10 @@ func (u *user) login() error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	return cli.cli.SendRequest(ctx, gactor.ClientRequest{
+	return cli.cli.SendRequest(gactor.ClientRequest{
 		ID:      u.uid,
 		SID:     u.sid,
+		Timeout: 5 * time.Second,
 		Payload: b,
 	})
 }
@@ -267,12 +264,10 @@ func (u *user) heartbeat() error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	return cli.cli.SendRequest(ctx, gactor.ClientRequest{
+	return cli.cli.SendRequest(gactor.ClientRequest{
 		ID:      u.uid,
 		SID:     u.sid,
+		Timeout: 5 * time.Second,
 		Payload: b,
 	})
 }
@@ -409,7 +404,7 @@ func main() {
 	u := newUser(1, "user1", "password1")
 
 	actorRegistry := common.NewActorRegistry()
-	actorRegistry.RegisterActor(context.Background(), gactor.ActorRegisterParams{
+	actorRegistry.RegisterActor(gactor.ActorRegisterParams{
 		UID:     gactor.ActorUID{Category: consts.CategoryUser, ID: u.uid},
 		NodeId:  consts.ServerNodeId,
 		LeaseId: "",
