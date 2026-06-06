@@ -100,9 +100,13 @@ type ActorRegistry interface {
 	GetActorLocation(uid ActorUID) (ActorLocation, error)
 }
 
+// ErrNoAvailableNode 无可用节点.
+var ErrNoAvailableNode = errors.New("gactor: no available node")
+
 // ActorRouter Actor 路由.
 // 用于在 Actor 未注册时, 选择合适的节点.
 type ActorRouter interface {
 	// PickActorNode 选择节点.
+	// 若无可用节点, 返回 ErrNoAvailableNode 错误.
 	PickActorNode(uid ActorUID) (string, error)
 }
