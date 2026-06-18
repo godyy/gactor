@@ -6,15 +6,16 @@ import (
 	"sync"
 	"time"
 
+	"github.com/godyy/gutils/deepcopy"
 	"go.uber.org/zap"
 )
 
 // Context 表示 Actor 需要处理的请求上下文.
 type Context struct {
-	svc   *Service       // Service.
-	req   request        // request.
-	actor actorImpl      // actor.
-	kv    map[string]any // kv mapping.
+	svc   *Service  // Service.
+	req   request   // request.
+	actor actorImpl // actor.
+	kv    contextKV // kv mapping.
 
 	handlers   []HandlerFunc // handlers.
 	handlerIdx int8          // handler index.
@@ -33,7 +34,7 @@ func newContext(svc *Service, req request) *Context {
 	cp := poolOfContext.Get().(*Context)
 	cp.svc = svc
 	cp.req = req
-	cp.kv = make(map[string]any)
+	cp.kv = make(contextKV)
 	cp.suspend = false
 	return cp
 }
@@ -49,12 +50,12 @@ func (c *Context) Actor() Actor {
 }
 
 // Set 设置 k->v.
-func (c *Context) Set(k string, v any) {
+func (c *Context) Set(k any, v any) {
 	c.kv[k] = v
 }
 
 // Get 获取 k->v.
-func (c *Context) Get(k string) (v any, exists bool) {
+func (c *Context) Get(k any) (v any, exists bool) {
 	v, exists = c.kv[k]
 	return
 }
@@ -209,21 +210,12 @@ func (c *Context) Clone() *Context {
 	cp.svc = c.svc
 	cp.actor = c.actor
 	cp.req = c.req.clone(c)
-	cp.kv = c.cloneKV()
+	cp.kv = c.kv.clone()
 	cp.handlers = c.handlers
 	cp.handlerIdx = c.handlerIdx
 	cp.suspend = false
 
 	return cp
-}
-
-// cloneKV 复制 kv mapping.
-func (c *Context) cloneKV() map[string]any {
-	kv := make(map[string]any, len(c.kv))
-	for k, v := range c.kv {
-		kv[k] = v
-	}
-	return kv
 }
 
 // release 回收.
@@ -298,4 +290,15 @@ func (c *Context) Err() error {
 
 func (c *Context) Value(key any) any {
 	return nil
+}
+
+// contextKV 上下文键值对.
+type contextKV map[any]any
+
+func (kv contextKV) clone() contextKV {
+	cp := make(contextKV, len(kv))
+	for k, v := range kv {
+		cp[k] = deepcopy.Copy(v)
+	}
+	return cp
 }

@@ -251,7 +251,7 @@ func TestContextCloneCopiesKVAndRequest(t *testing.T) {
 		svc:        &Service{},
 		req:        req,
 		actor:      actor,
-		kv:         map[string]any{"name": "alice"},
+		kv:         contextKV{"name": "alice"},
 		handlerIdx: 3,
 	}
 	clone := ctx.Clone()
