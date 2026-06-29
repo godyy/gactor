@@ -164,20 +164,20 @@ func (m *packetHandlerTestBytesManager) GetBytes(cap int) []byte {
 func (m *packetHandlerTestBytesManager) PutBytes(b []byte) {}
 
 type packetHandlerTestClientResponse struct {
-	id      int64
+	id      ActorID
 	sid     uint32
 	errCode ErrCode
 	payload []byte
 }
 
 type packetHandlerTestClientPush struct {
-	id      int64
+	id      ActorID
 	sid     uint32
 	payload []byte
 }
 
 type packetHandlerTestClientDisconnect struct {
-	id  int64
+	id  ActorID
 	sid uint32
 }
 
@@ -226,7 +226,7 @@ func (h *packetHandlerTestClientHandler) HandlePush(push ClientPush) {
 	})
 }
 
-func (h *packetHandlerTestClientHandler) HandleDisconnect(id int64, sid uint32) {
+func (h *packetHandlerTestClientHandler) HandleDisconnect(id ActorID, sid uint32) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.disconnects = append(h.disconnects, packetHandlerTestClientDisconnect{id: id, sid: sid})
@@ -558,22 +558,22 @@ func TestServiceHandlePacketS2SRpcRespDispatchesCallback(t *testing.T) {
 	from := ActorUID{Category: 1, ID: 701}
 	to := ActorUID{Category: 1, ID: 702}
 	callbackCh := make(chan struct {
-		err      error
+		err       error
 		decodeErr error
-		reply    testS2SMessage
+		reply     testS2SMessage
 	}, 1)
 	markerDone := make(chan struct{})
 
 	reqID, err := svc.rpcManager.createCall(from, to, time.Now().Add(time.Second), func(resp *RPCResp) {
 		var reply testS2SMessage
 		callbackCh <- struct {
-			err      error
+			err       error
 			decodeErr error
-			reply    testS2SMessage
+			reply     testS2SMessage
 		}{
-			err:      resp.Err(),
+			err:       resp.Err(),
 			decodeErr: resp.DecodeReply(&reply),
-			reply:    reply,
+			reply:     reply,
 		}
 	})
 	if err != nil {

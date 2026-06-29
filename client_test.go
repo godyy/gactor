@@ -67,7 +67,7 @@ func (h *clientAPITestHandler) HandleResponse(resp ClientResponse) {}
 
 func (h *clientAPITestHandler) HandlePush(push ClientPush) {}
 
-func (h *clientAPITestHandler) HandleDisconnect(id int64, sid uint32) {}
+func (h *clientAPITestHandler) HandleDisconnect(id ActorID, sid uint32) {}
 
 func newClientAPITestClient(t *testing.T) (*Client, *clientAPITestNetAgent) {
 	t.Helper()

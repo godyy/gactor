@@ -68,10 +68,10 @@ func (b *Buffer) readActorUID() (uid ActorUID, err error) {
 
 // writeActorUID 写入 ActorUID.
 func (b *Buffer) writeActorUID(uid ActorUID) (err error) {
-	if err = b.WriteUint16(uid.Category); err != nil {
+	if err = b.WriteUint16(uint16(uid.Category)); err != nil {
 		return pkgerrors.WithMessage(err, "write actor category")
 	}
-	if err = b.WriteInt64(uid.ID); err != nil {
+	if err = b.WriteInt64(int64(uid.ID)); err != nil {
 		return pkgerrors.WithMessage(err, "write actor id")
 	}
 	return

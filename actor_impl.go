@@ -409,7 +409,7 @@ type actorCompletedAsyncRPC struct {
 // actorCore Actor 内部核心实现.
 type actorCore struct {
 	*actorDefineBase                              // 集成 actorDefineBase.
-	id                int64                       // Actor 分类实例ID.
+	id                ActorID                     // Actor 分类实例ID.
 	leaseID           string                      // 租约ID.
 	svc               *Service                    // 隶属的 Service.
 	messageBox        *gmpsc.Queue[message]       // 信箱.
@@ -429,7 +429,7 @@ type actorCore struct {
 }
 
 // newActorCore 构造 actorCore.
-func newActorCore(ad *actorDefineBase, id int64, leaseId string, svc *Service) *actorCore {
+func newActorCore(ad *actorDefineBase, id ActorID, leaseId string, svc *Service) *actorCore {
 	a := &actorCore{
 		actorDefineBase:   ad,
 		id:                id,
@@ -452,7 +452,7 @@ func (a *actorCore) core() *actorCore {
 	return a
 }
 
-func (a *actorCore) Category() uint16 {
+func (a *actorCore) Category() ActorCategory {
 	return a.category
 }
 

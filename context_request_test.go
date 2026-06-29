@@ -88,7 +88,7 @@ func (a *contextRequestTestActor) stopped() {}
 func (a *contextRequestTestActor) Behavior() ActorBehavior {
 	return nil
 }
-func (a *contextRequestTestActor) Category() uint16 {
+func (a *contextRequestTestActor) Category() ActorCategory {
 	return a.uid.Category
 }
 func (a *contextRequestTestActor) ActorUID() ActorUID {

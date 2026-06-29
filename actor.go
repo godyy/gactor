@@ -9,13 +9,19 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
+// ActorCategory Actor 分类.
+type ActorCategory = uint16
+
+// ActorID Actor 实例ID.
+type ActorID = int64
+
 // ActorUID 表示 Actor 的唯一标识.
 type ActorUID struct {
-	Category uint16 // The actor category from ActorDefine
-	ID       int64  // Unique instance ID within the category
+	Category ActorCategory // The actor category from ActorDefine
+	ID       ActorID       // Unique instance ID within the category
 }
 
-const sizeOfActorUID = int(unsafe.Sizeof(uint16(0)) + unsafe.Sizeof(int64(0)))
+const sizeOfActorUID = int(unsafe.Sizeof(ActorCategory(0)) + unsafe.Sizeof(ActorID(0)))
 
 func (uid ActorUID) String() string {
 	return fmt.Sprintf("%d-%d", uid.Category, uid.ID)
@@ -26,8 +32,8 @@ func (uid ActorUID) IsZero() bool {
 }
 
 func (uid *ActorUID) MarshalLogObject(enc zapcore.ObjectEncoder) error {
-	enc.AddUint16("category", uid.Category)
-	enc.AddInt64("id", uid.ID)
+	enc.AddUint16("category", uint16(uid.Category))
+	enc.AddInt64("id", int64(uid.ID))
 	return nil
 }
 
@@ -56,7 +62,7 @@ type ActorRPCFunc func(a Actor, resp *RPCResp)
 // Actor 封装 Actor 接口.
 type Actor interface {
 	// Category 获取 Actor 的分类.
-	Category() uint16
+	Category() ActorCategory
 
 	// ActorUID 获取 Actor 的唯一标识.
 	ActorUID() ActorUID

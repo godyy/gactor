@@ -15,7 +15,7 @@ type ActorDefine interface {
 	Name() string
 
 	// Category Actor 类别.
-	Category() uint16
+	Category() ActorCategory
 
 	// init 初始化配置, 验证数据是否有效.
 	init() error
@@ -24,21 +24,21 @@ type ActorDefine interface {
 	base() *actorDefineBase
 
 	// createActor 创建 Actor.
-	createActor(svc *Service, id int64, leaseId string) actorImpl
+	createActor(svc *Service, id ActorID, leaseId string) actorImpl
 }
 
 // actorDefineSet Actor 定义集合.
 type actorDefineSet struct {
-	defineMap      map[uint16]ActorDefine // Actor 定义.
-	priorityList   []int                  // 优先级列表.
-	priority2Index map[int]int            // 优先级索引.
+	defineMap      map[ActorCategory]ActorDefine // Actor 定义.
+	priorityList   []int                         // 优先级列表.
+	priority2Index map[int]int                   // 优先级索引.
 }
 
 func newActorDefineSet(actorDefines []ActorDefine) *actorDefineSet {
 	if len(actorDefines) == 0 {
 		panic("gactor: no actor define")
 	}
-	defineMap := make(map[uint16]ActorDefine, len(actorDefines))
+	defineMap := make(map[ActorCategory]ActorDefine, len(actorDefines))
 	priorityList := make([]int, 0)
 	priorityMap := make(map[int]bool)
 	for i, actorDefine := range actorDefines {
@@ -66,7 +66,7 @@ func newActorDefineSet(actorDefines []ActorDefine) *actorDefineSet {
 	}
 }
 
-func (s *actorDefineSet) getDefine(category uint16) ActorDefine {
+func (s *actorDefineSet) getDefine(category ActorCategory) ActorDefine {
 	return s.defineMap[category]
 }
 
@@ -88,7 +88,7 @@ type actorDefineBase struct {
 	name string
 
 	// category 表示 Actor 的类别.
-	category uint16
+	category ActorCategory
 
 	// priority 表示 Actor 的优先级. 值越小优先级越高.
 	priority int
@@ -118,7 +118,7 @@ func (ad *actorDefineBase) Name() string {
 }
 
 // Category Actor 类别.
-func (ad *actorDefineBase) Category() uint16 {
+func (ad *actorDefineBase) Category() ActorCategory {
 	return ad.category
 }
 
@@ -150,7 +150,7 @@ func (ad *actorDefineBase) needRecycle() bool {
 // ActorDefineConfig Actor 定义配置.
 type ActorDefineConfig struct {
 	Name            string                    // Actor 名称.
-	Category        uint16                    // Actor 类别.
+	Category        ActorCategory             // Actor 类别.
 	Priority        int                       // Actor 优先级.
 	MessageBoxSize  int                       // Actor 信箱大小.
 	BehaviorCreator func(Actor) ActorBehavior // Actor 行为构造器.
@@ -176,7 +176,7 @@ func NewActorDefine(config ActorDefineConfig, ops ...func(ActorDefine)) ActorDef
 // CActorDefineConfig CActor 定义配置.
 type CActorDefineConfig struct {
 	Name            string                      // Actor 名称.
-	Category        uint16                      // Actor 类别.
+	Category        ActorCategory               // Actor 类别.
 	Priority        int                         // Actor 优先级.
 	MessageBoxSize  int                         // Actor 信箱大小.
 	RecycleTime     time.Duration               // Actor 回收时间.
@@ -244,7 +244,7 @@ func (ad *actorDefine) base() *actorDefineBase {
 	return ad.actorDefineBase
 }
 
-func (ad *actorDefine) createActor(svc *Service, id int64, leaseId string) actorImpl {
+func (ad *actorDefine) createActor(svc *Service, id ActorID, leaseId string) actorImpl {
 	a := &actor{
 		actorCore: newActorCore(ad.actorDefineBase, id, leaseId, svc),
 	}
@@ -278,7 +278,7 @@ func (ad *cactorDefine) base() *actorDefineBase {
 	return ad.actorDefineBase
 }
 
-func (ad *cactorDefine) createActor(svc *Service, id int64, leaseId string) actorImpl {
+func (ad *cactorDefine) createActor(svc *Service, id ActorID, leaseId string) actorImpl {
 	a := &cactor{
 		actorCore: newActorCore(ad.actorDefineBase, id, leaseId, svc),
 	}

@@ -19,7 +19,7 @@ type ActorConfig struct {
 	// ClientActorCategory 当值非0时, 表示客户端需要通信的actor的分类.
 	// 一般情况下, 客户端都与同一分类的actor通信.
 	// PS: 该分类必须已在 ActorDefines 中定义.
-	ClientActorCategory uint16
+	ClientActorCategory ActorCategory
 
 	// RegistryTTL 注册表存续时间, 秒级.
 	// 默认值 60s.
@@ -121,12 +121,12 @@ func (s *Service) stopPriorityActors(priorityIndex int) bool {
 // stopCategoryActors 停机分类.
 func (s *Service) stopCategoryActors(categoryActors *categoryActors) bool {
 	stopped := true
-	categoryActors.actors.Traverse(func(id int64, actor actorImpl) bool {
+	categoryActors.actors.Traverse(func(id ActorID, actor actorImpl) bool {
 		_ = actor.stop(true)
 		stopped = false
 		return true
 	})
-	categoryActors.starters.Traverse(func(id int64, actor *actorStarter) bool {
+	categoryActors.starters.Traverse(func(id ActorID, actor *actorStarter) bool {
 		stopped = false
 		return false
 	})
@@ -184,12 +184,12 @@ func (s *Service) getPriorityActors(priority int) *priorityActors {
 }
 
 // getPriorityIndex 获取指定优先级类别下的所有 Actor.
-func (s *Service) getCategoryActors(priority int, category uint16) *categoryActors {
+func (s *Service) getCategoryActors(priority int, category ActorCategory) *categoryActors {
 	return s.priorityActors[priority].categoryActors[category]
 }
 
 // getCategoryActorsByCategory 获取指定类别下的所有 Actor.
-func (s *Service) getCategoryActorsByCategory(category uint16) *categoryActors {
+func (s *Service) getCategoryActorsByCategory(category ActorCategory) *categoryActors {
 	base := s.getDefine(category).base()
 	return s.getCategoryActors(base.priority, base.category)
 }
@@ -551,7 +551,7 @@ func (s *Service) Cast(to ActorUID, payload any) error {
 }
 
 // makeClientActorUID 构造客户端通信的目标ActorUID
-func (s *Service) makeClientActorUID(id int64) ActorUID {
+func (s *Service) makeClientActorUID(id ActorID) ActorUID {
 	return ActorUID{
 		Category: s.getCfg().ClientActorCategory,
 		ID:       id,
@@ -709,17 +709,17 @@ func (s *actorStarter) doStop() {
 
 // categoryActors 聚合同一分类下的所有 Actor.
 type categoryActors struct {
-	mtx           sync.RWMutex                               // 读写锁.
-	actors        *utils.ConcurrentMap[int64, actorImpl]     // 未终止的 Actor.
-	stoppedActors *utils.ConcurrentMap[int64, actorImpl]     // 已终止的 Actor.
-	starters      *utils.ConcurrentMap[int64, *actorStarter] // 启动器。
+	mtx           sync.RWMutex                                 // 读写锁.
+	actors        *utils.ConcurrentMap[ActorID, actorImpl]     // 未终止的 Actor.
+	stoppedActors *utils.ConcurrentMap[ActorID, actorImpl]     // 已终止的 Actor.
+	starters      *utils.ConcurrentMap[ActorID, *actorStarter] // 启动器。
 }
 
 func newCategoryActors() *categoryActors {
 	return &categoryActors{
-		actors:        &utils.ConcurrentMap[int64, actorImpl]{},
-		stoppedActors: &utils.ConcurrentMap[int64, actorImpl]{},
-		starters:      &utils.ConcurrentMap[int64, *actorStarter]{},
+		actors:        &utils.ConcurrentMap[ActorID, actorImpl]{},
+		stoppedActors: &utils.ConcurrentMap[ActorID, actorImpl]{},
+		starters:      &utils.ConcurrentMap[ActorID, *actorStarter]{},
 	}
 }
 
@@ -743,11 +743,11 @@ func (ca *categoryActors) addActor(actor actorImpl) {
 	ca.actors.Store(actor.core().id, actor)
 }
 
-func (ca *categoryActors) delActor(id int64) {
+func (ca *categoryActors) delActor(id ActorID) {
 	ca.actors.Delete(id)
 }
 
-func (ca *categoryActors) getActor(id int64) actorImpl {
+func (ca *categoryActors) getActor(id ActorID) actorImpl {
 	if actor, exists := ca.actors.Load(id); exists {
 		return actor
 	} else {
@@ -755,7 +755,7 @@ func (ca *categoryActors) getActor(id int64) actorImpl {
 	}
 }
 
-func (ca *categoryActors) refActor(id int64) (actorImpl, error) {
+func (ca *categoryActors) refActor(id ActorID) (actorImpl, error) {
 	actor, exists := ca.actors.Load(id)
 	if !exists {
 		return nil, nil
@@ -773,7 +773,7 @@ func (ca *categoryActors) refActor(id int64) (actorImpl, error) {
 	return nil, err
 }
 
-func (ca *categoryActors) isActorStopping(id int64) bool {
+func (ca *categoryActors) isActorStopping(id ActorID) bool {
 	if actor, exists := ca.actors.Load(id); exists {
 		return !actor.core().isRunning()
 	} else {
@@ -781,11 +781,11 @@ func (ca *categoryActors) isActorStopping(id int64) bool {
 	}
 }
 
-func (ca *categoryActors) addStarter(id int64, sa *actorStarter) (actual *actorStarter, loaded bool) {
+func (ca *categoryActors) addStarter(id ActorID, sa *actorStarter) (actual *actorStarter, loaded bool) {
 	return ca.starters.LoadOrStore(id, sa)
 }
 
-func (ca *categoryActors) getStarter(id int64) *actorStarter {
+func (ca *categoryActors) getStarter(id ActorID) *actorStarter {
 	if sa, exists := ca.starters.Load(id); exists {
 		return sa
 	} else {
@@ -793,21 +793,21 @@ func (ca *categoryActors) getStarter(id int64) *actorStarter {
 	}
 }
 
-func (ca *categoryActors) delStarter(id int64) {
+func (ca *categoryActors) delStarter(id ActorID) {
 	ca.starters.Delete(id)
 }
 
 // priorityActors 同一优先级下的所有 Actor.
 type priorityActors struct {
-	categoryActors map[uint16]*categoryActors
+	categoryActors map[ActorCategory]*categoryActors
 }
 
 func newPriorityActors() *priorityActors {
 	return &priorityActors{
-		categoryActors: make(map[uint16]*categoryActors),
+		categoryActors: make(map[ActorCategory]*categoryActors),
 	}
 }
 
-func (pa *priorityActors) addCategoryActors(category uint16, ca *categoryActors) {
+func (pa *priorityActors) addCategoryActors(category ActorCategory, ca *categoryActors) {
 	pa.categoryActors[category] = ca
 }

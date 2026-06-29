@@ -90,13 +90,13 @@ func (s *Service) lfdActorUID(name string, uid ActorUID) zap.Field {
 		return zap.Dict(
 			name,
 			zap.String("category", ad.base().name),
-			zap.Int64("id", uid.ID),
+			zap.Int64("id", int64(uid.ID)),
 		)
 	} else {
 		return zap.Dict(
 			name,
-			zap.Uint16("category", uid.Category),
-			zap.Int64("id", uid.ID),
+			zap.Uint16("category", uint16(uid.Category)),
+			zap.Int64("id", int64(uid.ID)),
 		)
 	}
 }

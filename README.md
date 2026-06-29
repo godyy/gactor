@@ -244,7 +244,7 @@ func (h *MyClientHandler) GetNetAgent() gactor.NetAgent           { return h.net
 func (h *MyClientHandler) GetBytesManager() gactor.BytesManager   { return h.bytesMgr }
 func (h *MyClientHandler) HandleResponse(resp gactor.ClientResponse) {}
 func (h *MyClientHandler) HandlePush(push gactor.ClientPush)         {}
-func (h *MyClientHandler) HandleDisconnect(id int64, sid uint32)     {}
+func (h *MyClientHandler) HandleDisconnect(id ActorID, sid uint32)     {}
 
 client := gactor.NewClient(&gactor.ClientConfig{
 	NodeId:        "client-1",

@@ -93,7 +93,7 @@ func newRPCTestManager(t *testing.T, queueSize int) (*Service, *rpcManager) {
 			Handler: handler,
 		},
 		actorDefineSet: &actorDefineSet{
-			defineMap:      make(map[uint16]ActorDefine),
+			defineMap:      make(map[ActorCategory]ActorDefine),
 			priority2Index: make(map[int]int),
 		},
 		logger:            logger.Named("rpc-test"),

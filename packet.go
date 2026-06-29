@@ -137,12 +137,12 @@ func (ph *ackPacketHead) decode(b *Buffer) (err error) {
 
 // connectPacketHead PacketTypeConnect 包头.
 type connectPacketHead struct {
-	seq uint32 // 序号.
-	id  int64  // Actor ID
-	sid uint32 // 会话ID.
+	seq uint32  // 序号.
+	id  ActorID // Actor ID
+	sid uint32  // 会话ID.
 }
 
-func newConnectHead(seq uint32, id int64, sid uint32) connectPacketHead {
+func newConnectHead(seq uint32, id ActorID, sid uint32) connectPacketHead {
 	return connectPacketHead{seq: seq, id: id, sid: sid}
 }
 
@@ -193,12 +193,12 @@ func (ph *connectPacketHead) decode(b *Buffer) (err error) {
 
 // disconnectPacketHead PacketTypeDisconnect 包头.
 type disconnectPacketHead struct {
-	seq uint32 // 序号.
-	id  int64  // Actor ID.
-	sid uint32 // 会话ID.
+	seq uint32  // 序号.
+	id  ActorID // Actor ID.
+	sid uint32  // 会话ID.
 }
 
-func newDisconnectHead(seq uint32, id int64, sid uint32) disconnectPacketHead {
+func newDisconnectHead(seq uint32, id ActorID, sid uint32) disconnectPacketHead {
 	return disconnectPacketHead{seq: seq, id: id, sid: sid}
 }
 
@@ -243,13 +243,13 @@ func (ph *disconnectPacketHead) decode(b *Buffer) (err error) {
 
 // rawReqPacketHead PacketTypeRawReq 包头.
 type rawReqPacketHead struct {
-	seq     uint32 // 序号.
-	toId    int64  // 目标 Actor ID.
-	sid     uint32 // 会话ID.
-	timeout uint32 // 超时.
+	seq     uint32  // 序号.
+	toId    ActorID // 目标 Actor ID.
+	sid     uint32  // 会话ID.
+	timeout uint32  // 超时.
 }
 
-func newRawReqHead(seq uint32, toId int64, sid uint32, timeout uint32) rawReqPacketHead {
+func newRawReqHead(seq uint32, toId ActorID, sid uint32, timeout uint32) rawReqPacketHead {
 	return rawReqPacketHead{seq: seq, toId: toId, sid: sid, timeout: timeout}
 }
 
@@ -302,12 +302,12 @@ func (ph *rawReqPacketHead) decode(b *Buffer) (err error) {
 // rawRespPacketHead PacketTypeRawResp 包头.
 type rawRespPacketHead struct {
 	seq     uint32  // 序号.
-	fromId  int64   // 来自 Actor ID.
+	fromId  ActorID // 来自 Actor ID.
 	sid     uint32  // 会话ID.
 	errCode ErrCode // 错误码.
 }
 
-func newRawRespHead(seq uint32, fromId int64, sid uint32, errCode ErrCode) rawRespPacketHead {
+func newRawRespHead(seq uint32, fromId ActorID, sid uint32, errCode ErrCode) rawRespPacketHead {
 	return rawRespPacketHead{seq: seq, fromId: fromId, sid: sid, errCode: errCode}
 }
 
@@ -363,12 +363,12 @@ func (ph *rawRespPacketHead) decode(b *Buffer) (err error) {
 
 // rawPushPacketHead PacketTypeRawPush 包头.
 type rawPushPacketHead struct {
-	seq    uint32 // 序号.
-	fromId int64  // 来自 Actor ID.
-	sid    uint32 // 会话ID.
+	seq    uint32  // 序号.
+	fromId ActorID // 来自 Actor ID.
+	sid    uint32  // 会话ID.
 }
 
-func newRawPushHead(seq uint32, fromId int64, sid uint32) rawPushPacketHead {
+func newRawPushHead(seq uint32, fromId ActorID, sid uint32) rawPushPacketHead {
 	return rawPushPacketHead{seq: seq, fromId: fromId, sid: sid}
 }
 

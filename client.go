@@ -14,7 +14,7 @@ import (
 
 // ClientRequest 客户端请求.
 type ClientRequest struct {
-	ID      int64         // 目标 Actor ID.
+	ID      ActorID       // 目标 Actor ID.
 	SID     uint32        // 会话ID.
 	Timeout time.Duration // 超时. 精度为毫秒, 向下取证.
 	Payload []byte        // 负载数据.
@@ -23,7 +23,7 @@ type ClientRequest struct {
 // ClientResponse 客户端响应.
 // PS: 需自行回收 Payload 中的字节切片.
 type ClientResponse struct {
-	ID      int64   // 来源 Actor ID.
+	ID      ActorID // 来源 Actor ID.
 	SID     uint32  // 会话ID.
 	Payload Buffer  // 负载数据.
 	ErrCode ErrCode // 错误码.
@@ -32,9 +32,9 @@ type ClientResponse struct {
 // ClientPush 客户端推送.
 // PS: 需自行回收 Payload 中的字节切片.
 type ClientPush struct {
-	ID      int64  // 来源 Actor ID.
-	SID     uint32 // 会话ID.
-	Payload Buffer // 负载数据.
+	ID      ActorID // 来源 Actor ID.
+	SID     uint32  // 会话ID.
+	Payload Buffer  // 负载数据.
 }
 
 // ClientHandler Client 处理器.
@@ -55,7 +55,7 @@ type ClientHandler interface {
 	HandlePush(push ClientPush)
 
 	// HandleDisconnect 处理 Actor 断开连接.
-	HandleDisconnect(id int64, sid uint32)
+	HandleDisconnect(id ActorID, sid uint32)
 }
 
 // ClientConfig Client 配置.
@@ -66,7 +66,7 @@ type ClientConfig struct {
 	// ActorCategory 客户端与之通信的默认目标actor分类.
 	// 一般情况下, 用户只会与同一分类的actor通信. 例如Player.
 	// PS: 其值必须大于0.
-	ActorCategory uint16
+	ActorCategory ActorCategory
 
 	// DefCtxTimeout 默认上下文超时时间.
 	// 默认值 5s.
@@ -282,7 +282,7 @@ func (c *Client) sendPacket(nodeId string, ph packetHead, payload []byte) error 
 }
 
 // getNodeIdOfActor 获取 Actor 所在的节点ID.
-func (c *Client) getNodeIdOfActor(id int64) (string, error) {
+func (c *Client) getNodeIdOfActor(id ActorID) (string, error) {
 	uid := c.makeActorUID(id)
 	reg := c.cfg.Handler.GetActorRegistry()
 	location, err := reg.GetActorLocation(uid)
@@ -314,7 +314,7 @@ func (c *Client) GenSessionId() uint32 {
 }
 
 // makeActorUID 构造Actor唯一ID.
-func (c *Client) makeActorUID(id int64) ActorUID {
+func (c *Client) makeActorUID(id ActorID) ActorUID {
 	return ActorUID{
 		Category: c.cfg.ActorCategory,
 		ID:       id,
@@ -322,7 +322,7 @@ func (c *Client) makeActorUID(id int64) ActorUID {
 }
 
 // Connnect 连接 uid 指定的 Actor.
-func (c *Client) Connect(id int64, sid uint32) error {
+func (c *Client) Connect(id ActorID, sid uint32) error {
 	// 获取目标节点.
 	nodeId, err := c.getNodeIdOfActor(id)
 	if err != nil {
@@ -341,7 +341,7 @@ func (c *Client) Connect(id int64, sid uint32) error {
 }
 
 // Disconnect 通知 uid 指定的 Actor 断开连接.
-func (c *Client) Disconnect(id int64, sid uint32) error {
+func (c *Client) Disconnect(id ActorID, sid uint32) error {
 	// 获取目标节点.
 	nodeId, err := c.getNodeIdOfActor(id)
 	if err != nil {
@@ -395,6 +395,6 @@ func (c *Client) handlePush(push ClientPush) {
 }
 
 // handleDisconnect 处理断开连接.
-func (c *Client) handleDisconnect(id int64, sid uint32) {
+func (c *Client) handleDisconnect(id ActorID, sid uint32) {
 	c.cfg.Handler.HandleDisconnect(id, sid)
 }

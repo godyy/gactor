@@ -8,7 +8,7 @@ import (
 type ServiceMonitor interface {
 	// MonitorActorAmount Actor 数量.
 	// 参数 action 表示 Actor 动作, category 表示 Actor 分类, amount 表示增加的数量.
-	MonitorActorAmount(action MonitorActorAction, category uint16, amount int64)
+	MonitorActorAmount(action MonitorActorAction, category ActorCategory, amount int64)
 
 	// MonitorTimerAmount 定时器数量.
 	// 参数 action 表示定时器动作, 参数 amount 表示数量.
@@ -108,31 +108,31 @@ var contextErr2CAAction = map[error]MonitorCAAction{
 	context.Canceled:         MonitorCAContextCanceled,
 }
 
-func (s *Service) monitorActorStart(category uint16) {
+func (s *Service) monitorActorStart(category ActorCategory) {
 	if monitor := s.cfg.Handler.GetMonitor(); monitor != nil {
 		monitor.MonitorActorAmount(MonitorActorStart, category, 1)
 	}
 }
 
-func (s *Service) monitorActorStop(category uint16) {
+func (s *Service) monitorActorStop(category ActorCategory) {
 	if monitor := s.cfg.Handler.GetMonitor(); monitor != nil {
 		monitor.MonitorActorAmount(MonitorActorStop, category, 1)
 	}
 }
 
-func (s *Service) monitorActorOnStartErr(category uint16) {
+func (s *Service) monitorActorOnStartErr(category ActorCategory) {
 	if monitor := s.cfg.Handler.GetMonitor(); monitor != nil {
 		monitor.MonitorActorAmount(MonitorActorOnStartErr, category, 1)
 	}
 }
 
-func (s *Service) monitorActorOnStopErr(category uint16) {
+func (s *Service) monitorActorOnStopErr(category ActorCategory) {
 	if monitor := s.cfg.Handler.GetMonitor(); monitor != nil {
 		monitor.MonitorActorAmount(MonitorActorOnStopErr, category, 1)
 	}
 }
 
-func (s *Service) monitorActorPanic(category uint16) {
+func (s *Service) monitorActorPanic(category ActorCategory) {
 	if monitor := s.cfg.Handler.GetMonitor(); monitor != nil {
 		monitor.MonitorActorAmount(MonitorActorPanic, category, 1)
 	}
