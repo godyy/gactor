@@ -2,6 +2,8 @@ github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/godyy/gcluster v0.0.11 h1:zJjRlROVEehwmizlVJctHKomBEAdUEiBxkB29eRYOM0=
 github.com/godyy/gcluster v0.0.11/go.mod h1:dsyUevggIOqqchzcCxc7rSJIJ68ufU5FJByDJpojGpI=
+github.com/godyy/gcluster v0.0.12 h1:6JulPiCmapsr3luT6Wibt/RhI4bF7isJcq65xF3fbbY=
+github.com/godyy/gcluster v0.0.12/go.mod h1:+nX3TStOG8t6/8SkyI2kYpNIvOLNL7mKjRjbkGSCBGs=
 github.com/godyy/glog v0.1.1 h1:rKmcqxKTmsI57lC64ncZKx+Fdhm6q7rbKd0kic1bh6I=
 github.com/godyy/glog v0.1.1/go.mod h1:rrqQSrnviKSnnm92twBD4rDE/syOisnqPgXcTSvU44w=
 github.com/godyy/gmpsc v0.0.4 h1:D3tBi3u/JiNCe48+/SSeXH5OoM/IElwnfsDbtNUVXB8=
@@ -12,6 +14,8 @@ github.com/godyy/gtimewheel v0.1.1 h1:T8q9YapvMZ9FZpSXnS7/igQbgf3Qoy/z66GCDv9Snt
 github.com/godyy/gtimewheel v0.1.1/go.mod h1:wOmNKjkpEz03ACVNdQ58DVr6mAKliRGdE+0MA/piZME=
 github.com/godyy/gutils v0.0.2 h1:PegtVz0trk0kqvq4LEBXqkPaD1cD9zMLt7Q7jmHHzn0=
 github.com/godyy/gutils v0.0.2/go.mod h1:ExhCh7LStCtq6PgbG00/PscKlKVNc87aShjpYTSN6IU=
+github.com/godyy/gutils v0.0.4 h1:Etjj/hZd3zsdD2RzadO487meAoahO+fhFLkORMLl9jw=
+github.com/godyy/gutils v0.0.4/go.mod h1:tiC0oUfJ776tohwuwtQt0CR1qA0e3OO3qhDFVVZhBvw=
 github.com/google/go-cmp v0.5.5 h1:Khx7svrCpmxxtHBq5j2mp/xVjsi8hQMfNLvJFAlrGgU=
 github.com/google/go-cmp v0.5.5/go.mod h1:v8dTdLbMG2kIc/vJvl+f65V22dbkXbowE6jgT/gNBxE=
 github.com/pkg/errors v0.9.1 h1:FEBLx1zS214owpjy7qsBeixbURkuhQAwrK5UwLGTwt4=

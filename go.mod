@@ -3,11 +3,11 @@ module github.com/godyy/gactor
 go 1.23
 
 require (
-	github.com/godyy/gcluster v0.0.11
+	github.com/godyy/gcluster v0.0.12
 	github.com/godyy/glog v0.1.1
 	github.com/godyy/gnet v0.3.0
 	github.com/godyy/gtimewheel v0.1.1
-	github.com/godyy/gutils v0.0.2
+	github.com/godyy/gutils v0.0.4
 	github.com/pkg/errors v0.9.1
 	github.com/rs/xid v1.6.0
 	go.uber.org/zap v1.27.0
