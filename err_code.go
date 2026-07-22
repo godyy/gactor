@@ -26,14 +26,15 @@ const (
 
 const (
 	_                               = ErrCode(iota + 20000)
-	ErrCodeActorUndefined                   // Actor 未定义.
-	ErrCodeActorNotExists                   // Actor 不存在.
-	ErrCodeActorRegisteredByAnother         // Actor 被其它节点注册.
-	ErrCodeActorStartFailed                 // Actor 启动失败.
-	ErrCodeActorBusy                        // Actor 繁忙.
-	ErrCodeActorLoopError                   // Actor 循环错误.
-	ErrCodeActorNotConnected                // Actor 未连接.
-	ErrCodeActorConnectedByAnother  = 20008 // Actor 被其他人连接.
+	ErrCodeActorUndefined           // Actor 未定义.
+	ErrCodeActorNotExists           // Actor 不存在.
+	ErrCodeActorRegisteredByAnother // Actor 被其它节点注册.
+	ErrCodeActorStartFailed         // Actor 启动失败.
+	ErrCodeActorBusy                // Actor 繁忙.
+	ErrCodeActorLoopError           // Actor 循环错误.
+	ErrCodeActorNotConnected        // Actor 未连接.
+	ErrCodeActorForwardUnsupported  // Actor 不支持透传.
+	ErrCodeActorConnectedByAnother  // Actor 被其他人连接.
 )
 
 // errCodeStrings 错误码文本.
@@ -53,6 +54,7 @@ var errCodeStrings = map[ErrCode]string{
 	ErrCodeActorBusy:                "actor busy",
 	ErrCodeActorLoopError:           "actor loop error",
 	ErrCodeActorNotConnected:        "actor not connected",
+	ErrCodeActorForwardUnsupported:  "actor forward unsupported",
 	ErrCodeActorConnectedByAnother:  "actor connected by another",
 }
 

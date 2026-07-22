@@ -146,7 +146,7 @@ func (f *contextAsyncRPCFunc) invoke(_ Actor, resp *RPCResp) {
 	f.ctx.suspend = false
 	f.ctx.Next()
 	// 回收.
-	f.ctx.release()
+	f.ctx.release(nil)
 }
 
 // AsyncRPCWithDeadline 基于 Context 的异步 RPC 调用.
@@ -219,7 +219,7 @@ func (c *Context) Clone() *Context {
 }
 
 // release 回收.
-func (c *Context) release() {
+func (c *Context) release(_ actorImpl) {
 	if c.suspend {
 		return
 	}
@@ -231,6 +231,11 @@ func (c *Context) release() {
 	c.handlers = nil
 	c.handlerIdx = -1
 	poolOfContext.Put(c)
+}
+
+// discard 在请求未进入 Actor 信箱时回收.
+func (c *Context) discard(_ *Service) {
+	c.release(nil)
 }
 
 // beforeHandle 处理请求前的检查.

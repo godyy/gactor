@@ -449,6 +449,55 @@ func TestServiceHandlePacketS2SRpcWhenNotStartedReturnsStoppedResp(t *testing.T)
 	}
 }
 
+func TestServiceHandlePacketS2SForwardWhenNotStartedOnlyAcks(t *testing.T) {
+	svc, netAgent := newPacketHandlerTestService(t, false, true)
+
+	head := newS2SForwardHead(51, ActorUID{Category: 9, ID: 9001}, ActorUID{Category: 1, ID: 401})
+	b := encodeIncomingPacket(t, &head, []byte("forward-payload"))
+
+	if err := svc.HandlePacket("remote-node", b); err != nil {
+		t.Fatalf("handle packet: %v", err)
+	}
+
+	sends := netAgent.snapshot()
+	if len(sends) != 1 {
+		t.Fatalf("send count = %d, want 1", len(sends))
+	}
+	if sends[0].nodeId != "remote-node" {
+		t.Fatalf("send nodeId = %s, want remote-node", sends[0].nodeId)
+	}
+
+	ackHead := decodeAckPacketHead(t, sends[0].data)
+	if ackHead.ackPt != PacketTypeS2SForward {
+		t.Fatalf("ack packet type = %d, want %d", ackHead.ackPt, PacketTypeS2SForward)
+	}
+	if ackHead.ackSeq != head.seq {
+		t.Fatalf("ack seq = %d, want %d", ackHead.ackSeq, head.seq)
+	}
+}
+
+func TestServiceHandlePacketS2SForwardMissingActorOnlyAcks(t *testing.T) {
+	svc, netAgent := newPacketHandlerTestService(t, true, true)
+	defer func() { _ = svc.Stop() }()
+
+	head := newS2SForwardHead(61, ActorUID{Category: 9, ID: 9002}, ActorUID{Category: 1, ID: 402})
+	b := encodeIncomingPacket(t, &head, []byte("forward-missing-actor"))
+
+	if err := svc.HandlePacket("remote-node", b); err != nil {
+		t.Fatalf("handle packet: %v", err)
+	}
+
+	sends := netAgent.snapshot()
+	if len(sends) != 1 {
+		t.Fatalf("send count = %d, want 1", len(sends))
+	}
+
+	ackHead := decodeAckPacketHead(t, sends[0].data)
+	if ackHead.ackPt != PacketTypeS2SForward || ackHead.ackSeq != head.seq {
+		t.Fatalf("unexpected ack head: %+v", ackHead)
+	}
+}
+
 func TestClientHandlePacketRawRespDispatchesResponse(t *testing.T) {
 	if logger == nil {
 		if err := initLogger(); err != nil {

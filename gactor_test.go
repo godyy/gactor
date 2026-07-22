@@ -263,7 +263,7 @@ func (pc *testPacketCodec) PutBytes(b []byte) {
 
 func (pc *testPacketCodec) Encode(allocator PacketAllocator, payload any) ([]byte, error) {
 	switch allocator.PacketType() {
-	case PacketTypeS2SRpcResp, PacketTypeS2SRpc, PacketTypeS2SCast:
+	case PacketTypeS2SRpcResp, PacketTypeS2SRpc, PacketTypeS2SCast, PacketTypeS2SForward:
 		s2sMsg, ok := payload.(*testS2SMessage)
 		if !ok {
 			return nil, errors.New("invalid payload type")
@@ -290,7 +290,7 @@ func (pc *testPacketCodec) Encode(allocator PacketAllocator, payload any) ([]byt
 
 func (pc *testPacketCodec) EncodePayload(pt PacketType, payload any) ([]byte, error) {
 	switch pt {
-	case PacketTypeS2SRpcResp, PacketTypeS2SRpc, PacketTypeS2SCast:
+	case PacketTypeRawPush, PacketTypeS2SRpcResp, PacketTypeS2SRpc, PacketTypeS2SCast, PacketTypeS2SForward:
 		s2sMsg, ok := payload.(*testS2SMessage)
 		if !ok {
 			return nil, errors.New("invalid payload type")

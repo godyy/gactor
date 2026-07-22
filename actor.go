@@ -111,6 +111,9 @@ type Actor interface {
 	// Cast 向 to 指向的 Actor 投递消息.
 	// payload 为投递的负载消息.
 	Cast(to ActorUID, payload any) error
+
+	// Forward 向 to 指向的 Actor 透传消息.
+	Forward(to ActorUID, payload any) error
 }
 
 // CActorBehavior CActor 行为.

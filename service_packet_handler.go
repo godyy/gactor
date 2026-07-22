@@ -169,7 +169,7 @@ func svcHandlePacketRawReq(s *Service, nodeId string, b *Buffer) error {
 	// 创建并发送请求.
 	request := newContext(s, newRawRequest(nodeId, head.getSeq(), head.sid, *b, time.Now().Add(timeout).UnixMilli()))
 	if err := s.send2LocalActor(uid, request, ""); err != nil {
-		request.release()
+		request.discard(s)
 		s.getLogger().ErrorFields("[HandlePacketRawReq] send request to actor failed",
 			lfdRemoteNodeId(nodeId), lfdSeq(head.getSeq()), s.lfdActorUID("uid", uid), lfdSid(head.sid), lfdTimeout(int64(head.timeout)), lfdError(err))
 
@@ -225,7 +225,7 @@ func svcHandlePacketS2SRpc(s *Service, nodeId string, b *Buffer) error {
 	// 创建并发送请求.
 	request := newContext(s, newRPCRequest(nodeId, head.getSeq(), head.reqId, head.fromId, *b, time.Now().Add(timeout).UnixMilli()))
 	if err := s.send2LocalActor(head.toId, request, ""); err != nil {
-		request.release()
+		request.discard(s)
 		s.getLogger().ErrorFields("[HandlePacketS2SRpc] send request to actor failed",
 			lfdRemoteNodeId(nodeId), lfdSeq(head.getSeq()), lfdReqId(head.reqId), s.lfdActorUID("fromId", head.fromId), s.lfdActorUID("toId", head.toId), lfdTimeout(int64(head.timeout)), lfdError(err))
 
@@ -299,9 +299,44 @@ func svcHandlePacketS2SCast(s *Service, nodeId string, b *Buffer) error {
 	// 创建并发送请求.
 	request := newContext(s, newCastRequest(nodeId, head.getSeq(), head.fromId, *b))
 	if err := s.send2LocalActor(head.toId, request, ""); err != nil {
-		request.release()
+		request.discard(s)
 		s.getLogger().ErrorFields("[HandlePacketS2SCast] send request to actor failed",
 			lfdRemoteNodeId(nodeId), lfdSeq(head.getSeq()), s.lfdActorUID("fromId", head.fromId), s.lfdActorUID("toId", head.toId), lfdError(err))
+	}
+
+	return nil
+}
+
+// svcHandlePacketS2SForward PacketTypeS2SForward 处理器.
+func svcHandlePacketS2SForward(s *Service, nodeId string, b *Buffer) error {
+	if nodeId == s.nodeId() {
+		return errors.New("gactor: [HandlePacketS2SForward] receive from local")
+	}
+
+	var head s2sForwardPacketHead
+	if err := head.decode(b); err != nil {
+		return pkgerrors.WithMessage(err, "gactor: [HandlePacketS2SForward] decode request Head")
+	}
+
+	s.getLogger().DebugFields("[HandlePacketS2SForward]",
+		lfdRemoteNodeId(nodeId), lfdSeq(head.getSeq()), s.lfdActorUID("fromId", head.fromId), s.lfdActorUID("toId", head.toId))
+
+	if err := s.sendAckPacket(nodeId, &head); err != nil {
+		s.getLogger().ErrorFields("[HandlePacketS2SForward] send ack packet failed",
+			lfdRemoteNodeId(nodeId), lfdSeq(head.getSeq()), s.lfdActorUID("fromId", head.fromId), s.lfdActorUID("toId", head.toId), lfdError(err))
+	}
+
+	if s.checkStarted() != nil {
+		s.freeBuffer(b)
+		return nil
+	}
+
+	msg := newMessageForward(*b)
+	if err := s.send2StartedLocalActor(head.toId, msg); err != nil {
+		msg.discard(s)
+		s.getLogger().ErrorFields("[HandlePacketS2SForward] send message to actor failed",
+			lfdRemoteNodeId(nodeId), lfdSeq(head.getSeq()), s.lfdActorUID("fromId", head.fromId), s.lfdActorUID("toId", head.toId), lfdError(err))
+		return nil
 	}
 
 	return nil
@@ -342,6 +377,7 @@ var servicePacketHandlers = map[PacketType]func(s *Service, nodeId string, b *Bu
 	PacketTypeS2SRpc:     svcHandlePacketS2SRpc,
 	PacketTypeS2SRpcResp: svcHandlePacketS2SRpcResp,
 	PacketTypeS2SCast:    svcHandlePacketS2SCast,
+	PacketTypeS2SForward: svcHandlePacketS2SForward,
 }
 
 // HandlePacket 处理字节切片 b 指代的网络数据包.

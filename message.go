@@ -8,8 +8,11 @@ type message interface {
 	// handleError 处理错误.
 	handleError(a actorImpl, err error)
 
-	// release 回收.
-	release()
+	// release 在消息经由 Actor 处理完成后回收资源.
+	release(a actorImpl)
+
+	// discard 在消息未进入 Actor 信箱时回收资源.
+	discard(s *Service)
 }
 
 // messageConnect 封装连接消息.
@@ -45,7 +48,10 @@ func (m *messageConnect) handle(a actorImpl) {
 func (m *messageConnect) handleError(a actorImpl, err error) {}
 
 // release 回收.
-func (m *messageConnect) release() {}
+func (m *messageConnect) release(_ actorImpl) {}
+
+// discard 回收.
+func (m *messageConnect) discard(_ *Service) {}
 
 // messageDisconnect 封装断开连接消息.
 type messageDisconnect struct {
@@ -76,7 +82,9 @@ func (m *messageDisconnect) handle(a actorImpl) {
 
 func (m *messageDisconnect) handleError(_ actorImpl, _ error) {}
 
-func (m *messageDisconnect) release() {}
+func (m *messageDisconnect) release(_ actorImpl) {}
+
+func (m *messageDisconnect) discard(_ *Service) {}
 
 // messageCheckAlive 检查 Actor 是否存活的消息.
 type messageCheckAlive struct {
@@ -93,4 +101,46 @@ func (m *messageCheckAlive) handleError(a actorImpl, err error) {
 	close(m.done)
 }
 
-func (m *messageCheckAlive) release() {}
+func (m *messageCheckAlive) release(_ actorImpl) {}
+
+func (m *messageCheckAlive) discard(_ *Service) {}
+
+// messageForward 封装 Service 透传消息.
+type messageForward struct {
+	payload Buffer
+}
+
+func newMessageForward(payload Buffer) *messageForward {
+	msg := &messageForward{
+		payload: payload,
+	}
+	return msg
+}
+
+func (m *messageForward) handle(a actorImpl) {
+	ca, ok := a.(*cactor)
+	if !ok {
+		a.core().getLogger().Error("[HandleMessageForward] not cActor")
+		return
+	}
+
+	// 透传消息必须串行进入 Actor 信箱；实际处理时再判断连接状态.
+	if !ca.session.IsConnected() {
+		a.core().getLogger().Debug("[HandleMessageForward] actor not connected, skip")
+		return
+	}
+
+	if err := ca.pushRawPayload(m.payload.UnreadData()); err != nil {
+		a.core().getLogger().ErrorFields("[HandleMessageForward] push raw payload failed", lfdError(err))
+	}
+}
+
+func (m *messageForward) handleError(a actorImpl, err error) {}
+
+func (m *messageForward) release(a actorImpl) {
+	a.core().service().freeBuffer(&m.payload)
+}
+
+func (m *messageForward) discard(s *Service) {
+	s.freeBuffer(&m.payload)
+}

@@ -261,7 +261,7 @@ func actorHandleMsg(a actorImpl, msg message) {
 		a.core().service().monitorActorPanic(a.core().category)
 	})
 	msg.handle(a)
-	msg.release()
+	msg.release(a)
 }
 
 // actorHandleMsgErr Actor 处理消息错误.
@@ -270,7 +270,7 @@ func actorHandleMsgErr(a actorImpl, msg message, err error) {
 		a.core().service().monitorActorPanic(a.core().category)
 	})
 	msg.handleError(a, err)
-	msg.release()
+	msg.release(a)
 }
 
 // actorExecTimer Actor 执行定时器.
@@ -856,6 +856,11 @@ func (a *actorCore) Cast(to ActorUID, payload any) error {
 	return a.svc.cast(a.ActorUID(), to, payload)
 }
 
+// Forward 向目标 Actor 透传未编码业务消息.
+func (a *actorCore) Forward(to ActorUID, payload any) error {
+	return a.svc.forward(a.ActorUID(), to, payload)
+}
+
 // actor Actor 内部实现.
 type actor struct {
 	*actorCore
@@ -940,6 +945,16 @@ func (a *cactor) PushRawMessage(payload any) error {
 	}
 	ph := newRawPushHead(a.service().genSeq(), a.id, a.session.SID)
 	return a.svc.sendRemotePacket(a.session.NodeId, &ph, payload)
+}
+
+// pushRawPayload 向客户端直推已编码 payload.
+// 该能力仅供框架内部透传链路使用，不对外暴露到 CActor 接口.
+func (a *cactor) pushRawPayload(payload []byte) error {
+	if a.session.NodeId == "" {
+		return ErrCodeActorNotConnected
+	}
+	ph := newRawPushHead(a.service().genSeq(), a.id, a.session.SID)
+	return a.svc.sendRemoteRawPacket(a.session.NodeId, &ph, payload)
 }
 
 // Disconnect 端开与客户端的连接.

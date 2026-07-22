@@ -73,6 +73,8 @@ func (h *handler) rpcUserNameCallback(ctx *gactor.Context, resp *message.GetName
 	logger.Logger().DebugFields("server get user name", zap.Int64("id", ctx.Actor().ActorUID().ID), zap.String("user name", resp.Name))
 	server := h.server(ctx)
 	h.RpcHandler.Reply(ctx, &message.GetNameResp{Name: server.Name()})
+	forwardMsg := message.NewPushMessageWithPayload(&message.Notify{Msg: "server forward"})
+	ctx.Actor().Forward(ctx.FromActorUID(), &forwardMsg)
 }
 
 var serverHandler = &handler{

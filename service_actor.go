@@ -536,7 +536,7 @@ func (s *Service) cast(from, to ActorUID, payload any) error {
 	buf.SetBuf(encodedPayload)
 	request := newContext(s, newCastRequest(s.nodeId(), seq, from, buf))
 	if err := s.send2LocalActor(to, request, leaseId); err != nil {
-		request.release()
+		request.discard(s)
 		s.monitorCastActionSend2LocalErr(err)
 		return err
 	} else {

@@ -110,7 +110,7 @@ func (s *Service) doRPC(from ActorUID, to ActorUID, params any, cb RPCFunc, dead
 			// 并发送给目标actor.
 			req := newContext(s, newRPCRequest(toNodeId, seq, reqId, from, buf, deadline.UnixMilli()))
 			if err = s.send2LocalActor(to, req, leaseId); err != nil {
-				req.release()
+				req.discard(s)
 				s.monitorRPCActionSend2LocalErr(err)
 			}
 		}

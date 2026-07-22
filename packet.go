@@ -24,6 +24,7 @@ const (
 	PacketTypeS2SRpc     = PacketType(21) // S2S RPC调用.
 	PacketTypeS2SRpcResp = PacketType(22) // S2S RPC调用响应.
 	PacketTypeS2SCast    = PacketType(23) // S2S 消息投递.
+	PacketTypeS2SForward = PacketType(24) // S2S 透传消息投递.
 )
 
 const sizeOfPacketType = int(unsafe.Sizeof(PacketType(0)))
@@ -51,13 +52,14 @@ type PacketCodec interface {
 	// 数据包切片, 将编码后的 payload 数据写入数据包切片中.
 	// 数据包类型包括:
 	// 	PacketTypeRawResp, PacketTypeRawPush
-	//	PacketTypeS2SRpc, PacketTypeS2SRpcResp, PacketTypeS2SCast
+	//	PacketTypeS2SRpc, PacketTypeS2SRpcResp, PacketTypeS2SCast, PacketTypeS2SForward
 	Encode(allocator PacketAllocator, payload any) ([]byte, error)
 
 	// EncodePayload 编码负载数据.
 	// 根据数据包类型 pt 编码 payload 并生成数据切片返回.
 	// 数据包类型包括:
-	//	PacketTypeS2SRpc, PacketTypeS2SCast
+	//	PacketTypeRawPush
+	//	PacketTypeS2SRpc, PacketTypeS2SCast, PacketTypeS2SForward
 	EncodePayload(pt PacketType, payload any) ([]byte, error)
 
 	// DecodePayload 解码负载数据.
@@ -687,6 +689,56 @@ func (ph *s2sCastPacketHead) decode(b *Buffer) (err error) {
 		return pkgerrors.WithMessage(err, "read toId")
 	}
 	return
+}
+
+// s2sForwardPacketHead PacketTypeS2SForward 包头.
+type s2sForwardPacketHead struct {
+	seq    uint32   // 序号.
+	fromId ActorUID // 来源 Actor ID.
+	toId   ActorUID // 目标 Actor ID.
+}
+
+func newS2SForwardHead(seq uint32, fromId, toId ActorUID) s2sForwardPacketHead {
+	return s2sForwardPacketHead{seq: seq, fromId: fromId, toId: toId}
+}
+
+const sizeOfS2SForwardPacketHead = 4 + sizeOfActorUID + sizeOfActorUID
+
+func (ph *s2sForwardPacketHead) getPt() PacketType { return PacketTypeS2SForward }
+
+func (ph *s2sForwardPacketHead) getSeq() uint32 { return ph.seq }
+
+func (ph *s2sForwardPacketHead) getSize() int {
+	return sizeOfS2SForwardPacketHead
+}
+
+func (ph *s2sForwardPacketHead) encode(b *Buffer) error {
+	if err := b.WriteUint32(ph.seq); err != nil {
+		return pkgerrors.WithMessage(err, "write seq")
+	}
+	if err := b.writeActorUID(ph.fromId); err != nil {
+		return pkgerrors.WithMessage(err, "write fromId")
+	}
+	if err := b.writeActorUID(ph.toId); err != nil {
+		return pkgerrors.WithMessage(err, "write toId")
+	}
+	return nil
+}
+
+func (ph *s2sForwardPacketHead) decode(b *Buffer) (err error) {
+	ph.seq, err = b.ReadUint32()
+	if err != nil {
+		return pkgerrors.WithMessage(err, "read seq")
+	}
+	ph.fromId, err = b.readActorUID()
+	if err != nil {
+		return pkgerrors.WithMessage(err, "read fromId")
+	}
+	ph.toId, err = b.readActorUID()
+	if err != nil {
+		return pkgerrors.WithMessage(err, "read toId")
+	}
+	return nil
 }
 
 // packetAllocator 数据包分配器.

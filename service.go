@@ -451,6 +451,49 @@ func (s *Service) sendRemotePacket(nodeId string, ph packetHead, payload any) er
 	return nil
 }
 
+// encodeRawPacket 将原始 payload 直接拼装为数据包.
+func (s *Service) encodeRawPacket(ph packetHead, payload []byte) ([]byte, error) {
+	size := sizeOfPacketType + ph.getSize() + len(payload)
+	b := s.getBytes(size)
+	var buf Buffer
+	buf.SetBuf(b)
+
+	if err := buf.writePacketType(ph.getPt()); err != nil {
+		s.putBytes(b)
+		return nil, pkgerrors.WithMessage(err, "write packet type")
+	}
+	if err := ph.encode(&buf); err != nil {
+		s.putBytes(b)
+		return nil, pkgerrors.WithMessage(err, "encode packet head")
+	}
+	if len(payload) > 0 {
+		if _, err := buf.Write(payload); err != nil {
+			s.putBytes(b)
+			return nil, pkgerrors.WithMessage(err, "write raw payload")
+		}
+	}
+
+	return buf.Data(), nil
+}
+
+// sendRemoteRawPacket 发送携带原始 payload 的远程数据包.
+func (s *Service) sendRemoteRawPacket(nodeId string, ph packetHead, payload []byte) error {
+	// 直接拼包，避免对 payload 做二次业务编码.
+	b, err := s.encodeRawPacket(ph, payload)
+	if err != nil {
+		s.logger.ErrorFields("[sendRemoteRawPacket] encode packet failed", lfdPacketType(ph.getPt()), lfdError(err))
+		return ErrCodeEncodePacketFailed
+	}
+
+	s.addPacket2Ack(nodeId, ph.getPt(), ph.getSeq(), b)
+	if err = s.send(nodeId, b); err != nil {
+		s.remPacket2Ack(ph.getPt(), ph.getSeq())
+		return pkgerrors.WithMessage(err, "send packet")
+	}
+
+	return nil
+}
+
 // sendPacket 编码数据包, 并发送数据包到 nodeId 指定的节点.
 func (s *Service) sendPacket(nodeId string, ph packetHead, payload any) error {
 	if nodeId == s.nodeId() {

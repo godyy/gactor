@@ -134,6 +134,10 @@ func (a *contextRequestTestActor) Cast(to ActorUID, payload any) error {
 	return nil
 }
 
+func (a *contextRequestTestActor) Forward(to ActorUID, payload any) error {
+	return nil
+}
+
 type contextRequestTestCBehavior struct {
 	CActor
 }

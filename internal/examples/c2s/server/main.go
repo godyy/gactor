@@ -119,7 +119,7 @@ func (s *server) PutBytes(b []byte) {
 // 数据包类型包括:
 //
 //	PacketTypeRawResp, PacketTypeRawPush
-//	PacketTypeS2SRpc, PacketTypeS2SRpcResp, PacketTypeS2SCast
+//	PacketTypeS2SRpc, PacketTypeS2SRpcResp, PacketTypeS2SCast, PacketTypeS2SForward
 func (s *server) Encode(allocator gactor.PacketAllocator, payload any) ([]byte, error) {
 	switch allocator.PacketType() {
 	case gactor.PacketTypeRawReq:
@@ -132,6 +132,8 @@ func (s *server) Encode(allocator gactor.PacketAllocator, payload any) ([]byte, 
 		return payload.(*message.RpcMessage).EncodePacket(allocator)
 	case gactor.PacketTypeS2SRpcResp:
 		return payload.(*message.RpcRespMessage).EncodePacket(allocator)
+	case gactor.PacketTypeS2SForward:
+		return payload.(*message.PushMessage).EncodePacket(allocator)
 	default:
 		return nil, fmt.Errorf("unsupported packet type %d", allocator.PacketType())
 	}
@@ -154,6 +156,8 @@ func (s *server) EncodePayload(pt gactor.PacketType, payload any) ([]byte, error
 		return payload.(*message.RpcMessage).Encode()
 	case gactor.PacketTypeS2SRpcResp:
 		return payload.(*message.RpcRespMessage).Encode()
+	case gactor.PacketTypeS2SForward:
+		return payload.(*message.PushMessage).Encode()
 	default:
 		return nil, fmt.Errorf("unsupported packet type %d", pt)
 	}

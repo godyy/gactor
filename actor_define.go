@@ -25,6 +25,9 @@ type ActorDefine interface {
 
 	// createActor 创建 Actor.
 	createActor(svc *Service, id ActorID, leaseId string) actorImpl
+
+	// isForwardSupported 是否支持透传消息.
+	isForwardSupported() bool
 }
 
 // actorDefineSet Actor 定义集合.
@@ -252,6 +255,11 @@ func (ad *actorDefine) createActor(svc *Service, id ActorID, leaseId string) act
 	return a
 }
 
+// isForwardSupported 是否支持透传消息.
+func (ad *actorDefine) isForwardSupported() bool {
+	return false
+}
+
 // cactorDefine CActor 定义.
 type cactorDefine struct {
 	*actorDefineBase
@@ -284,4 +292,9 @@ func (ad *cactorDefine) createActor(svc *Service, id ActorID, leaseId string) ac
 	}
 	a.behavior = ad.behaviorCreator(a)
 	return a
+}
+
+// isForwardSupported 是否支持透传消息.
+func (ad *cactorDefine) isForwardSupported() bool {
+	return true
 }
