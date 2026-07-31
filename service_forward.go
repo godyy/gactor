@@ -71,7 +71,7 @@ func (s *Service) resolveForwardNodeOfActor(uid ActorUID) (string, error) {
 // forwardLocal 将透传消息投递到本地 Actor 信箱.
 // 本地投递前先完成 payload 编码，再封装为 messageForward.
 func (s *Service) forwardLocal(from, to ActorUID, payload any) error {
-	encodedPayload, err := s.encodePayload(PacketTypeS2SForward, payload)
+	encodedPayload, err := s.encodePayload(PacketTypeRawPush, payload)
 	if err != nil {
 		s.logger.ErrorFields("[forwardLocal] encode payload failed",
 			s.lfdActorUID("fromId", from),
