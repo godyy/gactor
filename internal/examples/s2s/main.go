@@ -57,10 +57,11 @@ var (
 			},
 		}),
 		gactor.NewActorDefine(gactor.ActorDefineConfig{
-			Name:           "server",
-			Category:       actors.CategoryServer,
-			Priority:       1,
-			MessageBoxSize: serverMessageBoxSize,
+			Name:              "server",
+			Category:          actors.CategoryServer,
+			Priority:          1,
+			PriMessageBoxSize: 10,
+			MessageBoxSize:    serverMessageBoxSize,
 			BehaviorCreator: func(actor gactor.Actor) gactor.ActorBehavior {
 				return actors.NewServer(actor)
 			},

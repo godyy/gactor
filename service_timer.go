@@ -193,14 +193,13 @@ type triggeredTimer struct {
 
 // timerExecutor 定时器执行回调.
 func (s *Service) timerExecutor(tf TimerFunc, args gtimewheel.TimerArgs) {
-	const alarmThreshold = time.Millisecond * 50
 	begin := time.Now()
 	select {
 	case s.triggeredTimers <- triggeredTimer{
 		cb:   tf,
 		args: args,
 	}:
-		if d := time.Now().Sub(begin); d > alarmThreshold {
+		if d := time.Now().Sub(begin); d > s.getCfg().QueueWriteTimeAlarmThreshold {
 			s.getLogger().Warnf("receive triggerd timer cost:%dms", d.Milliseconds())
 		}
 	case <-s.timeWheelStop:

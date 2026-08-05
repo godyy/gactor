@@ -55,6 +55,10 @@ type ServiceConfig struct {
 	// Handler Service 处理器.
 	// required.
 	Handler ServiceHandler
+
+	// QueueWriteTimeAlarmThreshold 队列写入时间报警阈值.
+	// 默认值 50ms.
+	QueueWriteTimeAlarmThreshold time.Duration
 }
 
 func (c *ServiceConfig) init() {
@@ -91,6 +95,10 @@ func (c *ServiceConfig) init() {
 
 	if c.Handler.GetTimeSystem() == nil {
 		panic("gactor: ServiceConfig: Handler has no TimeSystem")
+	}
+
+	if c.QueueWriteTimeAlarmThreshold <= 0 {
+		c.QueueWriteTimeAlarmThreshold = 50 * time.Millisecond
 	}
 }
 

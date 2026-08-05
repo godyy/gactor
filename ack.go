@@ -22,6 +22,10 @@ type AckConfig struct {
 
 	// TickInterval Tick 时间间隔.
 	TickInterval time.Duration
+
+	// QueueWriteTimeAlarmThreshold 队列写入时间报警阈值.
+	// 默认值 50ms.
+	QueueWriteTimeAlarmThreshold time.Duration
 }
 
 func (c *AckConfig) init() {
@@ -39,6 +43,10 @@ func (c *AckConfig) init() {
 
 	if c.TickInterval <= 0 {
 		panic("gactor: AckConfig: TickInterval must be > 0")
+	}
+
+	if c.QueueWriteTimeAlarmThreshold <= 0 {
+		c.QueueWriteTimeAlarmThreshold = 50 * time.Millisecond
 	}
 }
 
@@ -143,11 +151,10 @@ func (m *ackManager) getCfg() *AckConfig {
 // enqueueCmd 入队指令.
 func (m *ackManager) enqueueCmd(c ackCmd) {
 	chStop := m.handler.getStopWait().C
-	const alarmThreshold = time.Millisecond * 50
 	begin := time.Now()
 	select {
 	case m.chCmds <- c:
-		if d := time.Now().Sub(begin); d > alarmThreshold {
+		if d := time.Now().Sub(begin); d > m.cfg.QueueWriteTimeAlarmThreshold {
 			m.handler.getLogger().Warnf("ack enqueueCmd cost:%dms", d.Milliseconds())
 		}
 	case <-chStop:
@@ -161,11 +168,10 @@ func (m *ackManager) addPacket(ap ackPacket) {
 
 	// 添加指令.
 	chStop := m.handler.getStopWait().C
-	const alarmThreshold = time.Millisecond * 50
 	begin := time.Now()
 	select {
 	case m.chCmds <- newAckCmdAdd(p):
-		if d := time.Now().Sub(begin); d > alarmThreshold {
+		if d := time.Now().Sub(begin); d > m.cfg.QueueWriteTimeAlarmThreshold {
 			m.handler.getLogger().Warnf("ack add packet cost:%dms", d.Milliseconds())
 		}
 	case <-chStop:

@@ -196,11 +196,10 @@ func (m *rpcManager) enqueueCmd(c rpcCmd, ignoreBusy bool) error {
 	}
 	chStop := m.svc.getStopWait().C
 	if ignoreBusy {
-		const alarmThreshold = time.Millisecond * 50
 		begin := time.Now()
 		select {
 		case m.chCmds <- c:
-			if cost := time.Since(begin); cost > alarmThreshold {
+			if cost := time.Since(begin); cost > m.svc.getCfg().QueueWriteTimeAlarmThreshold {
 				m.svc.getLogger().Warnf("rpc enqueue slowly, cost:%dms", cost.Milliseconds())
 				return ErrRPCTimeout
 			}

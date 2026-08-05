@@ -641,10 +641,9 @@ func (a *actorCore) receiveCompletedAsyncRPC(resp RPCResp, cb ActorRPCFunc) erro
 	msg := newMessageCompletedAsyncRPC(resp.payload, resp.err, cb)
 	resp.payload.SetBuf(nil)
 
-	const alarmThreshold = time.Millisecond * 50
 	begin := time.Now()
 	a.priMessageBox <- msg
-	if d := time.Now().Sub(begin); d > alarmThreshold {
+	if d := time.Now().Sub(begin); d > a.svc.getCfg().QueueWriteTimeAlarmThreshold {
 		a.getLogger().Warnf("receiveCompletedAsyncRPC cost:%dms", d.Milliseconds())
 	}
 	return nil
@@ -686,12 +685,11 @@ func (a *actorCore) receiveTriggerdTimer(tid TimerId, args any, cb ActorTimerFun
 		return
 	}
 
-	const alarmThreshold = time.Millisecond * 50
 	msg := newMessageTriggeredTimer(tid, cb, args)
 	begin := time.Now()
 	select {
 	case a.priMessageBox <- msg:
-		if d := time.Now().Sub(begin); d > alarmThreshold {
+		if d := time.Now().Sub(begin); d > a.svc.getCfg().QueueWriteTimeAlarmThreshold {
 			a.getLogger().Warnf("receive triggerd timer cost:%dms", d.Milliseconds())
 		}
 		return
@@ -707,10 +705,9 @@ func (a *actorCore) receiveFunc(f ActorFunc, args any) error {
 	}
 
 	msg := newMessageFunc(f, args)
-	const alarmThreshold = time.Millisecond * 50
 	begin := time.Now()
 	a.priMessageBox <- msg
-	if d := time.Now().Sub(begin); d > alarmThreshold {
+	if d := time.Now().Sub(begin); d > a.svc.getCfg().QueueWriteTimeAlarmThreshold {
 		a.getLogger().Warnf("receiveFunc cost:%dms", d.Milliseconds())
 	}
 	return nil
