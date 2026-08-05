@@ -17,9 +17,9 @@ type Context struct {
 	actor actorImpl // actor.
 	kv    contextKV // kv mapping.
 
-	handlers   []HandlerFunc // handlers.
-	handlerIdx int8          // handler index.
-	suspend    bool          // 是否挂起.
+	handlers    []HandlerFunc // handlers.
+	handlerIdx  int8          // handler index.
+	suspendFlag int32         // 挂起计数标记.
 }
 
 var poolOfContext = &sync.Pool{
@@ -35,7 +35,6 @@ func newContext(svc *Service, req request) *Context {
 	cp.svc = svc
 	cp.req = req
 	cp.kv = make(contextKV)
-	cp.suspend = false
 	return cp
 }
 
@@ -91,16 +90,34 @@ func (c *Context) Abort() {
 	c.handlerIdx = maxHandlers
 }
 
+// suspend 挂起.
+func (c *Context) suspend() {
+	c.suspendFlag++
+}
+
+// resume 恢复.
+func (c *Context) resume() bool {
+	if c.suspendFlag > 0 {
+		c.suspendFlag--
+	}
+	return c.suspendFlag == 0
+}
+
+// isSuspend 是否挂起.
+func (c *Context) isSuspend() bool {
+	return c.suspendFlag > 0
+}
+
 // Next 执行下一个 Handler.
 func (c *Context) Next() {
-	if c.suspend || c.handlerIdx >= int8(len(c.handlers)-1) {
+	if c.suspendFlag > 0 || c.handlerIdx >= int8(len(c.handlers)-1) {
 		return
 	}
 
 	c.handlerIdx++
 	for c.handlerIdx < int8(len(c.handlers)) {
 		c.handlers[c.handlerIdx](c)
-		if c.suspend {
+		if c.isSuspend() {
 			return
 		}
 		c.handlerIdx++
@@ -139,25 +156,36 @@ type contextAsyncRPCFunc struct {
 	cb  ContextRPCFunc
 }
 
-func (f *contextAsyncRPCFunc) invoke(_ Actor, resp RPCResp) {
+func (f *contextAsyncRPCFunc) invoke(a Actor, resp RPCResp) {
+	// 保险起见, 更新下Actor.
+	f.ctx.actor = a.(actorImpl)
 	// 优先执行回调.
 	f.cb(f.ctx, resp)
-	// 继续执行 Handler.
-	f.ctx.suspend = false
+
+	// 恢复状态.
+	if !f.ctx.resume() {
+		return
+	}
+
+	// 恢复成功, 则继续执行 Handler.
 	f.ctx.Next()
+
+	// 执行 Handler 后, 若 ctx 未挂起.
 	// 回收.
-	f.ctx.release(nil)
+	if !f.ctx.isSuspend() {
+		f.ctx.release(nil)
+	}
 }
 
 // AsyncRPCWithDeadline 基于 Context 的异步 RPC 调用.
 func (c *Context) AsyncRPCWithDeadline(to ActorUID, params any, cb ContextRPCFunc, deadline time.Time) error {
-	c.suspend = true
+	c.suspend()
 	asyncFunc := &contextAsyncRPCFunc{
 		ctx: c,
 		cb:  cb,
 	}
 	if err := c.actor.AsyncRPCWithDeadline(to, params, asyncFunc.invoke, deadline); err != nil {
-		c.suspend = false
+		c.resume()
 		return err
 	}
 	return nil
@@ -173,13 +201,13 @@ func (c *Context) AsyncRPC(to ActorUID, params any, cb ContextRPCFunc) error {
 	if deadline, ok := c.Deadline(); ok {
 		return c.AsyncRPCWithDeadline(to, params, cb, deadline)
 	}
-	c.suspend = true
+	c.suspend()
 	asyncFunc := &contextAsyncRPCFunc{
 		ctx: c,
 		cb:  cb,
 	}
 	if err := c.actor.AsyncRPC(to, params, asyncFunc.invoke); err != nil {
-		c.suspend = false
+		c.resume()
 		return err
 	}
 	return nil
@@ -187,13 +215,13 @@ func (c *Context) AsyncRPC(to ActorUID, params any, cb ContextRPCFunc) error {
 
 // AsyncRPCWithContext 基于 Context 的异步 RPC 调用.
 func (c *Context) AsyncRPCWithContext(ctx context.Context, to ActorUID, params any, cb ContextRPCFunc) error {
-	c.suspend = true
+	c.suspend()
 	asyncFunc := &contextAsyncRPCFunc{
 		ctx: c,
 		cb:  cb,
 	}
 	if err := c.actor.AsyncRPCWithContext(ctx, to, params, asyncFunc.invoke); err != nil {
-		c.suspend = false
+		c.resume()
 		return err
 	}
 	return nil
@@ -213,14 +241,13 @@ func (c *Context) Clone() *Context {
 	cp.kv = c.kv.clone()
 	cp.handlers = c.handlers
 	cp.handlerIdx = c.handlerIdx
-	cp.suspend = false
-
+	cp.suspendFlag = 0
 	return cp
 }
 
 // release 回收.
 func (c *Context) release(_ actorImpl) {
-	if c.suspend {
+	if c.isSuspend() {
 		return
 	}
 	c.req.release(c)
