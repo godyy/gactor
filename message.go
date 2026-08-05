@@ -220,3 +220,30 @@ func (m *messageTriggeredTimer) release(a actorImpl) {}
 
 // discard 在消息未进入 Actor 信箱时回收资源.
 func (m *messageTriggeredTimer) discard(s *Service) {}
+
+// messageFunc 封装函数消息.
+type messageFunc struct {
+	f    ActorFunc
+	args any
+}
+
+func newMessageFunc(f ActorFunc, args any) *messageFunc {
+	return &messageFunc{
+		f:    f,
+		args: args,
+	}
+}
+
+// handle 处理消息.
+func (m *messageFunc) handle(a actorImpl) {
+	m.f(a, m.args)
+}
+
+// handleError 处理错误.
+func (m *messageFunc) handleError(a actorImpl, err error) {}
+
+// release 在消息经由 Actor 处理完成后回收资源.
+func (m *messageFunc) release(a actorImpl) {}
+
+// discard 在消息未进入 Actor 信箱时回收资源.
+func (m *messageFunc) discard(s *Service) {}

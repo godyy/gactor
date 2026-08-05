@@ -59,6 +59,9 @@ type ActorTimerFunc func(args ActorTimerArgs)
 // ActorRPCFunc Actor RPC 回调.
 type ActorRPCFunc func(a Actor, resp RPCResp)
 
+// ActorFunc Actor 回调函数.
+type ActorFunc func(a Actor, args any)
+
 // Actor 封装 Actor 接口.
 type Actor interface {
 	// Category 获取 Actor 的分类.

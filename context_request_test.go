@@ -85,6 +85,9 @@ func (a *contextRequestTestActor) stop(shutdown bool) error {
 	return nil
 }
 func (a *contextRequestTestActor) stopped() {}
+func (a *contextRequestTestActor) receiveFunc(f ActorFunc, args any) error {
+	return nil
+}
 func (a *contextRequestTestActor) Behavior() ActorBehavior {
 	return nil
 }

@@ -20,6 +20,9 @@ type actorImpl interface {
 	start() error
 	stop(shutdown bool) error
 	stopped()
+
+	// receiveFunc 接收回调函数.
+	receiveFunc(f ActorFunc, args any) error
 }
 
 // actorStart Actor 启动逻辑.
@@ -695,6 +698,22 @@ func (a *actorCore) receiveTriggerdTimer(tid TimerId, args any, cb ActorTimerFun
 	case <-a.sigStop:
 		return
 	}
+}
+
+// receiveFunc 接收回调函数.
+func (a *actorCore) receiveFunc(f ActorFunc, args any) error {
+	if err := a.checkNotStopped(); err != nil {
+		return err
+	}
+
+	msg := newMessageFunc(f, args)
+	const alarmThreshold = time.Millisecond * 50
+	begin := time.Now()
+	a.priMessageBox <- msg
+	if d := time.Now().Sub(begin); d > alarmThreshold {
+		a.getLogger().Warnf("receiveFunc cost:%dms", d.Milliseconds())
+	}
+	return nil
 }
 
 // RPCWithDeadline 发起同步 RPC 调用.
