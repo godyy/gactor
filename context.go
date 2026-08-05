@@ -131,7 +131,7 @@ func (c *Context) RPCWithContext(ctx context.Context, to ActorUID, params any, r
 }
 
 // ContextRPCFunc 基于 Context 的 RPC 回调.
-type ContextRPCFunc func(ctx *Context, resp *RPCResp)
+type ContextRPCFunc func(ctx *Context, resp RPCResp)
 
 // contextAsyncRPCFunc 基于 Context 的异步 RPC 回调.
 type contextAsyncRPCFunc struct {
@@ -139,7 +139,7 @@ type contextAsyncRPCFunc struct {
 	cb  ContextRPCFunc
 }
 
-func (f *contextAsyncRPCFunc) invoke(_ Actor, resp *RPCResp) {
+func (f *contextAsyncRPCFunc) invoke(_ Actor, resp RPCResp) {
 	// 优先执行回调.
 	f.cb(f.ctx, resp)
 	// 继续执行 Handler.

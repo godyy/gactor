@@ -49,7 +49,7 @@ func (resp *RPCResp) release() {
 
 // RPCFunc RPC回调.
 // RPCCall 对象只能在回调内部访问, 切记不要传递到回调函数外.
-type RPCFunc func(*RPCResp)
+type RPCFunc func(RPCResp)
 
 // rpcCall 内部 RPC 调用实例实现.
 type rpcCall struct {
@@ -249,7 +249,7 @@ func (m *rpcManager) invokeCallback(call *rpcCall) {
 		payload: call.respPayload,
 		err:     call.err,
 	}
-	call.cb(&resp)
+	call.cb(resp)
 	resp.release()
 	call.release()
 }

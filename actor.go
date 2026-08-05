@@ -54,10 +54,10 @@ type ActorTimerArgs struct {
 }
 
 // ActorTimerFunc Actor 定时器回调函数.
-type ActorTimerFunc func(args *ActorTimerArgs)
+type ActorTimerFunc func(args ActorTimerArgs)
 
 // ActorRPCFunc Actor RPC 回调.
-type ActorRPCFunc func(a Actor, resp *RPCResp)
+type ActorRPCFunc func(a Actor, resp RPCResp)
 
 // Actor 封装 Actor 接口.
 type Actor interface {

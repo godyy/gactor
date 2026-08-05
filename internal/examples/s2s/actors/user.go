@@ -53,7 +53,7 @@ func randomGetServerName(u *User) {
 	u.StartTimer(d, false, nil, onRandomGetServerName)
 }
 
-func onRandomGetServerName(args *gactor.ActorTimerArgs) {
+func onRandomGetServerName(args gactor.ActorTimerArgs) {
 	u := args.Actor.Behavior().(*User)
 
 	if rand.Intn(2) > 0 {

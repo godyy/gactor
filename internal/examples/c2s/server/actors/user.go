@@ -49,7 +49,7 @@ func (u *User) StopNotifyTimer() {
 	u.notifyTimerId = gactor.TimerIdNone
 }
 
-func onNotifyTimer(args *gactor.ActorTimerArgs) {
+func onNotifyTimer(args gactor.ActorTimerArgs) {
 	u := args.Actor.Behavior().(*User)
 	if args.TID != u.notifyTimerId {
 		return

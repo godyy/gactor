@@ -614,7 +614,7 @@ func TestServiceHandlePacketS2SRpcRespDispatchesCallback(t *testing.T) {
 	}, 1)
 	markerDone := make(chan struct{})
 
-	reqID, err := svc.rpcManager.createCall(from, to, time.Now().Add(time.Second), func(resp *RPCResp) {
+	reqID, err := svc.rpcManager.createCall(from, to, time.Now().Add(time.Second), func(resp RPCResp) {
 		var reply testS2SMessage
 		callbackCh <- struct {
 			err       error

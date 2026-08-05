@@ -8,7 +8,7 @@ import (
 )
 
 func WrapRPCCallback[AB gactor.ActorBehavior, R any](callback func(ab AB, reply *R, err error)) gactor.ActorRPCFunc {
-	return func(a gactor.Actor, resp *gactor.RPCResp) {
+	return func(a gactor.Actor, resp gactor.RPCResp) {
 		var msgReply message.Msg
 		var reply R
 		if err := resp.DecodeReply(&msgReply); err != nil {

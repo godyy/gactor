@@ -275,7 +275,7 @@ func actorHandleMsgErr(a actorImpl, msg message, err error) {
 }
 
 // actorOnRecycle Actor 回收定时器回调.
-func actorOnRecycle(args *ActorTimerArgs) {
+func actorOnRecycle(args ActorTimerArgs) {
 	a := args.Actor.(actorImpl)
 	if args.TID != a.core().recycleTimerId {
 		return
@@ -287,7 +287,7 @@ func actorOnRecycle(args *ActorTimerArgs) {
 }
 
 // actorOnKeepAlive Actor 存续定时器回调.
-func actorOnKeepAlive(args *ActorTimerArgs) {
+func actorOnKeepAlive(args ActorTimerArgs) {
 	a := args.Actor.(actorImpl)
 	core := a.core()
 	svc := core.service()
@@ -630,7 +630,7 @@ func (a *actorCore) receiveMessage(msg message) error {
 }
 
 // receiveCompletedAsyncRPC 接收已完成的异步 RPC 调用.
-func (a *actorCore) receiveCompletedAsyncRPC(resp *RPCResp, cb ActorRPCFunc) error {
+func (a *actorCore) receiveCompletedAsyncRPC(resp RPCResp, cb ActorRPCFunc) error {
 	if err := a.checkNotStopped(); err != nil {
 		return err
 	}
@@ -728,7 +728,7 @@ type actorAsyncRPCFunc struct {
 	cb  ActorRPCFunc
 }
 
-func (f *actorAsyncRPCFunc) invoke(resp *RPCResp) {
+func (f *actorAsyncRPCFunc) invoke(resp RPCResp) {
 	if actor, err := f.svc.getActor(f.uid); err != nil {
 		f.svc.getLogger().ErrorFields("get actor failed inside actorAsyncRPCFunc", f.svc.lfdActorUID("uid", f.uid), lfdError(err))
 	} else if actor == nil {

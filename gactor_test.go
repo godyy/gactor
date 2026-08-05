@@ -389,7 +389,7 @@ func (a *testActor) GetActor() Actor {
 
 func (a *testActor) OnStart() error {
 	a.name = "test:" + a.ActorUID().String()
-	a.StartTimer(100*time.Millisecond, true, nil, func(args *ActorTimerArgs) {
+	a.StartTimer(100*time.Millisecond, true, nil, func(args ActorTimerArgs) {
 		ta := args.Actor.Behavior().(*testActor)
 		ta.tCount++
 		logger.Debugf("actor %s tick", a.ActorUID())
@@ -413,7 +413,7 @@ func (a *testActor) OnStart() error {
 				msgId:   msgIdPing,
 				payload: &testMessagePing{Time: time.Now()},
 			}
-			if err := ta.AsyncRPC(targetUID, &params, func(_ Actor, resp *RPCResp) {
+			if err := ta.AsyncRPC(targetUID, &params, func(_ Actor, resp RPCResp) {
 				reply := testS2SMessage{}
 				if err := resp.DecodeReply(&reply); err != nil {
 					logger.Errorf("actor %s decode rpc async payload, %v", a.ActorUID(), err)

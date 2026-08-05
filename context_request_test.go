@@ -226,7 +226,7 @@ func TestContextAsyncRPCUsesRequestDeadline(t *testing.T) {
 		actor: actor,
 	}
 
-	if err := ctx.AsyncRPC(ActorUID{Category: 1, ID: 2}, "req", func(ctx *Context, resp *RPCResp) {}); err != nil {
+	if err := ctx.AsyncRPC(ActorUID{Category: 1, ID: 2}, "req", func(ctx *Context, resp RPCResp) {}); err != nil {
 		t.Fatalf("context async rpc: %v", err)
 	}
 	if !ctx.suspend {
@@ -291,7 +291,7 @@ func TestContextAsyncRPCErrorResetsSuspend(t *testing.T) {
 	}
 	ctx := &Context{req: req, actor: actor}
 
-	err := ctx.AsyncRPC(ActorUID{Category: 1, ID: 2}, "req", func(ctx *Context, resp *RPCResp) {})
+	err := ctx.AsyncRPC(ActorUID{Category: 1, ID: 2}, "req", func(ctx *Context, resp RPCResp) {})
 	if err == nil || err.Error() != "async rpc failed" {
 		t.Fatalf("context async rpc err = %v, want async rpc failed", err)
 	}

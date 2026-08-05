@@ -167,7 +167,7 @@ func (m *messageCompletedAsyncRPC) handle(a actorImpl) {
 		payload: m.payload,
 		err:     m.err,
 	}
-	m.cb(a, &resp)
+	m.cb(a, resp)
 	resp.release()
 }
 
@@ -205,12 +205,11 @@ func (m *messageTriggeredTimer) handle(a actorImpl) {
 	if !core.isRunning() || !core.service().isRunning() {
 		return
 	}
-	args := ActorTimerArgs{
+	m.f(ActorTimerArgs{
 		Actor: a,
 		TID:   m.tid,
 		Args:  m.args,
-	}
-	m.f(&args)
+	})
 }
 
 // handleError 处理错误.

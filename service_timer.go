@@ -129,7 +129,7 @@ func (s *Service) startActorTimer(uid ActorUID, d time.Duration, periodic bool, 
 		panic("gactor: cb is nil")
 	}
 
-	return s.StartTimer(d, periodic, &actorTimerArgs{
+	return s.StartTimer(d, periodic, actorTimerArgs{
 		uid:  uid,
 		cb:   cb,
 		args: args,
@@ -138,7 +138,7 @@ func (s *Service) startActorTimer(uid ActorUID, d time.Duration, periodic bool, 
 
 // execActorTimer 执行 Actor 定时器.
 func (s *Service) execActorTimer(args TimerArgs) {
-	aargs := args.Args.(*actorTimerArgs)
+	aargs := args.Args.(actorTimerArgs)
 
 	actor, err := s.refActor(aargs.uid)
 	if err != nil || actor == nil {

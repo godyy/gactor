@@ -127,7 +127,7 @@ type rpcDoneFunc struct {
 	err     error         // 错误信息.
 }
 
-func (cb *rpcDoneFunc) invoke(resp *RPCResp) {
+func (cb *rpcDoneFunc) invoke(resp RPCResp) {
 	defer close(cb.done)
 	if err := resp.Err(); err != nil {
 		cb.err = err

@@ -166,7 +166,7 @@ func TestRPCCmdAddDiscardReleasesCall(t *testing.T) {
 	call := &rpcCall{
 		reqId: 1,
 		err:   errors.New("test"),
-		cb:    func(*RPCResp) {},
+		cb:    func(RPCResp) {},
 	}
 	buf := Buffer{}
 	buf.SetBuf([]byte{1, 2, 3})
@@ -199,7 +199,7 @@ func TestRPCManagerStopCompletesPendingCalls(t *testing.T) {
 	from := ActorUID{Category: 1, ID: 1}
 	to := ActorUID{Category: 1, ID: 2}
 
-	if _, err := rm.createCall(from, to, time.Now().Add(time.Second), func(resp *RPCResp) {
+	if _, err := rm.createCall(from, to, time.Now().Add(time.Second), func(resp RPCResp) {
 		callbackErr <- resp.Err()
 	}); err != nil {
 		t.Fatalf("create call: %v", err)
@@ -284,7 +284,7 @@ func TestRPCManagerHandleResponseConcurrentWithStopCallbackOnce(t *testing.T) {
 	from := ActorUID{Category: 1, ID: 1}
 	to := ActorUID{Category: 1, ID: 2}
 
-	reqId, err := rm.createCall(from, to, time.Now().Add(time.Second), func(resp *RPCResp) {
+	reqId, err := rm.createCall(from, to, time.Now().Add(time.Second), func(resp RPCResp) {
 		atomic.AddInt32(&callbackCount, 1)
 		callbackErr <- resp.Err()
 	})
