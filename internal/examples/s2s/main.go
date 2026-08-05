@@ -46,17 +46,16 @@ const (
 var (
 	actorDefines = []gactor.ActorDefine{
 		gactor.NewCActorDefine(gactor.CActorDefineConfig{
-			Name:           "user",
-			Category:       actors.CategoryUser,
-			Priority:       10,
-			MessageBoxSize: userMessageBoxSize,
-			RecycleTime:    1 * time.Hour,
+			Name:              "user",
+			Category:          actors.CategoryUser,
+			Priority:          10,
+			PriMessageBoxSize: 10,
+			MessageBoxSize:    userMessageBoxSize,
+			RecycleTime:       1 * time.Hour,
 			BehaviorCreator: func(actor gactor.CActor) gactor.CActorBehavior {
 				return actors.NewUser(actor)
 			},
-		},
-			gactor.WithMaxAsyncRPCAmount(1),
-		),
+		}),
 		gactor.NewActorDefine(gactor.ActorDefineConfig{
 			Name:           "server",
 			Category:       actors.CategoryServer,

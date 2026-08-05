@@ -10,27 +10,25 @@ import (
 
 var Defines = []gactor.ActorDefine{
 	gactor.NewCActorDefine(gactor.CActorDefineConfig{
-		Name:           consts.CategoryNameUser,
-		Category:       consts.CategoryUser,
-		Priority:       consts.CategoryPriorityUser,
-		MessageBoxSize: 10,
-		RecycleTime:    10 * time.Second,
+		Name:              consts.CategoryNameUser,
+		Category:          consts.CategoryUser,
+		Priority:          consts.CategoryPriorityUser,
+		PriMessageBoxSize: 10,
+		MessageBoxSize:    10,
+		RecycleTime:       10 * time.Second,
 		BehaviorCreator: func(c gactor.CActor) gactor.CActorBehavior {
 			return actors.NewUser(c)
 		},
-	},
-		gactor.WithMaxAsyncRPCAmount(1),
-	),
+	}),
 
 	gactor.NewActorDefine(gactor.ActorDefineConfig{
-		Name:           consts.CategoryNameServer,
-		Category:       consts.CategoryServer,
-		Priority:       consts.CategoryPriorityServer,
-		MessageBoxSize: 100,
+		Name:              consts.CategoryNameServer,
+		Category:          consts.CategoryServer,
+		Priority:          consts.CategoryPriorityServer,
+		PriMessageBoxSize: 10,
+		MessageBoxSize:    100,
 		BehaviorCreator: func(a gactor.Actor) gactor.ActorBehavior {
 			return actors.NewServer(a)
 		},
-	},
-		gactor.WithMaxAsyncRPCAmount(10),
-	),
+	}),
 }

@@ -89,20 +89,18 @@ func newActorTimerTestServiceWithTimeSystem(t *testing.T, ts TimeSystem) (*Servi
 		ActorConfig: ActorConfig{
 			ActorDefines: []ActorDefine{
 				NewActorDefine(ActorDefineConfig{
-					Name:           "actor-timer-test",
-					Category:       1,
-					Priority:       1,
-					MessageBoxSize: 16,
+					Name:              "actor-timer-test",
+					Category:          1,
+					Priority:          1,
+					PriMessageBoxSize: 16,
+					MessageBoxSize:    16,
 					BehaviorCreator: func(a Actor) ActorBehavior {
 						return &actorTimerTestBehavior{
 							Actor: a,
 							state: state,
 						}
 					},
-				},
-					WithMaxTimerAmount(8),
-					WithMaxAsyncRPCAmount(8),
-				),
+				}),
 			},
 			Handler: func(ctx *Context) {
 				_ = ctx.Reply(nil)

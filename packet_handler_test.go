@@ -106,10 +106,11 @@ func newPacketHandlerTestService(t *testing.T, started bool, enableAck bool) (*S
 		ActorConfig: ActorConfig{
 			ActorDefines: []ActorDefine{
 				NewActorDefine(ActorDefineConfig{
-					Name:           "packet-handler-test",
-					Category:       1,
-					Priority:       1,
-					MessageBoxSize: 8,
+					Name:              "packet-handler-test",
+					Category:          1,
+					Priority:          1,
+					PriMessageBoxSize: 8,
+					MessageBoxSize:    8,
 					BehaviorCreator: func(a Actor) ActorBehavior {
 						return &packetHandlerTestActor{Actor: a}
 					},

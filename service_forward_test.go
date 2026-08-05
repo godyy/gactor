@@ -150,20 +150,22 @@ func newForwardTestServiceWithCodec(t *testing.T, nodeId string, registry *testA
 		ActorConfig: ActorConfig{
 			ActorDefines: []ActorDefine{
 				NewActorDefine(ActorDefineConfig{
-					Name:           "forward-test-actor",
-					Category:       1,
-					Priority:       1,
-					MessageBoxSize: 8,
+					Name:              "forward-test-actor",
+					Category:          1,
+					Priority:          1,
+					PriMessageBoxSize: 8,
+					MessageBoxSize:    8,
 					BehaviorCreator: func(a Actor) ActorBehavior {
 						return &forwardTestActor{Actor: a}
 					},
 				}),
 				NewCActorDefine(CActorDefineConfig{
-					Name:           "forward-test-cactor",
-					Category:       2,
-					Priority:       1,
-					MessageBoxSize: 8,
-					RecycleTime:    time.Minute,
+					Name:              "forward-test-cactor",
+					Category:          2,
+					Priority:          1,
+					PriMessageBoxSize: 8,
+					MessageBoxSize:    8,
+					RecycleTime:       time.Minute,
 					BehaviorCreator: func(a CActor) CActorBehavior {
 						return &forwardTestCActor{CActor: a}
 					},

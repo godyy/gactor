@@ -42,16 +42,15 @@ func TestService(t *testing.T) {
 
 	actorDefines := []ActorDefine{
 		NewActorDefine(ActorDefineConfig{
-			Name:           "test",
-			Category:       1,
-			Priority:       1,
-			MessageBoxSize: 1000,
+			Name:              "test",
+			Category:          1,
+			Priority:          1,
+			PriMessageBoxSize: 10,
+			MessageBoxSize:    1000,
 			BehaviorCreator: func(a Actor) ActorBehavior {
 				return &testActor{Actor: a}
 			},
-		},
-			WithMaxAsyncRPCAmount(1),
-		),
+		}),
 	}
 
 	actorAmount := 10
