@@ -10,9 +10,6 @@ import (
 	"github.com/godyy/gutils/container/heap"
 )
 
-// ErrRPCTimeout RPC 超时错误.
-var ErrRPCTimeout = errors.New("gactor: rpc timeout")
-
 // errRPCCallDuplicate RPC 调用重复错误.
 var errRPCCallDuplicate = errors.New("gactor: rpc call duplicate")
 
@@ -201,7 +198,6 @@ func (m *rpcManager) enqueueCmd(c rpcCmd, ignoreBusy bool) error {
 		case m.chCmds <- c:
 			if cost := time.Since(begin); cost > m.svc.getCfg().QueueWriteTimeAlarmThreshold {
 				m.svc.getLogger().Warnf("rpc enqueue slowly, cost:%dms", cost.Milliseconds())
-				return ErrRPCTimeout
 			}
 			return nil
 		case <-chStop:
@@ -296,7 +292,7 @@ func (m *rpcManager) tick() {
 		}
 
 		m.rem(call)
-		m.handleCallDone(call, nil, ErrRPCTimeout)
+		m.handleCallDone(call, nil, ErrTimeout)
 	}
 }
 
@@ -346,7 +342,7 @@ func (m *rpcManager) handleCallDone(call *rpcCall, payload *Buffer, err error) {
 	// 更新监控数据.
 	if err == nil {
 		m.svc.monitorRPCAction(MonitorCARPC)
-	} else if errors.Is(err, ErrRPCTimeout) {
+	} else if errors.Is(err, ErrTimeout) {
 		m.svc.monitorRPCAction(MonitorCARPCTimeout)
 	} else {
 		m.svc.monitorRPCAction(MonitorCAResponseErr)

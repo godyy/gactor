@@ -6,6 +6,9 @@ import (
 	"unsafe"
 )
 
+// ErrTimeout 超时错误.
+var ErrTimeout = errors.New("gactor: timeout")
+
 // ErrCode 错误码.
 type ErrCode uint16
 

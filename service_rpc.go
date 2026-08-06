@@ -43,7 +43,7 @@ func (s *Service) doRPC(from ActorUID, to ActorUID, params any, cb RPCFunc, dead
 
 	// 检查deadline
 	if !deadline.After(time.Now()) {
-		return 0, ErrRPCTimeout
+		return 0, ErrTimeout
 	}
 
 	// 检查服务状态
@@ -60,7 +60,7 @@ func (s *Service) doRPC(from ActorUID, to ActorUID, params any, cb RPCFunc, dead
 
 	// 再次检查deadline.
 	if !deadline.After(time.Now()) {
-		return 0, ErrRPCTimeout
+		return 0, ErrTimeout
 	}
 
 	// 创建 RPC 调用实例.
@@ -85,7 +85,7 @@ func (s *Service) doRPC(from ActorUID, to ActorUID, params any, cb RPCFunc, dead
 
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
-			err = ErrRPCTimeout
+			err = ErrTimeout
 			return
 		}
 
