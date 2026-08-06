@@ -667,11 +667,22 @@ func (a *actorCore) resetRecycleTimer(stop bool) {
 
 // StartTimer 启动定时器.
 func (a *actorCore) StartTimer(d time.Duration, periodic bool, args any, cb ActorTimerFunc) TimerId {
-	if a.checkStarted() != nil {
-		return TimerIdNone
-	}
+	return a.startTimer(d, periodic, args, cb, false)
+}
 
-	return a.svc.startActorTimer(a.ActorUID(), d, periodic, args, cb)
+// startTimer 启动定时器.
+// notStopped 是否在未停止时启动.
+func (a *actorCore) startTimer(d time.Duration, periodic bool, args any, cb ActorTimerFunc, notStopped bool) TimerId {
+	if notStopped {
+		if err := a.checkNotStopped(); err != nil {
+			return TimerIdNone
+		}
+	} else {
+		if err := a.checkStarted(); err != nil {
+			return TimerIdNone
+		}
+	}
+	return a.svc.startActorTimer(a.ActorUID(), d, periodic, args, cb, notStopped)
 }
 
 // StopTimer 停止定时器.

@@ -75,13 +75,26 @@ func (s *Service) stopTimeWheel() {
 }
 
 // StartTimer 启动定时器.
+// Service 一旦开始停机, 调用无效.
 func (s *Service) StartTimer(d time.Duration, periodic bool, args any, cb TimerFunc) TimerId {
+	return s.startTimer(d, periodic, args, cb, false)
+}
+
+// startTimer 启动定时器.
+// notStopped 是否在未停止状态下启动定时器.
+func (s *Service) startTimer(d time.Duration, periodic bool, args any, cb TimerFunc, notStopped bool) TimerId {
 	if cb == nil {
 		panic("gactor: cb is nil")
 	}
 
-	if s.checkStarted() != nil {
-		return TimerIdNone
+	if notStopped {
+		if s.checkNotStopped() != nil {
+			return TimerIdNone
+		}
+	} else {
+		if s.checkStarted() != nil {
+			return TimerIdNone
+		}
 	}
 
 	s.mtxTimer.RLock()
@@ -105,11 +118,11 @@ func (s *Service) StartTimer(d time.Duration, periodic bool, args any, cb TimerF
 }
 
 // StopTimer 停止定时器.
+// 只要 Service 未完全停止, 就可以调用.
 func (s *Service) StopTimer(tid TimerId) {
-	if s.checkStarted() != nil {
+	if s.checkNotStopped() != nil {
 		return
 	}
-
 	if s.timeWheel.RemoveTimer(tid) {
 		// 更新监控数据.
 		s.monitorStopTimerAmount(s.timeWheel.RemoveAmount())
@@ -124,16 +137,16 @@ type actorTimerArgs struct {
 }
 
 // startActorTimer 启动 Actor 定时器.
-func (s *Service) startActorTimer(uid ActorUID, d time.Duration, periodic bool, args any, cb ActorTimerFunc) TimerId {
+func (s *Service) startActorTimer(uid ActorUID, d time.Duration, periodic bool, args any, cb ActorTimerFunc, notStopped bool) TimerId {
 	if cb == nil {
 		panic("gactor: cb is nil")
 	}
 
-	return s.StartTimer(d, periodic, actorTimerArgs{
+	return s.startTimer(d, periodic, actorTimerArgs{
 		uid:  uid,
 		cb:   cb,
 		args: args,
-	}, s.execActorTimer)
+	}, s.execActorTimer, notStopped)
 }
 
 // execActorTimer 执行 Actor 定时器.
