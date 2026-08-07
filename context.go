@@ -108,9 +108,26 @@ func (c *Context) isSuspend() bool {
 	return c.suspendFlag > 0
 }
 
+// resumeAndNext 恢复并继续执行.
+func (c *Context) resumeAndNext() {
+	// 恢复状态.
+	if !c.resume() {
+		return
+	}
+
+	// 恢复成功, 则继续执行 Handler.
+	c.Next()
+
+	// 执行 Handler 后, 若 ctx 未挂起.
+	// 回收.
+	if !c.isSuspend() {
+		c.release(nil)
+	}
+}
+
 // Next 执行下一个 Handler.
 func (c *Context) Next() {
-	if c.suspendFlag > 0 || c.handlerIdx >= int8(len(c.handlers)-1) {
+	if c.isSuspend() || c.handlerIdx >= int8(len(c.handlers)-1) {
 		return
 	}
 
@@ -162,19 +179,8 @@ func (f *contextAsyncRPCFunc) invoke(a Actor, resp RPCResp) {
 	// 优先执行回调.
 	f.cb(f.ctx, resp)
 
-	// 恢复状态.
-	if !f.ctx.resume() {
-		return
-	}
-
-	// 恢复成功, 则继续执行 Handler.
-	f.ctx.Next()
-
-	// 执行 Handler 后, 若 ctx 未挂起.
-	// 回收.
-	if !f.ctx.isSuspend() {
-		f.ctx.release(nil)
-	}
+	// 恢复并继续执行.
+	f.ctx.resumeAndNext()
 }
 
 // AsyncRPCWithDeadline 基于 Context 的异步 RPC 调用.
@@ -230,6 +236,28 @@ func (c *Context) AsyncRPCWithContext(ctx context.Context, to ActorUID, params a
 // Cast Service.cast 的快捷方式.
 func (c *Context) Cast(to ActorUID, payload any) error {
 	return c.svc.cast(c.actor.ActorUID(), to, payload)
+}
+
+// ContextFunc 基于 Context 的回调函数.
+type ContextFunc func(ctx *Context, args any, err error)
+
+// AsyncCall 基于 Context 的异步调用.
+func (c *Context) AsyncCall(f ContextFunc, timeout time.Duration) (ActorAsyncCaller, error) {
+	c.suspend()
+	af := func(a Actor, args any, err error) {
+		// 调用回调.
+		c.actor = a.(actorImpl)
+		f(c, args, err)
+
+		// 恢复并继续执行.
+		c.resumeAndNext()
+	}
+	caller, err := c.actor.AsyncCall(af, timeout)
+	if err != nil {
+		c.resume()
+		return nil, err
+	}
+	return caller, nil
 }
 
 // Clone 复制 Context.

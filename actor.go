@@ -60,7 +60,11 @@ type ActorTimerFunc func(args ActorTimerArgs)
 type ActorRPCFunc func(a Actor, resp RPCResp)
 
 // ActorFunc Actor 回调函数.
-type ActorFunc func(a Actor, args any)
+type ActorFunc func(a Actor, args any, err error)
+
+// ActorAsyncCaller Actor 异步函数调用器.
+// 通过调用该函数, 通知 Actor 调用相应的回调函数.
+type ActorAsyncCaller func(args any, err error) error
 
 // Actor 封装 Actor 接口.
 type Actor interface {
@@ -117,6 +121,12 @@ type Actor interface {
 
 	// Forward 向 to 指向的 Actor 透传消息.
 	Forward(to ActorUID, payload any) error
+
+	// AsyncCall 异步调用.
+	// timeout 为超时间隔.
+	// 返回 ActorFuncCaller, 用于调用该回调函数.
+	// 如果返回的调用函数在 timeout 内未被调用, 则系统自动使用 ErrTimeout 错误调用回调函数.
+	AsyncCall(f ActorFunc, timeout time.Duration) (ActorAsyncCaller, error)
 }
 
 // CActorBehavior CActor 行为.

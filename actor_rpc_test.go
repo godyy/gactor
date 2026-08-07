@@ -2,6 +2,7 @@ package gactor
 
 import (
 	"testing"
+	"time"
 )
 
 type actorRPCTestState struct{}
@@ -17,6 +18,16 @@ func (a *actorRPCTestBehavior) OnStop() error  { return nil }
 type actorRPCTestStub struct {
 	*actorCore
 	behavior ActorBehavior
+}
+
+func (a *actorRPCTestStub) AsyncCall(f ActorFunc, timeout time.Duration) (ActorAsyncCaller, error) {
+	return nil, nil
+}
+
+func (a *actorRPCTestStub) onAsyncCallTimeout(args ActorTimerArgs) {
+}
+
+func (a *actorRPCTestStub) invokeAsyncCall(id TimerId, args any, err error) {
 }
 
 func newActorRPCTestStub(t *testing.T) (*Service, *actorRPCTestStub) {

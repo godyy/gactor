@@ -77,6 +77,10 @@ type contextRequestTestActor struct {
 	lastAsyncCallback   ActorRPCFunc
 	asyncErr            error
 	asyncDeadlineErr    error
+	asyncCallCalled     bool
+	asyncCallTimeout    time.Duration
+	lastAsyncCall       ActorFunc
+	asyncCallErr        error
 }
 
 func (a *contextRequestTestActor) core() *actorCore { return nil }
@@ -139,6 +143,27 @@ func (a *contextRequestTestActor) Cast(to ActorUID, payload any) error {
 
 func (a *contextRequestTestActor) Forward(to ActorUID, payload any) error {
 	return nil
+}
+
+func (a *contextRequestTestActor) receiveAsyncCall(id uint32, args any, err error) error { return nil }
+
+func (a *contextRequestTestActor) AsyncCall(f ActorFunc, timeout time.Duration) (ActorAsyncCaller, error) {
+	a.asyncCallCalled = true
+	a.asyncCallTimeout = timeout
+	a.lastAsyncCall = f
+	if a.asyncCallErr != nil {
+		return nil, a.asyncCallErr
+	}
+	return func(args any, err error) error {
+		f(a, args, err)
+		return nil
+	}, nil
+}
+
+func (a *contextRequestTestActor) onAsyncCallTimeout(args ActorTimerArgs) {
+}
+
+func (a *contextRequestTestActor) invokeAsyncCall(id uint32, args any, err error) {
 }
 
 type contextRequestTestCBehavior struct {
@@ -318,6 +343,90 @@ func TestContextReplyDecodeErrorForwardsToRequest(t *testing.T) {
 	}
 	if req.replyCount != 0 {
 		t.Fatalf("replyCount = %d, want 0", req.replyCount)
+	}
+}
+
+func TestContextAsyncCallSuspendsAndResumes(t *testing.T) {
+	req := &contextRequestTestRequest{rt: RequestTypeReq}
+	actor := &contextRequestTestActor{uid: ActorUID{Category: 1, ID: 1}}
+	nextCalled := false
+	ctx := &Context{
+		svc:   &Service{},
+		req:   req,
+		actor: actor,
+		handlers: []HandlerFunc{
+			func(ctx *Context) {},
+			func(ctx *Context) {
+				nextCalled = true
+			},
+		},
+		handlerIdx: 0,
+	}
+
+	wantErr := errors.New("async call done")
+	var gotActorUID ActorUID
+	var gotArgs any
+	var gotErr error
+
+	caller, err := ctx.AsyncCall(func(ctx *Context, args any, err error) {
+		gotActorUID = ctx.Actor().ActorUID()
+		gotArgs = args
+		gotErr = err
+	}, time.Second)
+	if err != nil {
+		t.Fatalf("context async call: %v", err)
+	}
+	if !ctx.isSuspend() {
+		t.Fatal("expected context suspended after AsyncCall")
+	}
+	if !actor.asyncCallCalled {
+		t.Fatal("expected actor AsyncCall called")
+	}
+	if actor.asyncCallTimeout != time.Second {
+		t.Fatalf("async call timeout = %v, want %v", actor.asyncCallTimeout, time.Second)
+	}
+
+	if err := caller("payload", wantErr); err != nil {
+		t.Fatalf("invoke async caller: %v", err)
+	}
+
+	if ctx.isSuspend() {
+		t.Fatal("expected context resumed after async callback")
+	}
+	if gotActorUID != actor.uid {
+		t.Fatalf("callback actor uid = %v, want %v", gotActorUID, actor.uid)
+	}
+	if gotArgs != "payload" {
+		t.Fatalf("callback args = %v, want payload", gotArgs)
+	}
+	if !errors.Is(gotErr, wantErr) {
+		t.Fatalf("callback err = %v, want %v", gotErr, wantErr)
+	}
+	if !nextCalled {
+		t.Fatal("expected next handler executed after async callback")
+	}
+	if ctx.req != nil || ctx.actor != nil || ctx.handlers != nil {
+		t.Fatal("expected context released after callback")
+	}
+}
+
+func TestContextAsyncCallErrorResetsSuspend(t *testing.T) {
+	req := &contextRequestTestRequest{rt: RequestTypeReq}
+	actor := &contextRequestTestActor{
+		uid:          ActorUID{Category: 1, ID: 1},
+		asyncCallErr: errors.New("async call failed"),
+	}
+	ctx := &Context{req: req, actor: actor}
+
+	_, err := ctx.AsyncCall(func(ctx *Context, args any, err error) {}, time.Second)
+	if err == nil || err.Error() != "async call failed" {
+		t.Fatalf("context async call err = %v, want async call failed", err)
+	}
+	if ctx.isSuspend() {
+		t.Fatal("expected context suspend reset after AsyncCall error")
+	}
+	if !actor.asyncCallCalled {
+		t.Fatal("expected actor AsyncCall called")
 	}
 }
 

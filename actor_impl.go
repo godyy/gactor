@@ -21,8 +21,14 @@ type actorImpl interface {
 	stop(shutdown bool) error
 	stopped()
 
-	// receiveFunc 接收回调函数.
-	receiveFunc(f ActorFunc, args any) error
+	// receiveAsyncCall 接收异步调用参数.
+	receiveAsyncCall(id uint32, args any, err error) error
+
+	// invokeAsyncCall 调用异步调用.
+	invokeAsyncCall(id uint32, args any, err error)
+
+	// onAsyncCallTimeout 异步调用超时.
+	onAsyncCallTimeout(ActorTimerArgs)
 }
 
 // actorStart Actor 启动逻辑.
@@ -135,13 +141,11 @@ actor_loop_for:
 		}
 
 		// 检查是否可以停止.
-		if err := actorCheckCouldStopped(a); err != nil {
-			if errors.Is(err, errActorBeReferenced) || errors.Is(err, errActorMessageNotDrained) {
-				runtime.Gosched()
-				continue
-			}
-
+		if conti, err := actorCheckCouldStopped(a); err != nil {
 			core.getLogger().ErrorFields("check could stopped failed", lfdError(err))
+		} else if conti {
+			runtime.Gosched()
+			continue
 		}
 
 		actorStopped(a)
@@ -165,23 +169,29 @@ func actorStopWithErr(a actorImpl, err error) {
 }
 
 // actorCheckCouldStopped 检查 Actor 是否能够停机.
-func actorCheckCouldStopped(a actorImpl) error {
+// 若 Actor 被引用, 或有消息没处理完, 或存在未完成的异步调用,
+// conti 返回 true, 表示需要继续等待; 否则 conti 返回 false, 表示可以停机.
+// 若检查状态失败, 返回相应错误.
+func actorCheckCouldStopped(a actorImpl) (conti bool, err error) {
 	core := a.core()
 
 	if err := core.lockState(actorStateStopping, true); err != nil {
-		return err
+		return false, err
 	}
 
 	defer core.unlock(true)
 
 	if core.refCount > 0 {
-		return errActorBeReferenced
+		return true, nil
 	}
 	if len(core.priMessageBox) > 0 || core.messageBox.Size() > 0 {
-		return errActorMessageNotDrained
+		return true, nil
+	}
+	if len(core.asyncCalls) > 0 {
+		return true, nil
 	}
 
-	return nil
+	return false, nil
 }
 
 // actorStopped Actor 最终停机逻辑.
@@ -327,8 +337,8 @@ var (
 	// errActorMessageNotDrained 表示 Actor 消息未被处理完.
 	errActorMessageNotDrained = errors.New("gactor: actor message not drained")
 
-	// errActorAsyncRPCLimitExceeded 表示异步RPC调用数量已达到上限
-	errActorAsyncRPCLimitExceeded = errors.New("gactor: actor async rpc amount exceeded limit")
+	// errActorHasAsyncCalls 表示 Actor 有未完成的异步调用.
+	errActorHasAsyncCalls = errors.New("gactor: actor has async calls")
 )
 
 // ErrIsActorStop error 是否表示 Actor 停机.
@@ -365,18 +375,26 @@ const (
 	actorFlagShutdown = int8(1 << 0)
 )
 
+// actorAsyncCall Actor 异步调用.
+type actorAsyncCall struct {
+	f          ActorFunc // 异步调用方法.
+	timeoutTid TimerId   // 超时定时器ID.
+}
+
 // actorCore Actor 内部核心实现.
 type actorCore struct {
-	*actorDefineBase                       // 集成 actorDefineBase.
-	id               ActorID               // Actor 分类实例ID.
-	leaseID          string                // 租约ID.
-	svc              *Service              // 隶属的 Service.
-	priMessageBox    chan message          // 优先信箱，用于处理高优先级消息.
-	messageBox       *gmpsc.Queue[message] // 信箱.
-	messageNotify    chan struct{}         // 信箱通知.
-	waitMessage      atomic.Bool           // 是否等待消息.
-	sigStop          chan struct{}         // 停机信号.
-	logger           glog.Logger           // 日志工具.
+	*actorDefineBase                           // 集成 actorDefineBase.
+	id               ActorID                   // Actor 分类实例ID.
+	leaseID          string                    // 租约ID.
+	svc              *Service                  // 隶属的 Service.
+	priMessageBox    chan message              // 优先信箱，用于处理高优先级消息.
+	messageBox       *gmpsc.Queue[message]     // 信箱.
+	messageNotify    chan struct{}             // 信箱通知.
+	waitMessage      atomic.Bool               // 是否等待消息.
+	asyncCallId      uint32                    // 异步调用ID.
+	asyncCalls       map[uint32]actorAsyncCall // 异步调用.
+	sigStop          chan struct{}             // 停机信号.
+	logger           glog.Logger               // 日志工具.
 
 	mtx              sync.RWMutex // 读写锁.
 	state            int8         // 状态.
@@ -587,7 +605,7 @@ func (a *actorCore) stopped(f func()) {
 
 // ref 引用.
 func (a *actorCore) ref() error {
-	if err := a.lockState(actorStateStarted, false); err != nil {
+	if err := a.lockNotStopped(false); err != nil {
 		return err
 	}
 	defer a.unlock(false)
@@ -709,19 +727,41 @@ func (a *actorCore) receiveTriggerdTimer(tid TimerId, args any, cb ActorTimerFun
 	}
 }
 
-// receiveFunc 接收回调函数.
-func (a *actorCore) receiveFunc(f ActorFunc, args any) error {
+// receiveAsyncCall 接收异步调用参数.
+func (a *actorCore) receiveAsyncCall(id uint32, args any, err error) error {
 	if err := a.checkNotStopped(); err != nil {
 		return err
 	}
 
-	msg := newMessageFunc(f, args)
+	msg := newMessageAsyncCall(id, args, err)
 	begin := time.Now()
 	a.priMessageBox <- msg
 	if d := time.Now().Sub(begin); d > a.svc.getCfg().QueueWriteTimeAlarmThreshold {
-		a.getLogger().Warnf("receiveFunc cost:%dms", d.Milliseconds())
+		a.getLogger().Warnf("receiveAsyncCall cost:%dms", d.Milliseconds())
 	}
 	return nil
+}
+
+// invokeAsyncCall 调用异步调用.
+func (a *actorCore) invokeAsyncCall(ai actorImpl, id uint32, args any, err error) {
+	if err := a.checkNotStopped(); err != nil {
+		return
+	}
+	if a.asyncCalls == nil {
+		return
+	}
+	asyncCall, ok := a.asyncCalls[id]
+	if !ok {
+		return
+	}
+	delete(a.asyncCalls, id)
+	if len(a.asyncCalls) == 0 {
+		a.asyncCalls = nil
+	}
+	if !errors.Is(err, ErrTimeout) {
+		a.StopTimer(asyncCall.timeoutTid)
+	}
+	asyncCall.f(ai, args, err)
 }
 
 // RPCWithDeadline 发起同步 RPC 调用.
@@ -832,6 +872,50 @@ func (a *actorCore) Forward(to ActorUID, payload any) error {
 	return a.svc.forward(a.ActorUID(), to, payload)
 }
 
+// actorFuncCaller 回调函数调用函数.
+type actorFuncCaller struct {
+	svc *Service // 所属服务
+	uid ActorUID // Actor ID
+	id  uint32   // 异步调用 ID
+}
+
+func (c *actorFuncCaller) invoke(args any, err error) error {
+	return c.svc.asyncCallActorFunc(c.uid, c.id, args, err)
+}
+
+// nextAsyncCallId 获取下一个异步调用 ID.
+func (a *actorCore) nextAsyncCallId() uint32 {
+	a.asyncCallId++
+	return a.asyncCallId
+}
+
+// asyncCall 发起异步调用.
+func (a *actorCore) asyncCall(ai actorImpl, f ActorFunc, timeout time.Duration) (ActorAsyncCaller, error) {
+	if err := a.checkNotStopped(); err != nil {
+		return nil, err
+	}
+
+	callId := a.nextAsyncCallId()
+	timeoutTid := a.startTimer(timeout, false, callId, ai.onAsyncCallTimeout, true)
+	if timeoutTid == TimerIdNone {
+		return nil, errActorStopped
+	}
+
+	if a.asyncCalls == nil {
+		a.asyncCalls = make(map[uint32]actorAsyncCall)
+	}
+	a.asyncCalls[callId] = actorAsyncCall{
+		f:          f,
+		timeoutTid: timeoutTid,
+	}
+	caller := &actorFuncCaller{
+		svc: a.svc,
+		uid: a.ActorUID(),
+		id:  callId,
+	}
+	return caller.invoke, nil
+}
+
 // actor Actor 内部实现.
 type actor struct {
 	*actorCore
@@ -861,6 +945,18 @@ func (a *actor) Behavior() ActorBehavior {
 	return a.behavior
 }
 
+func (a *actor) AsyncCall(f ActorFunc, timeout time.Duration) (ActorAsyncCaller, error) {
+	return a.actorCore.asyncCall(a, f, timeout)
+}
+
+func (a *actor) onAsyncCallTimeout(args ActorTimerArgs) {
+	a.invokeAsyncCall(args.Args.(uint32), nil, ErrTimeout)
+}
+
+func (a *actor) invokeAsyncCall(id uint32, args any, err error) {
+	a.actorCore.invokeAsyncCall(a, id, args, err)
+}
+
 // cactor CActor 内部实现.
 type cactor struct {
 	*actorCore
@@ -886,6 +982,18 @@ func (a *cactor) onStopped() {
 
 func (a *cactor) Behavior() ActorBehavior {
 	return a.behavior
+}
+
+func (a *cactor) AsyncCall(f ActorFunc, timeout time.Duration) (ActorAsyncCaller, error) {
+	return a.actorCore.asyncCall(a, f, timeout)
+}
+
+func (a *cactor) onAsyncCallTimeout(args ActorTimerArgs) {
+	a.invokeAsyncCall(args.Args.(uint32), nil, ErrTimeout)
+}
+
+func (a *cactor) invokeAsyncCall(id uint32, args any, err error) {
+	a.actorCore.invokeAsyncCall(a, id, args, err)
 }
 
 func (a *cactor) Session() ActorSession {

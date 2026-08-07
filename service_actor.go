@@ -550,9 +550,8 @@ func (s *Service) Cast(to ActorUID, payload any) error {
 	return s.cast(ActorUID{}, to, payload)
 }
 
-// ReceiveActorFunc 接收 Actor 回调函数.
-// 不会唤醒Actor, 若 Actor 不存在, 返回错误.
-func (s *Service) ReceiveActorFunc(uid ActorUID, f ActorFunc, args any) error {
+// asyncCallActorFunc 异步调用 Actor 回调函数.
+func (s *Service) asyncCallActorFunc(uid ActorUID, id uint32, args any, err error) error {
 	// 引用 Actor
 	actor, err := s.refActor(uid)
 	if err != nil {
@@ -563,7 +562,7 @@ func (s *Service) ReceiveActorFunc(uid ActorUID, f ActorFunc, args any) error {
 	}
 	defer actor.core().deref()
 
-	return actor.receiveFunc(f, args)
+	return actor.receiveAsyncCall(id, args, err)
 }
 
 // makeClientActorUID 构造客户端通信的目标ActorUID

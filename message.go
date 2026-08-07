@@ -221,29 +221,31 @@ func (m *messageTriggeredTimer) release(a actorImpl) {}
 // discard 在消息未进入 Actor 信箱时回收资源.
 func (m *messageTriggeredTimer) discard(s *Service) {}
 
-// messageFunc 封装函数消息.
-type messageFunc struct {
-	f    ActorFunc
+// messageAsynnCall 异步调用消息.
+type messageAsynnCall struct {
+	id   uint32
 	args any
+	err  error
 }
 
-func newMessageFunc(f ActorFunc, args any) *messageFunc {
-	return &messageFunc{
-		f:    f,
+func newMessageAsyncCall(id uint32, args any, err error) *messageAsynnCall {
+	return &messageAsynnCall{
+		id:   id,
 		args: args,
+		err:  err,
 	}
 }
 
 // handle 处理消息.
-func (m *messageFunc) handle(a actorImpl) {
-	m.f(a, m.args)
+func (m *messageAsynnCall) handle(a actorImpl) {
+	a.core().invokeAsyncCall(a, m.id, m.args, m.err)
 }
 
 // handleError 处理错误.
-func (m *messageFunc) handleError(a actorImpl, err error) {}
+func (m *messageAsynnCall) handleError(a actorImpl, err error) {}
 
 // release 在消息经由 Actor 处理完成后回收资源.
-func (m *messageFunc) release(a actorImpl) {}
+func (m *messageAsynnCall) release(a actorImpl) {}
 
 // discard 在消息未进入 Actor 信箱时回收资源.
-func (m *messageFunc) discard(s *Service) {}
+func (m *messageAsynnCall) discard(s *Service) {}
