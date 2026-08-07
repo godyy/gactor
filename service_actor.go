@@ -196,7 +196,7 @@ func (s *Service) getCategoryActorsByCategory(category ActorCategory) *categoryA
 
 // startActor 启动 uid 指定的 Actor.
 // 如果 leaseId 为空, 需要同时注册 Actor.
-func (s *Service) startActor(uid ActorUID, leaeId string) (actorImpl, error) {
+func (s *Service) startActor(uid ActorUID, leaseId string) (actorImpl, error) {
 	// 检查装运行状态
 	if err := s.checkStarted(); err != nil {
 		return nil, err
@@ -214,21 +214,15 @@ func (s *Service) startActor(uid ActorUID, leaeId string) (actorImpl, error) {
 	var starter *actorStarter
 
 	for starter == nil {
-		categoryActors.lock(true)
-
 		// 优先尝试引用当前有效的 Actor.
 		if actor, err := categoryActors.refActor(uid.ID); err != nil {
-			categoryActors.unlock(true)
 			return nil, err
 		} else if actor != nil {
-			categoryActors.unlock(true)
 			return actor, nil
 		}
 
 		// 优先获取当前正有效的启动器.
 		starter = categoryActors.getStarter(uid.ID)
-
-		categoryActors.unlock(true)
 
 		// 当前无有效启动器.
 		if starter == nil {
@@ -237,7 +231,7 @@ func (s *Service) startActor(uid ActorUID, leaeId string) (actorImpl, error) {
 
 			starter = &actorStarter{
 				uid:     uid,
-				leaseId: leaeId,
+				leaseId: leaseId,
 				done:    make(chan struct{}, 1),
 			}
 			actual, loaded := categoryActors.addStarter(uid.ID, starter)
@@ -260,9 +254,15 @@ func (s *Service) startActor(uid ActorUID, leaeId string) (actorImpl, error) {
 				s.updateMaxActorPriorityIndex(priorityIndex)
 				s.mtxActor.Unlock()
 
+				// 再次确认 actor 是否已经存在，用于兜住 addStarter 前后的竞态窗口。
+				if actor, err := categoryActors.refActor(uid.ID); actor != nil || err != nil {
+					starter.complete(actor, err)
+					categoryActors.delStarter(uid.ID)
+				}
+
 				// 若当前不存在相同 id 的正在停机的 Actor, 执行启动逻辑.
 				// 否则, 等待 Actor 停机完成再出发启动逻辑.
-				if !categoryActors.isActorStopping(uid.ID) {
+				if !starter.isCompleted() && !categoryActors.isActorStopping(uid.ID) {
 					starter.start(s)
 				}
 			}
@@ -304,8 +304,6 @@ func (s *Service) refActor(uid ActorUID) (actorImpl, error) {
 
 	// 获取 Actor 分类集合.
 	categoryActors := s.getCategoryActors(defineBase.priority, defineBase.category)
-	categoryActors.lock(true)
-	defer categoryActors.unlock(true)
 
 	// 引用 Actor.
 	actor, err := categoryActors.refActor(uid.ID)
@@ -332,8 +330,6 @@ func (s *Service) getActor(uid ActorUID) (actorImpl, error) {
 
 	// 获取 Actor 分类集合.
 	categoryActors := s.getCategoryActors(defineBase.priority, defineBase.category)
-	categoryActors.lock(true)
-	defer categoryActors.unlock(true)
 
 	// 获取 Actor.
 	actor := categoryActors.getActor(uid.ID)
@@ -390,7 +386,8 @@ func (s *Service) resolveNodeOfActor(mode int, uid ActorUID) (nodeId string, lea
 		nodeId = result.NodeId
 
 	case actorNodeModeRouter:
-		location, err := registry.GetActorLocation(uid)
+		var location ActorLocation
+		location, err = registry.GetActorLocation(uid)
 		if location.ExpireAt <= 0 {
 			return location.NodeId, "", nil
 		}
@@ -495,7 +492,7 @@ func (s *Service) cast(from, to ActorUID, payload any) error {
 	)
 
 	// 检查服务状态
-	if err := s.checkNotStopped(); err != nil {
+	if err = s.checkNotStopped(); err != nil {
 		return err
 	}
 
@@ -512,12 +509,12 @@ func (s *Service) cast(from, to ActorUID, payload any) error {
 	// 如果 Actor 位于其它节点.
 	// 编码数据并发送到远端.
 	if toNodeId != s.nodeId() {
-		if err := s.checkNotStopped(); err != nil {
+		if err = s.checkNotStopped(); err != nil {
 			return err
 		}
 
 		ph := newS2SCastHead(seq, from, to)
-		if err := s.sendRemotePacket(toNodeId, &ph, payload); err != nil {
+		if err = s.sendRemotePacket(toNodeId, &ph, payload); err != nil {
 			s.monitorCastActionSend2RemoteErr(err)
 			return err
 		}
@@ -609,8 +606,19 @@ func (s *actorStarter) deref() {
 	}
 }
 
+func (s *actorStarter) isCompleted() bool {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	return s.actor != nil || s.err != nil
+}
+
 // complete 完成逻辑.
 func (s *actorStarter) complete(actor actorImpl, err error) {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	if s.actor != nil || s.err != nil {
+		return
+	}
 	s.actor, s.err = actor, err
 	close(s.done)
 }
@@ -669,9 +677,7 @@ func (s *actorStarter) start(svc *Service) {
 		svc.monitorActorStart(s.uid.Category)
 
 		// 公告 Actor.
-		categoryActors.lock(false)
 		categoryActors.addActor(actor)
-		categoryActors.unlock(false)
 	} else {
 		svc.getLogger().ErrorFields("ref actor failed started", svc.lfdActorUID("uid", s.uid), lfdError(err))
 		actor = nil
@@ -724,7 +730,6 @@ func (s *actorStarter) doStop() {
 
 // categoryActors 聚合同一分类下的所有 Actor.
 type categoryActors struct {
-	mtx           sync.RWMutex                                 // 读写锁.
 	actors        *utils.ConcurrentMap[ActorID, actorImpl]     // 未终止的 Actor.
 	stoppedActors *utils.ConcurrentMap[ActorID, actorImpl]     // 已终止的 Actor.
 	starters      *utils.ConcurrentMap[ActorID, *actorStarter] // 启动器。
@@ -735,22 +740,6 @@ func newCategoryActors() *categoryActors {
 		actors:        &utils.ConcurrentMap[ActorID, actorImpl]{},
 		stoppedActors: &utils.ConcurrentMap[ActorID, actorImpl]{},
 		starters:      &utils.ConcurrentMap[ActorID, *actorStarter]{},
-	}
-}
-
-func (ca *categoryActors) lock(read bool) {
-	if read {
-		ca.mtx.RLock()
-	} else {
-		ca.mtx.Lock()
-	}
-}
-
-func (ca *categoryActors) unlock(read bool) {
-	if read {
-		ca.mtx.RUnlock()
-	} else {
-		ca.mtx.Unlock()
 	}
 }
 

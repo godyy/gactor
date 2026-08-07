@@ -92,8 +92,8 @@ func newActorTimerTestServiceWithTimeSystem(t *testing.T, ts TimeSystem) (*Servi
 					Name:              "actor-timer-test",
 					Category:          1,
 					Priority:          1,
-					PriMessageBoxSize: 16,
-					MessageBoxSize:    16,
+					PriMessageBoxSize: 1000,
+					MessageBoxSize:    1000,
 					BehaviorCreator: func(a Actor) ActorBehavior {
 						return &actorTimerTestBehavior{
 							Actor: a,
@@ -194,10 +194,10 @@ func TestServiceStartActorConcurrentSameUIDStartsOnce(t *testing.T) {
 
 	uid := ActorUID{Category: 1, ID: 1002}
 	start := make(chan struct{})
-	errCh := make(chan error, 16)
+	errCh := make(chan error, 160)
 	var wg sync.WaitGroup
 
-	for range 16 {
+	for range 160 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -221,6 +221,9 @@ func TestServiceStartActorConcurrentSameUIDStartsOnce(t *testing.T) {
 		return err == nil && actor != nil
 	}, "concurrent actor exists")
 	waitCountEventually(t, func() int32 { return atomic.LoadInt32(&state.startCount) }, 1, "concurrent actor start")
+	waitEventually(t, func() bool {
+		return svc.getCategoryActorsByCategory(uid.Category).getStarter(uid.ID) == nil
+	}, "concurrent starter cleared")
 }
 
 func TestServiceStopCallsActorOnStop(t *testing.T) {
