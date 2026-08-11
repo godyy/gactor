@@ -362,3 +362,32 @@ func (kv contextKV) clone() contextKV {
 	}
 	return cp
 }
+
+// ContextSuspender Context 挂起工具.
+type ContextSuspender struct {
+	*Context       // Context.
+	n        int32 // 挂起计数标记.
+}
+
+func NewContextSuspender(c *Context) *ContextSuspender {
+	return &ContextSuspender{
+		Context: c,
+	}
+}
+
+// Suspend 挂起 Context.
+func (c *ContextSuspender) Suspend() *ContextSuspender {
+	c.n++
+	c.Context.suspend()
+	return c
+}
+
+// Resume 恢复 Context.
+func (c *ContextSuspender) Resume() *ContextSuspender {
+	if c.n == 0 {
+		return c
+	}
+	c.n--
+	c.Context.resumeAndNext()
+	return c
+}
