@@ -22,10 +22,10 @@ type actorImpl interface {
 	stopped()
 
 	// receiveAsyncCall 接收异步调用参数.
-	receiveAsyncCall(id uint32, args any, err error) error
+	receiveAsyncCall(id uint32, value any, err error) error
 
 	// invokeAsyncCall 调用异步调用.
-	invokeAsyncCall(id uint32, args any, err error)
+	invokeAsyncCall(id uint32, value any, err error)
 
 	// onAsyncCallTimeout 异步调用超时.
 	onAsyncCallTimeout(ActorTimerArgs)
@@ -661,7 +661,7 @@ func (a *actorCore) receiveCompletedAsyncRPC(resp RPCResp, cb ActorRPCFunc) erro
 
 	begin := time.Now()
 	a.priMessageBox <- msg
-	if d := time.Now().Sub(begin); d > a.svc.getCfg().QueueWriteTimeAlarmThreshold {
+	if d := time.Since(begin); d > a.svc.getCfg().QueueWriteTimeAlarmThreshold {
 		a.getLogger().Warnf("receiveCompletedAsyncRPC cost:%dms", d.Milliseconds())
 	}
 	return nil
@@ -718,7 +718,7 @@ func (a *actorCore) receiveTriggerdTimer(tid TimerId, args any, cb ActorTimerFun
 	begin := time.Now()
 	select {
 	case a.priMessageBox <- msg:
-		if d := time.Now().Sub(begin); d > a.svc.getCfg().QueueWriteTimeAlarmThreshold {
+		if d := time.Since(begin); d > a.svc.getCfg().QueueWriteTimeAlarmThreshold {
 			a.getLogger().Warnf("receive triggerd timer cost:%dms", d.Milliseconds())
 		}
 		return
@@ -728,22 +728,22 @@ func (a *actorCore) receiveTriggerdTimer(tid TimerId, args any, cb ActorTimerFun
 }
 
 // receiveAsyncCall 接收异步调用参数.
-func (a *actorCore) receiveAsyncCall(id uint32, args any, err error) error {
+func (a *actorCore) receiveAsyncCall(id uint32, value any, err error) error {
 	if err := a.checkNotStopped(); err != nil {
 		return err
 	}
 
-	msg := newMessageAsyncCall(id, args, err)
+	msg := newMessageAsyncCall(id, value, err)
 	begin := time.Now()
 	a.priMessageBox <- msg
-	if d := time.Now().Sub(begin); d > a.svc.getCfg().QueueWriteTimeAlarmThreshold {
+	if d := time.Since(begin); d > a.svc.getCfg().QueueWriteTimeAlarmThreshold {
 		a.getLogger().Warnf("receiveAsyncCall cost:%dms", d.Milliseconds())
 	}
 	return nil
 }
 
 // invokeAsyncCall 调用异步调用.
-func (a *actorCore) invokeAsyncCall(ai actorImpl, id uint32, args any, err error) {
+func (a *actorCore) invokeAsyncCall(ai actorImpl, id uint32, value any, err error) {
 	if err := a.checkNotStopped(); err != nil {
 		return
 	}
@@ -761,7 +761,7 @@ func (a *actorCore) invokeAsyncCall(ai actorImpl, id uint32, args any, err error
 	if !errors.Is(err, ErrTimeout) {
 		a.StopTimer(asyncCall.timeoutTid)
 	}
-	asyncCall.f(ai, args, err)
+	asyncCall.f(ActorFuncArgs{Actor: ai, Value: value, Err: err})
 }
 
 // RPCWithDeadline 发起同步 RPC 调用.
@@ -879,8 +879,8 @@ type actorFuncCaller struct {
 	id  uint32   // 异步调用 ID
 }
 
-func (c *actorFuncCaller) invoke(args any, err error) error {
-	return c.svc.asyncCallActorFunc(c.uid, c.id, args, err)
+func (c *actorFuncCaller) invoke(value any, err error) error {
+	return c.svc.asyncCallActorFunc(c.uid, c.id, value, err)
 }
 
 // nextAsyncCallId 获取下一个异步调用 ID.
@@ -953,8 +953,8 @@ func (a *actor) onAsyncCallTimeout(args ActorTimerArgs) {
 	a.invokeAsyncCall(args.Args.(uint32), nil, ErrTimeout)
 }
 
-func (a *actor) invokeAsyncCall(id uint32, args any, err error) {
-	a.actorCore.invokeAsyncCall(a, id, args, err)
+func (a *actor) invokeAsyncCall(id uint32, value any, err error) {
+	a.actorCore.invokeAsyncCall(a, id, value, err)
 }
 
 // cactor CActor 内部实现.
@@ -992,8 +992,8 @@ func (a *cactor) onAsyncCallTimeout(args ActorTimerArgs) {
 	a.invokeAsyncCall(args.Args.(uint32), nil, ErrTimeout)
 }
 
-func (a *cactor) invokeAsyncCall(id uint32, args any, err error) {
-	a.actorCore.invokeAsyncCall(a, id, args, err)
+func (a *cactor) invokeAsyncCall(id uint32, value any, err error) {
+	a.actorCore.invokeAsyncCall(a, id, value, err)
 }
 
 func (a *cactor) Session() ActorSession {

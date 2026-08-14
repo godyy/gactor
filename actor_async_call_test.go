@@ -100,12 +100,12 @@ func TestActorAsyncCallDeliversCallbackOnce(t *testing.T) {
 	var gotArgs any
 	var gotErr error
 
-	caller, err := actor.AsyncCall(func(a Actor, args any, err error) {
+	caller, err := actor.AsyncCall(func(args ActorFuncArgs) {
 		mu.Lock()
 		callCount++
-		gotUID = a.ActorUID()
-		gotArgs = args
-		gotErr = err
+		gotUID = args.Actor.ActorUID()
+		gotArgs = args.Value
+		gotErr = args.Err
 		mu.Unlock()
 		callbackCh <- struct{}{}
 	}, time.Second)
@@ -164,10 +164,10 @@ func TestActorAsyncCallTimeoutOnlyInvokesOnce(t *testing.T) {
 	var callCount int
 	var gotErr error
 
-	caller, err := actor.AsyncCall(func(a Actor, args any, err error) {
+	caller, err := actor.AsyncCall(func(args ActorFuncArgs) {
 		mu.Lock()
 		callCount++
-		gotErr = err
+		gotErr = args.Err
 		mu.Unlock()
 		callbackCh <- struct{}{}
 	}, 50*time.Millisecond)

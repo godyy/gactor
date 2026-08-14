@@ -59,12 +59,19 @@ type ActorTimerFunc func(args ActorTimerArgs)
 // ActorRPCFunc Actor RPC 回调.
 type ActorRPCFunc func(a Actor, resp RPCResp)
 
+// ActorFuncArgs Actor 回调函数参数.
+type ActorFuncArgs struct {
+	Actor Actor // Actor.
+	Value any   // 返回值.
+	Err   error // 错误.
+}
+
 // ActorFunc Actor 回调函数.
-type ActorFunc func(a Actor, args any, err error)
+type ActorFunc func(ActorFuncArgs)
 
 // ActorAsyncCaller Actor 异步函数调用器.
 // 通过调用该函数, 通知 Actor 调用相应的回调函数.
-type ActorAsyncCaller func(args any, err error) error
+type ActorAsyncCaller func(value any, err error) error
 
 // Actor 封装 Actor 接口.
 type Actor interface {

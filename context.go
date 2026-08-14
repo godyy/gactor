@@ -238,16 +238,23 @@ func (c *Context) Cast(to ActorUID, payload any) error {
 	return c.svc.cast(c.actor.ActorUID(), to, payload)
 }
 
+// ContextFuncArgs Context 回调函数参数.
+type ContextFuncArgs struct {
+	Ctx   *Context // Context.
+	Value any      // 返回值.
+	Err   error    // 错误.
+}
+
 // ContextFunc 基于 Context 的回调函数.
-type ContextFunc func(ctx *Context, args any, err error)
+type ContextFunc func(ContextFuncArgs)
 
 // AsyncCall 基于 Context 的异步调用.
 func (c *Context) AsyncCall(f ContextFunc, timeout time.Duration) (ActorAsyncCaller, error) {
 	c.suspend()
-	af := func(a Actor, args any, err error) {
+	af := func(args ActorFuncArgs) {
 		// 调用回调.
-		c.actor = a.(actorImpl)
-		f(c, args, err)
+		c.actor = args.Actor.(actorImpl)
+		f(ContextFuncArgs{Ctx: c, Value: args.Value, Err: args.Err})
 
 		// 恢复并继续执行.
 		c.resumeAndNext()

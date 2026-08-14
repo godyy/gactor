@@ -154,8 +154,8 @@ func (a *contextRequestTestActor) AsyncCall(f ActorFunc, timeout time.Duration) 
 	if a.asyncCallErr != nil {
 		return nil, a.asyncCallErr
 	}
-	return func(args any, err error) error {
-		f(a, args, err)
+	return func(value any, err error) error {
+		f(ActorFuncArgs{Actor: a, Value: value, Err: err})
 		return nil
 	}, nil
 }
@@ -368,10 +368,10 @@ func TestContextAsyncCallSuspendsAndResumes(t *testing.T) {
 	var gotArgs any
 	var gotErr error
 
-	caller, err := ctx.AsyncCall(func(ctx *Context, args any, err error) {
+	caller, err := ctx.AsyncCall(func(args ContextFuncArgs) {
 		gotActorUID = ctx.Actor().ActorUID()
-		gotArgs = args
-		gotErr = err
+		gotArgs = args.Value
+		gotErr = args.Err
 	}, time.Second)
 	if err != nil {
 		t.Fatalf("context async call: %v", err)
@@ -418,7 +418,7 @@ func TestContextAsyncCallErrorResetsSuspend(t *testing.T) {
 	}
 	ctx := &Context{req: req, actor: actor}
 
-	_, err := ctx.AsyncCall(func(ctx *Context, args any, err error) {}, time.Second)
+	_, err := ctx.AsyncCall(func(args ContextFuncArgs) {}, time.Second)
 	if err == nil || err.Error() != "async call failed" {
 		t.Fatalf("context async call err = %v, want async call failed", err)
 	}

@@ -353,9 +353,9 @@ func newTimerTickCmd(t time.Time, done chan struct{}) *timerTickCmd {
 
 func (c *timerTickCmd) exec(tm *timerManager) {
 	tickSpan := tm.svc.getCfg().TimeWheelLevels[0].Span
-	begin := tm.svc.getTimeSystem().Now()
+	begin := time.Now()
 	tm.tickTo(c.t)
-	if cost := tm.svc.getTimeSystem().Now().Sub(begin); cost > tickSpan {
+	if cost := time.Since(begin); cost > tickSpan {
 		tm.svc.getLogger().Warnf("tick time wheel cost:%dms", cost.Milliseconds())
 	}
 	if c.done != nil {

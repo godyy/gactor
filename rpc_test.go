@@ -84,7 +84,8 @@ func newRPCTestManager(t *testing.T, queueSize int) (*Service, *rpcManager) {
 				TimeWheelLevels: timerLevels,
 				MaxTimerAmount:  queueSize,
 			},
-			Handler: handler,
+			Handler:                      handler,
+			QueueWriteTimeAlarmThreshold: 50 * time.Millisecond,
 		},
 		actorDefineSet: &actorDefineSet{
 			defineMap:      make(map[ActorCategory]ActorDefine),
