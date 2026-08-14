@@ -72,12 +72,6 @@ func newRPCTestManager(t *testing.T, queueSize int) (*Service, *rpcManager) {
 		{Name: "10ms", Span: 10 * time.Millisecond, Slots: 10},
 		{Name: "100ms", Span: 100 * time.Millisecond, Slots: 10},
 	}
-	wheel, err := gtimewheel.NewTimeWheel(timerLevels, func(f gtimewheel.TimerFunc, args gtimewheel.TimerArgs) {
-		f(args)
-	})
-	if err != nil {
-		t.Fatalf("new time wheel: %v", err)
-	}
 
 	svc := &Service{
 		cfg: &ServiceConfig{
@@ -96,15 +90,14 @@ func newRPCTestManager(t *testing.T, queueSize int) (*Service, *rpcManager) {
 			defineMap:      make(map[ActorCategory]ActorDefine),
 			priority2Index: make(map[int]int),
 		},
-		logger:            logger.Named("rpc-test"),
-		oriLogger:         logger,
-		stopWait:          utils.NewStopWait(),
-		state:             serviceStateStarted,
-		timeWheel:         wheel,
-		lastTickTimeWheel: handler.TimeSystem.Now(),
-		triggeredTimers:   make(chan triggeredTimer, queueSize),
+		logger:    logger.Named("rpc-test"),
+		oriLogger: logger,
+		stopWait:  utils.NewStopWait(),
+		state:     serviceStateStarted,
 	}
 
+	svc.timerManager = newTimerManager(svc)
+	svc.timerManager.start()
 	rm := newRPCManager(svc)
 	svc.rpcManager = rm
 

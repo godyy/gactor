@@ -9,7 +9,6 @@ import (
 
 	"github.com/godyy/gactor/internal/utils"
 	"github.com/godyy/glog"
-	"github.com/godyy/gtimewheel"
 	pkgerrors "github.com/pkg/errors"
 )
 
@@ -156,6 +155,7 @@ type Service struct {
 	oriLogger       glog.Logger    // 原始日志工具.
 	logger          glog.Logger    // 日志.
 	*actorDefineSet                // 集成 Actor 定义.
+	*timerManager                  // 定时器管理器.
 	*rpcManager                    // RPC 调用管理器.
 	*ackManager                    // Ack 管理器.
 
@@ -166,12 +166,6 @@ type Service struct {
 	mtxActor              sync.RWMutex            // Actor 读写锁.
 	priorityActors        map[int]*priorityActors // 按优先级管理的 Actor 集合.
 	maxActorPriorityIndex int                     // 当前 Actor 最大优先级索引.
-
-	mtxTimer          sync.RWMutex          // 定时器读写锁.
-	timeWheel         *gtimewheel.TimeWheel // 时间轮.
-	lastTickTimeWheel time.Time             // 上次时间轮的 tick 时间.
-	triggeredTimers   chan triggeredTimer   // 已触发的定时器, 等待执行.
-	timeWheelStop     chan struct{}         // 时间轮停止信号.
 }
 
 func NewService(cfg *ServiceConfig, option ...ServiceOption) *Service {
@@ -194,16 +188,10 @@ func NewService(cfg *ServiceConfig, option ...ServiceOption) *Service {
 		stopWait:              utils.NewStopWait(),
 		priorityActors:        priorityActors,
 		maxActorPriorityIndex: -1,
-		triggeredTimers:       make(chan triggeredTimer, cfg.MaxTimerAmount),
 	}
 
+	s.timerManager = newTimerManager(s)
 	s.rpcManager = newRPCManager(s)
-
-	if timeWheel, err := gtimewheel.NewTimeWheel(cfg.TimeWheelLevels, s.timerExecutor); err != nil {
-		panic(err)
-	} else {
-		s.timeWheel = timeWheel
-	}
 
 	for _, o := range option {
 		o(s)
@@ -344,7 +332,7 @@ func (s *Service) Start() error {
 	s.state = serviceStateStarted
 
 	// timer.
-	s.startTimeWheel()
+	s.startTimerManager()
 
 	// rpc.
 	s.startRpcManager()
@@ -368,7 +356,6 @@ func (s *Service) Stop() error {
 	s.logger.Info("stopping")
 
 	s.stopActors()
-	s.stopTimeWheel()
 
 	s.mtxState.Lock()
 	s.state = serviceStateStopped

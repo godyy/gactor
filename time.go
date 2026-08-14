@@ -1,10 +1,6 @@
 package gactor
 
-import (
-	"time"
-
-	"github.com/godyy/gtimewheel"
-)
+import "time"
 
 // TimeSystem 时间系统.
 type TimeSystem interface {
@@ -28,15 +24,3 @@ func (d *defTimeSystem) Until(t time.Time) time.Duration {
 
 // DefTimeSystem 默认时间系统.
 var DefTimeSystem = &defTimeSystem{}
-
-// TimerId 定时器ID.
-type TimerId = uint64
-
-// TimerIdNone 表示无效的定时器ID.
-const TimerIdNone = gtimewheel.TimerIdNone
-
-// TimerFunc 定时器回调函数.
-type TimerFunc = gtimewheel.TimerFunc
-
-// TimerArgs 定时器参数.
-type TimerArgs = gtimewheel.TimerArgs
