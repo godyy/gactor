@@ -209,11 +209,8 @@ func (s *Service) startActor(uid ActorUID, leaseId string) (actorImpl, error) {
 	}
 
 	defineBase := define.base()
-
 	categoryActors := s.getCategoryActors(defineBase.priority, defineBase.category)
-	var starter *actorStarter
-
-	for starter == nil {
+	for {
 		// 优先尝试引用当前有效的 Actor.
 		if actor, err := categoryActors.refActor(uid.ID); err != nil {
 			return nil, err
@@ -221,71 +218,75 @@ func (s *Service) startActor(uid ActorUID, leaseId string) (actorImpl, error) {
 			return actor, nil
 		}
 
-		// 优先获取当前正有效的启动器.
-		starter = categoryActors.getStarter(uid.ID)
-
-		// 当前无有效启动器.
-		if starter == nil {
-			// 尝试创建并添加启动.
-			// 若添加成功, 执行启动逻辑.
-
-			starter = &actorStarter{
-				uid:     uid,
-				leaseId: leaseId,
-				done:    make(chan struct{}, 1),
-			}
-			actual, loaded := categoryActors.addStarter(uid.ID, starter)
-			if loaded {
-				// 添加失败.
-				close(starter.done)
-				starter = nil
-				if !actual.ref() {
-					starter = nil
-					continue
-				}
-				starter = actual
-			} else {
-				// 添加成功.
-				starter.ref()
-
-				// 更新最大优先级索引.
-				priorityIndex := s.getPriorityIndex(defineBase.priority)
-				s.mtxActor.Lock()
-				s.updateMaxActorPriorityIndex(priorityIndex)
-				s.mtxActor.Unlock()
-
-				// 再次确认 actor 是否已经存在，用于兜住 addStarter 前后的竞态窗口。
-				if actor, err := categoryActors.refActor(uid.ID); actor != nil || err != nil {
-					starter.complete(actor, err)
-					categoryActors.delStarter(uid.ID)
-				}
-
-				// 若当前不存在相同 id 的正在停机的 Actor, 执行启动逻辑.
-				// 否则, 等待 Actor 停机完成再出发启动逻辑.
-				if !starter.isCompleted() && !categoryActors.isActorStopping(uid.ID) {
-					starter.start(s)
-				}
-			}
-		} else {
-			if !starter.ref() {
-				starter = nil
-			}
+		// singleflight 只合并 starter 的获取与触发启动。
+		// 各调用方仍需分别引用 starter, 以保留当前的 Actor 引用语义。
+		result, err, _ := s.startActorGroup.Do(uid.String(), func() (any, error) {
+			return s.ensureActorStarter(categoryActors, defineBase, uid, leaseId), nil
+		})
+		if err != nil {
+			return nil, err
 		}
-	}
 
-	defer starter.deref()
+		starter := result.(*actorStarter)
+		if !starter.ref() {
+			continue
+		} else {
+			defer starter.deref()
+		}
 
-	// 等待启动完成.
-	// 随后获取启动结果, 若启动成功, 引用 Actor.
-	<-starter.done
-	actor, err := starter.actor, starter.err
-	if err == nil {
-		err = actor.core().ref()
+		// 等待启动完成.
+		// 随后获取启动结果, 若启动成功, 引用 Actor.
+		<-starter.done
+		actor, err := starter.actor, starter.err
+		if err == nil {
+			err = actor.core().ref()
+		}
+		if err != nil {
+			return nil, err
+		}
+		return actor, nil
 	}
-	if err != nil {
-		return nil, err
+}
+
+// ensureActorStarter 获取当前 uid 对应的启动器.
+// 这里仍然保留 actorStarter, 因为它还负责停机期间的续启与引用保护。
+func (s *Service) ensureActorStarter(categoryActors *categoryActors, defineBase *actorDefineBase, uid ActorUID, leaseId string) *actorStarter {
+	for {
+		// 优先复用当前有效的启动器.
+		if starter := categoryActors.getStarter(uid.ID); starter != nil {
+			return starter
+		}
+
+		starter := &actorStarter{
+			uid:     uid,
+			leaseId: leaseId,
+			done:    make(chan struct{}, 1),
+		}
+		actual, loaded := categoryActors.addStarter(uid.ID, starter)
+		if loaded {
+			return actual
+		}
+
+		// 更新最大优先级索引.
+		priorityIndex := s.getPriorityIndex(defineBase.priority)
+		s.mtxActor.Lock()
+		s.updateMaxActorPriorityIndex(priorityIndex)
+		s.mtxActor.Unlock()
+
+		// 再次确认 actor 是否已经存在，用于兜住 addStarter 前后的竞态窗口。
+		if actor, err := categoryActors.refActor(uid.ID); actor != nil || err != nil {
+			starter.complete(actor, err)
+			categoryActors.delStarter(uid.ID)
+		}
+
+		// 若当前不存在相同 id 的正在停机的 Actor, 执行启动逻辑.
+		// 否则, 等待 Actor 停机完成再触发启动逻辑.
+		if !starter.isCompleted() && !categoryActors.isActorStopping(uid.ID) {
+			starter.start(s)
+		}
+
+		return starter
 	}
-	return actor, err
 }
 
 // refActor 引用 Actor.

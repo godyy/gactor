@@ -10,6 +10,7 @@ import (
 	"github.com/godyy/gactor/internal/utils"
 	"github.com/godyy/glog"
 	pkgerrors "github.com/pkg/errors"
+	"golang.org/x/sync/singleflight"
 )
 
 // ServiceHandler 封装 Service 处理器需要实现的功能.
@@ -162,6 +163,8 @@ type Service struct {
 	mtxState sync.RWMutex    // 状态读写锁.
 	state    int8            // 状态.
 	stopWait *utils.StopWait // 停机等待.
+
+	startActorGroup singleflight.Group // 合并同一 Actor 的并发启动慢路径.
 
 	mtxActor              sync.RWMutex            // Actor 读写锁.
 	priorityActors        map[int]*priorityActors // 按优先级管理的 Actor 集合.

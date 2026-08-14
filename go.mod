@@ -1,20 +1,21 @@
 module github.com/godyy/gactor
 
-go 1.24
+go 1.24.0
 
 require (
 	github.com/godyy/gcluster v0.0.12
 	github.com/godyy/glog v0.1.1
+	github.com/godyy/gmpsc v0.0.4
 	github.com/godyy/gnet v0.3.0
 	github.com/godyy/gtimewheel v0.3.0
 	github.com/godyy/gutils v0.0.4
 	github.com/pkg/errors v0.9.1
 	github.com/rs/xid v1.6.0
 	go.uber.org/zap v1.27.0
+	golang.org/x/sync v0.19.0
 )
 
 require (
-	github.com/godyy/gmpsc v0.0.4 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	google.golang.org/protobuf v1.36.6 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
