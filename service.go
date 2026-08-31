@@ -397,8 +397,8 @@ func (s *Service) putBytes(b []byte) {
 }
 
 // allocBuffer 分配缓冲区.
-func (s *Service) allocBuffer(buf *Buffer, size int) {
-	b := s.cfg.Handler.GetPacketCodec().GetBytes(size)
+func (s *Service) allocBuffer(buf *Buffer, len int) {
+	b := s.cfg.Handler.GetPacketCodec().GetBytes(len)
 	buf.SetBuf(b)
 }
 
@@ -451,8 +451,8 @@ func (s *Service) sendRemotePacket(nodeId string, ph packetHead, payload any) er
 
 // encodeRawPacket 将原始 payload 直接拼装为数据包.
 func (s *Service) encodeRawPacket(ph packetHead, payload []byte) ([]byte, error) {
-	size := sizeOfPacketType + ph.getSize() + len(payload)
-	b := s.getBytes(size)
+	l := sizeOfPacketType + ph.getLen() + len(payload)
+	b := s.getBytes(l)
 	var buf Buffer
 	buf.SetBuf(b)
 

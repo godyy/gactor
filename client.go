@@ -215,8 +215,8 @@ func (c *Client) putBytes(b []byte) {
 }
 
 // allocBuffer 分配 Buffer.
-func (c *Client) allocBuffer(buf *Buffer, size int) {
-	b := c.cfg.Handler.GetBytesManager().GetBytes(size)
+func (c *Client) allocBuffer(buf *Buffer, len int) {
+	b := c.cfg.Handler.GetBytesManager().GetBytes(len)
 	buf.SetBuf(b)
 }
 
@@ -237,7 +237,7 @@ func (c *Client) genSeq() uint32 {
 func (c *Client) encodePacket(ph packetHead, payload []byte) ([]byte, error) {
 	// 分配缓冲区.
 	var buf Buffer
-	c.allocBuffer(&buf, sizeOfPacketType+ph.getSize()+len(payload))
+	c.allocBuffer(&buf, sizeOfPacketType+ph.getLen()+len(payload))
 
 	// 编码填充数据.
 	if err := buf.writePacketType(ph.getPt()); err != nil {

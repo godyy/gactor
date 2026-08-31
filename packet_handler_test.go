@@ -342,7 +342,7 @@ func encodeIncomingPacket(t *testing.T, ph packetHead, payload []byte) []byte {
 	t.Helper()
 
 	var buf Buffer
-	buf.SetBuf(make([]byte, 0, sizeOfPacketType+ph.getSize()+len(payload)))
+	buf.SetBuf(make([]byte, 0, sizeOfPacketType+ph.getLen()+len(payload)))
 	if err := buf.writePacketType(ph.getPt()); err != nil {
 		t.Fatalf("write packet type: %v", err)
 	}

@@ -81,8 +81,8 @@ type packetHead interface {
 	// 数据包序列号.
 	getSeq() uint32
 
-	// 数据包大小.
-	getSize() int
+	// 获取长度.
+	getLen() int
 
 	// 编码数据包.
 	encode(b *Buffer) error
@@ -101,7 +101,7 @@ func newAckHeadFrom(head packetHead) ackPacketHead {
 	return ackPacketHead{ackPt: head.getPt(), ackSeq: head.getSeq()}
 }
 
-const sizeOfAckPacketHead = sizeOfPacketType + 4
+const lenAckPacketHead = sizeOfPacketType + 4
 
 func (ph *ackPacketHead) getPt() PacketType {
 	return PacketTypeAck
@@ -111,8 +111,8 @@ func (ph *ackPacketHead) getSeq() uint32 {
 	return ph.ackSeq
 }
 
-func (ph *ackPacketHead) getSize() int {
-	return sizeOfAckPacketHead
+func (ph *ackPacketHead) getLen() int {
+	return lenAckPacketHead
 }
 
 func (ph *ackPacketHead) encode(b *Buffer) error {
@@ -148,7 +148,7 @@ func newConnectHead(seq uint32, id ActorID, sid uint32) connectPacketHead {
 	return connectPacketHead{seq: seq, id: id, sid: sid}
 }
 
-const sizeOfConnectPacketHead = 4 + 8 + 4
+const lenConnectPacketHead = 4 + lenOfActorUID + 4
 
 func (ph *connectPacketHead) getPt() PacketType {
 	return PacketTypeConnect
@@ -158,8 +158,8 @@ func (ph *connectPacketHead) getSeq() uint32 {
 	return ph.seq
 }
 
-func (ph *connectPacketHead) getSize() int {
-	return sizeOfConnectPacketHead
+func (ph *connectPacketHead) getLen() int {
+	return lenConnectPacketHead
 }
 
 // 编码数据包.
@@ -204,14 +204,14 @@ func newDisconnectHead(seq uint32, id ActorID, sid uint32) disconnectPacketHead 
 	return disconnectPacketHead{seq: seq, id: id, sid: sid}
 }
 
-const sizeOfS2SDisconnectedPacketHead = 4 + 8 + 4
+const lenS2SDisconnectedPacketHead = 4 + lenOfActorUID + 4
 
 func (ph *disconnectPacketHead) getPt() PacketType { return PacketTypeDisconnect }
 
 func (ph *disconnectPacketHead) getSeq() uint32 { return ph.seq }
 
-func (ph *disconnectPacketHead) getSize() int {
-	return sizeOfS2SDisconnectedPacketHead
+func (ph *disconnectPacketHead) getLen() int {
+	return lenS2SDisconnectedPacketHead
 }
 
 func (ph *disconnectPacketHead) encode(b *Buffer) error {
@@ -255,14 +255,14 @@ func newRawReqHead(seq uint32, toId ActorID, sid uint32, timeout uint32) rawReqP
 	return rawReqPacketHead{seq: seq, toId: toId, sid: sid, timeout: timeout}
 }
 
-const sizeOfRawReqPacketHead = 4 + 8 + 4 + 4
+const lenRawReqPacketHead = 4 + lenOfActorUID + 4 + 4
 
 func (ph *rawReqPacketHead) getPt() PacketType { return PacketTypeRawReq }
 
 func (ph *rawReqPacketHead) getSeq() uint32 { return ph.seq }
 
-func (ph *rawReqPacketHead) getSize() int {
-	return sizeOfRawReqPacketHead
+func (ph *rawReqPacketHead) getLen() int {
+	return lenRawReqPacketHead
 }
 
 func (ph *rawReqPacketHead) encode(b *Buffer) error {
@@ -317,14 +317,14 @@ func newRawRespHeadFromReq(seq uint32, errCode ErrCode, req *rawReqPacketHead) r
 	return rawRespPacketHead{seq: seq, fromId: req.toId, sid: req.sid, errCode: errCode}
 }
 
-const sizeOfRawRespPacketHead = 4 + 8 + 4 + sizeOfErrCode
+const lenRawRespPacketHead = 4 + lenOfActorUID + 4 + sizeOfErrCode
 
 func (ph *rawRespPacketHead) getPt() PacketType { return PacketTypeRawResp }
 
 func (ph *rawRespPacketHead) getSeq() uint32 { return ph.seq }
 
-func (ph *rawRespPacketHead) getSize() int {
-	return sizeOfRawRespPacketHead
+func (ph *rawRespPacketHead) getLen() int {
+	return lenRawRespPacketHead
 }
 
 func (ph *rawRespPacketHead) encode(b *Buffer) error {
@@ -374,14 +374,14 @@ func newRawPushHead(seq uint32, fromId ActorID, sid uint32) rawPushPacketHead {
 	return rawPushPacketHead{seq: seq, fromId: fromId, sid: sid}
 }
 
-const sizeOfRawPushPacketHead = 4 + 8 + 4
+const lenRawPushPacketHead = 4 + lenOfActorUID + 4
 
 func (ph *rawPushPacketHead) getPt() PacketType { return PacketTypeRawPush }
 
 func (ph *rawPushPacketHead) getSeq() uint32 { return ph.seq }
 
-func (ph *rawPushPacketHead) getSize() int {
-	return sizeOfRawPushPacketHead
+func (ph *rawPushPacketHead) getLen() int {
+	return lenRawPushPacketHead
 }
 
 func (ph *rawPushPacketHead) encode(b *Buffer) error {
@@ -413,32 +413,6 @@ func (ph *rawPushPacketHead) decode(b *Buffer) (err error) {
 	return
 }
 
-// s2sPacketFlag s2s数据包标记
-type s2sPacketFlag byte
-
-const (
-	s2sPacketFlagFromID = s2sPacketFlag(1 << 0) // 包含来源 Actor ID.
-	s2sPacketFlagToID   = s2sPacketFlag(1 << 1) // 包含目标 Actor ID.
-)
-
-func (f *s2sPacketFlag) setFromId() *s2sPacketFlag {
-	*f |= s2sPacketFlagFromID
-	return f
-}
-
-func (f *s2sPacketFlag) hasFromId() bool {
-	return *f&s2sPacketFlagFromID != 0
-}
-
-func (f *s2sPacketFlag) setToId() *s2sPacketFlag {
-	*f |= s2sPacketFlagToID
-	return f
-}
-
-func (f *s2sPacketFlag) hasToId() bool {
-	return *f&s2sPacketFlagToID != 0
-}
-
 // s2sRpcPacketHead PacketTypeS2SRpc 包头.
 type s2sRpcPacketHead struct {
 	seq     uint32   // 序号.
@@ -452,39 +426,25 @@ func newS2SRpcHead(seq uint32, reqId uint32, fromId, toId ActorUID, timeout uint
 	return s2sRpcPacketHead{seq: seq, reqId: reqId, fromId: fromId, toId: toId, timeout: timeout}
 }
 
-const sizeOfS2SRpcPacketHead = 1 + 4 + 4 + sizeOfActorUID*2 + 4
+const lenS2SRpcPacketHead = 4 + 4 + 2*lenOfActorUID + 4
 
 func (ph *s2sRpcPacketHead) getPt() PacketType { return PacketTypeS2SRpc }
 
 func (ph *s2sRpcPacketHead) getSeq() uint32 { return ph.seq }
 
-func (ph *s2sRpcPacketHead) getSize() int {
-	return sizeOfS2SRpcPacketHead
-}
-
-func (ph *s2sRpcPacketHead) getFlag() s2sPacketFlag {
-	var flag s2sPacketFlag
-	if !ph.fromId.IsZero() {
-		flag.setFromId()
-	}
-	flag.setToId()
-	return flag
+func (ph *s2sRpcPacketHead) getLen() int {
+	return lenS2SRpcPacketHead
 }
 
 func (ph *s2sRpcPacketHead) encode(b *Buffer) error {
-	if err := b.WriteByte(byte(ph.getFlag())); err != nil {
-		return pkgerrors.WithMessage(err, "write flag")
-	}
 	if err := b.WriteUint32(ph.seq); err != nil {
 		return pkgerrors.WithMessage(err, "write seq")
 	}
 	if err := b.WriteUint32(ph.reqId); err != nil {
 		return pkgerrors.WithMessage(err, "write reqId")
 	}
-	if !ph.fromId.IsZero() {
-		if err := b.writeActorUID(ph.fromId); err != nil {
-			return pkgerrors.WithMessage(err, "write fromId")
-		}
+	if err := b.writeActorUID(ph.fromId); err != nil {
+		return pkgerrors.WithMessage(err, "write fromId")
 	}
 	if err := b.writeActorUID(ph.toId); err != nil {
 		return pkgerrors.WithMessage(err, "write toId")
@@ -496,12 +456,6 @@ func (ph *s2sRpcPacketHead) encode(b *Buffer) error {
 }
 
 func (ph *s2sRpcPacketHead) decode(b *Buffer) (err error) {
-	var flag s2sPacketFlag
-	if flagByte, err := b.ReadByte(); err != nil {
-		return pkgerrors.WithMessage(err, "read flag")
-	} else {
-		flag = s2sPacketFlag(flagByte)
-	}
 	ph.seq, err = b.ReadUint32()
 	if err != nil {
 		return pkgerrors.WithMessage(err, "read seq")
@@ -510,11 +464,9 @@ func (ph *s2sRpcPacketHead) decode(b *Buffer) (err error) {
 	if err != nil {
 		return pkgerrors.WithMessage(err, "read reqId")
 	}
-	if flag.hasFromId() {
-		ph.fromId, err = b.readActorUID()
-		if err != nil {
-			return pkgerrors.WithMessage(err, "read fromId")
-		}
+	ph.fromId, err = b.readActorUID()
+	if err != nil {
+		return pkgerrors.WithMessage(err, "read fromId")
 	}
 	ph.toId, err = b.readActorUID()
 	if err != nil {
@@ -544,29 +496,17 @@ func newS2SRpcRespHeadFromReq(seq uint32, errCode ErrCode, req *s2sRpcPacketHead
 	return s2sRpcRespPacketHead{seq: seq, reqId: req.reqId, fromId: req.toId, toId: req.fromId, errCode: errCode}
 }
 
-const sizeOfS2SRpcRespPacketHead = 4 + 4 + sizeOfActorUID*2 + sizeOfErrCode
+const lenS2SRpcRespPacketHead = 4 + 4 + lenOfActorUID*2 + sizeOfErrCode
 
 func (ph *s2sRpcRespPacketHead) getPt() PacketType { return PacketTypeS2SRpcResp }
 
 func (ph *s2sRpcRespPacketHead) getSeq() uint32 { return ph.seq }
 
-func (ph *s2sRpcRespPacketHead) getSize() int {
-	return sizeOfS2SRpcRespPacketHead
-}
-
-func (ph *s2sRpcRespPacketHead) getFlag() s2sPacketFlag {
-	var flag s2sPacketFlag
-	flag.setFromId()
-	if !ph.toId.IsZero() {
-		flag.setToId()
-	}
-	return flag
+func (ph *s2sRpcRespPacketHead) getLen() int {
+	return lenS2SRpcRespPacketHead
 }
 
 func (ph *s2sRpcRespPacketHead) encode(b *Buffer) error {
-	if err := b.WriteByte(byte(ph.getFlag())); err != nil {
-		return pkgerrors.WithMessage(err, "write flag")
-	}
 	if err := b.WriteUint32(ph.seq); err != nil {
 		return pkgerrors.WithMessage(err, "write seq")
 	}
@@ -576,10 +516,8 @@ func (ph *s2sRpcRespPacketHead) encode(b *Buffer) error {
 	if err := b.writeActorUID(ph.fromId); err != nil {
 		return pkgerrors.WithMessage(err, "write fromId")
 	}
-	if !ph.toId.IsZero() {
-		if err := b.writeActorUID(ph.toId); err != nil {
-			return pkgerrors.WithMessage(err, "write toID")
-		}
+	if err := b.writeActorUID(ph.toId); err != nil {
+		return pkgerrors.WithMessage(err, "write toID")
 	}
 	if err := b.writeErrCode(ph.errCode); err != nil {
 		return pkgerrors.WithMessage(err, "write errCode")
@@ -588,12 +526,6 @@ func (ph *s2sRpcRespPacketHead) encode(b *Buffer) error {
 }
 
 func (ph *s2sRpcRespPacketHead) decode(b *Buffer) (err error) {
-	var flag s2sPacketFlag
-	if flagByte, err := b.ReadByte(); err != nil {
-		return pkgerrors.WithMessage(err, "read flag")
-	} else {
-		flag = s2sPacketFlag(flagByte)
-	}
 	ph.seq, err = b.ReadUint32()
 	if err != nil {
 		return pkgerrors.WithMessage(err, "read seq")
@@ -606,11 +538,9 @@ func (ph *s2sRpcRespPacketHead) decode(b *Buffer) (err error) {
 	if err != nil {
 		return pkgerrors.WithMessage(err, "read fromId")
 	}
-	if flag.hasToId() {
-		ph.toId, err = b.readActorUID()
-		if err != nil {
-			return pkgerrors.WithMessage(err, "read toId")
-		}
+	ph.toId, err = b.readActorUID()
+	if err != nil {
+		return pkgerrors.WithMessage(err, "read toId")
 	}
 	ph.errCode, err = b.readErrCode()
 	if err != nil {
@@ -630,36 +560,22 @@ func newS2SCastHead(seq uint32, fromId, toId ActorUID) s2sCastPacketHead {
 	return s2sCastPacketHead{seq: seq, fromId: fromId, toId: toId}
 }
 
-const sizeOfS2SCastPacketHead = 4 + sizeOfActorUID*2
+const lenS2SCastPacketHead = 4 + lenOfActorUID*2
 
 func (ph *s2sCastPacketHead) getPt() PacketType { return PacketTypeS2SCast }
 
 func (ph *s2sCastPacketHead) getSeq() uint32 { return ph.seq }
 
-func (ph *s2sCastPacketHead) getSize() int {
-	return sizeOfS2SCastPacketHead
-}
-
-func (ph *s2sCastPacketHead) getFlag() s2sPacketFlag {
-	var flag s2sPacketFlag
-	if !ph.fromId.IsZero() {
-		flag.setFromId()
-	}
-	flag.setToId()
-	return flag
+func (ph *s2sCastPacketHead) getLen() int {
+	return lenS2SCastPacketHead
 }
 
 func (ph *s2sCastPacketHead) encode(b *Buffer) error {
-	if err := b.WriteByte(byte(ph.getFlag())); err != nil {
-		return pkgerrors.WithMessage(err, "write flag")
-	}
 	if err := b.WriteUint32(ph.seq); err != nil {
 		return pkgerrors.WithMessage(err, "write seq")
 	}
-	if !ph.fromId.IsZero() {
-		if err := b.writeActorUID(ph.fromId); err != nil {
-			return pkgerrors.WithMessage(err, "write fromId")
-		}
+	if err := b.writeActorUID(ph.fromId); err != nil {
+		return pkgerrors.WithMessage(err, "write fromId")
 	}
 	if err := b.writeActorUID(ph.toId); err != nil {
 		return pkgerrors.WithMessage(err, "write toId")
@@ -668,21 +584,13 @@ func (ph *s2sCastPacketHead) encode(b *Buffer) error {
 }
 
 func (ph *s2sCastPacketHead) decode(b *Buffer) (err error) {
-	var flag s2sPacketFlag
-	if flagByte, err := b.ReadByte(); err != nil {
-		return pkgerrors.WithMessage(err, "read flag")
-	} else {
-		flag = s2sPacketFlag(flagByte)
-	}
 	ph.seq, err = b.ReadUint32()
 	if err != nil {
 		return pkgerrors.WithMessage(err, "read seq")
 	}
-	if flag.hasFromId() {
-		ph.fromId, err = b.readActorUID()
-		if err != nil {
-			return pkgerrors.WithMessage(err, "read fromId")
-		}
+	ph.fromId, err = b.readActorUID()
+	if err != nil {
+		return pkgerrors.WithMessage(err, "read fromId")
 	}
 	ph.toId, err = b.readActorUID()
 	if err != nil {
@@ -702,14 +610,14 @@ func newS2SForwardHead(seq uint32, fromId, toId ActorUID) s2sForwardPacketHead {
 	return s2sForwardPacketHead{seq: seq, fromId: fromId, toId: toId}
 }
 
-const sizeOfS2SForwardPacketHead = 4 + sizeOfActorUID + sizeOfActorUID
+const lenS2SForwardPacketHead = 4 + 2*lenOfActorUID
 
 func (ph *s2sForwardPacketHead) getPt() PacketType { return PacketTypeS2SForward }
 
 func (ph *s2sForwardPacketHead) getSeq() uint32 { return ph.seq }
 
-func (ph *s2sForwardPacketHead) getSize() int {
-	return sizeOfS2SForwardPacketHead
+func (ph *s2sForwardPacketHead) getLen() int {
+	return lenS2SForwardPacketHead
 }
 
 func (ph *s2sForwardPacketHead) encode(b *Buffer) error {
@@ -753,8 +661,8 @@ func (pa *packetAllocator) PacketType() PacketType {
 
 func (pa *packetAllocator) AllocBuf(buf *Buffer, payloadLen int) error {
 	// 分配字节切片.
-	size := sizeOfPacketType + pa.ph.getSize() + payloadLen
-	b := pa.BytesManager.GetBytes(size)
+	l := sizeOfPacketType + pa.ph.getLen() + payloadLen
+	b := pa.BytesManager.GetBytes(l)
 	buf.SetBuf(b)
 
 	// 编码包头.

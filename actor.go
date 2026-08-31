@@ -21,7 +21,7 @@ type ActorUID struct {
 	ID       ActorID       // Unique instance ID within the category
 }
 
-const sizeOfActorUID = int(unsafe.Sizeof(ActorCategory(0)) + unsafe.Sizeof(ActorID(0)))
+const lenOfActorUID = int(unsafe.Sizeof(ActorCategory(0)) + unsafe.Sizeof(ActorID(0)))
 
 func (uid ActorUID) String() string {
 	return fmt.Sprintf("%d-%d", uid.Category, uid.ID)
