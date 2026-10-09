@@ -13,8 +13,8 @@ type actorAsyncCallTestBehavior struct {
 	Actor
 }
 
-func (a *actorAsyncCallTestBehavior) OnStart() error { return nil }
-func (a *actorAsyncCallTestBehavior) OnStop() error  { return nil }
+func (a *actorAsyncCallTestBehavior) OnStart() error                { return nil }
+func (a *actorAsyncCallTestBehavior) OnStop(ActorStopContext) error { return nil }
 
 func newActorAsyncCallTestService(t *testing.T) *Service {
 	t.Helper()

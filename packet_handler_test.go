@@ -46,6 +46,7 @@ type packetHandlerTestServiceHandler struct {
 	net      NetAgent
 	codec    PacketCodec
 	ts       TimeSystem
+	monitor  ServiceMonitor
 }
 
 func (h *packetHandlerTestServiceHandler) GetActorRegistry() ActorRegistry {
@@ -69,15 +70,35 @@ func (h *packetHandlerTestServiceHandler) GetTimeSystem() TimeSystem {
 }
 
 func (h *packetHandlerTestServiceHandler) GetMonitor() ServiceMonitor {
-	return nil
+	return h.monitor
 }
 
 type packetHandlerTestActor struct {
 	Actor
+	outboundMigration chan ActorMigrationContext
+	stopContext       chan ActorStopContext
 }
 
 func (a *packetHandlerTestActor) OnStart() error { return nil }
-func (a *packetHandlerTestActor) OnStop() error  { return nil }
+func (a *packetHandlerTestActor) OnStop(ctx ActorStopContext) error {
+	// 部分测试夹具不关注停机原因，避免测试通知阻塞 Actor 的停机流程。
+	if a.stopContext != nil {
+		select {
+		case a.stopContext <- ctx:
+		default:
+		}
+	}
+	return nil
+}
+func (a *packetHandlerTestActor) OnMigrateOut(ctx ActorMigrationContext) error {
+	// 重试会重复触发回调；测试只需要记录首个上下文，不能阻塞 Actor loop。
+	select {
+	case a.outboundMigration <- ctx:
+	default:
+	}
+	return nil
+}
+func (a *packetHandlerTestActor) OnMigrateIn(ActorMigrationContext) error { return nil }
 
 func newPacketHandlerTestService(t *testing.T, started bool, enableAck bool) (*Service, *packetHandlerTestNetAgent) {
 	t.Helper()
@@ -112,7 +133,11 @@ func newPacketHandlerTestService(t *testing.T, started bool, enableAck bool) (*S
 					PriMessageBoxSize: 8,
 					MessageBoxSize:    8,
 					BehaviorCreator: func(a Actor) ActorBehavior {
-						return &packetHandlerTestActor{Actor: a}
+						return &packetHandlerTestActor{
+							Actor:             a,
+							outboundMigration: make(chan ActorMigrationContext, 1),
+							stopContext:       make(chan ActorStopContext, 1),
+						}
 					},
 				}),
 			},

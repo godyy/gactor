@@ -29,7 +29,7 @@ func (a *startActorSingleflightTestBehavior) OnStart() error {
 	return nil
 }
 
-func (a *startActorSingleflightTestBehavior) OnStop() error {
+func (a *startActorSingleflightTestBehavior) OnStop(ActorStopContext) error {
 	a.state.onStopCount.Add(1)
 	if a.state.onStopDelay > 0 {
 		time.Sleep(a.state.onStopDelay)

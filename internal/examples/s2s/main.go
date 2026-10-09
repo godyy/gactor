@@ -368,6 +368,32 @@ func (r *actorRegistry) RegisterActor(params gactor.ActorRegisterParams) (gactor
 	}, nil
 }
 
+func (r *actorRegistry) TakeOverActor(params gactor.ActorTakeOverParams) (gactor.ActorRegisterResult, error) {
+        r.mtx.Lock()
+        defer r.mtx.Unlock()
+        location := r.actorMap[params.UID]
+        if location == nil {
+                return gactor.ActorRegisterResult{}, gactor.ErrActorNotExists
+        }
+        if params.SourceLeaseId != location.leaseId {
+                return gactor.ActorRegisterResult{
+                        NodeId:   location.nodeId,
+                        ExpireAt: location.expireAt,
+                }, gactor.ErrLeaseMismatch
+        }
+        location.nodeId = params.NodeId
+        location.leaseId = params.LeaseId
+        if params.TTL > 0 {
+                location.expireAt = time.Now().Unix() + params.TTL
+        } else {
+                location.expireAt = 0
+        }
+        return gactor.ActorRegisterResult{
+                NodeId:   location.nodeId,
+                ExpireAt: location.expireAt,
+        }, nil
+}
+
 // UnregisterActor 注销 Actor.
 // 若 Actor 未注册, 返回 ErrActorNotExists 错误.
 // 若节点ID和租约ID匹配, 则注销 Actor, 否则返回 ErrLeaseMismatch 错误.

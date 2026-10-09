@@ -126,8 +126,9 @@ type testActorLocation struct {
 }
 
 type testActorRegistry struct {
-	mtx      sync.RWMutex
-	actorMap map[ActorUID]*testActorLocation
+	mtx           sync.RWMutex
+	actorMap      map[ActorUID]*testActorLocation
+	takeOverCount map[ActorUID]int
 }
 
 // MakeLeaseID 生成全剧唯一租约ID.
@@ -173,6 +174,90 @@ func (r *testActorRegistry) RegisterActor(params ActorRegisterParams) (ActorRegi
 		NodeId:   location.nodeId,
 		ExpireAt: location.expireAt,
 	}, nil
+}
+
+func (r *testActorRegistry) TakeOverActor(params ActorTakeOverParams) (ActorRegisterResult, error) {
+	r.mtx.Lock()
+	defer r.mtx.Unlock()
+	location := r.actorMap[params.UID]
+	if location == nil {
+		return ActorRegisterResult{}, ErrActorNotExists
+	}
+	if params.SourceLeaseId != location.leaseId {
+		return ActorRegisterResult{
+			NodeId:   location.nodeId,
+			ExpireAt: location.expireAt,
+		}, ErrLeaseMismatch
+	}
+	location.nodeId = params.NodeId
+	location.leaseId = params.LeaseId
+	if r.takeOverCount == nil {
+		r.takeOverCount = make(map[ActorUID]int)
+	}
+	r.takeOverCount[params.UID]++
+	if params.TTL > 0 {
+		location.expireAt = time.Now().Unix() + params.TTL
+	} else {
+		location.expireAt = 0
+	}
+	return ActorRegisterResult{
+		NodeId:   location.nodeId,
+		ExpireAt: location.expireAt,
+	}, nil
+}
+
+func (r *testActorRegistry) takeOverCalls(uid ActorUID) int {
+	r.mtx.RLock()
+	defer r.mtx.RUnlock()
+	return r.takeOverCount[uid]
+}
+
+func TestActorRegistryTakeOverFencesOldLease(t *testing.T) {
+	registry := &testActorRegistry{
+		actorMap: make(map[ActorUID]*testActorLocation),
+	}
+	uid := ActorUID{Category: 1, ID: 9001}
+	if _, err := registry.RegisterActor(ActorRegisterParams{
+		UID:     uid,
+		NodeId:  "source-node",
+		LeaseId: "source-lease",
+		TTL:     60,
+	}); err != nil {
+		t.Fatalf("register source actor: %v", err)
+	}
+	if _, err := registry.TakeOverActor(ActorTakeOverParams{
+		UID:           uid,
+		NodeId:        "target-node",
+		LeaseId:       "target-lease",
+		SourceLeaseId: "source-lease",
+		TTL:           60,
+	}); err != nil {
+		t.Fatalf("take over actor: %v", err)
+	}
+
+	if err := registry.KeepActorAlive(ActorKeepAliveParams{
+		UID:     uid,
+		NodeId:  "source-node",
+		LeaseId: "source-lease",
+		TTL:     60,
+	}); err != ErrLeaseMismatch {
+		t.Fatalf("keep alive with old lease = %v, want %v", err, ErrLeaseMismatch)
+	}
+	if err := registry.UnregisterActor(ActorUnregisterParams{
+		UID:     uid,
+		NodeId:  "source-node",
+		LeaseId: "source-lease",
+	}); err != ErrLeaseMismatch {
+		t.Fatalf("unregister with old lease = %v, want %v", err, ErrLeaseMismatch)
+	}
+
+	location, err := registry.GetActorLocation(uid)
+	if err != nil {
+		t.Fatalf("get actor location: %v", err)
+	}
+	if location.NodeId != "target-node" {
+		t.Fatalf("actor node = %q, want target-node", location.NodeId)
+	}
 }
 
 // UnregisterActor 注销 Actor.
@@ -429,7 +514,7 @@ func (a *testActor) OnStart() error {
 	return nil
 }
 
-func (a *testActor) OnStop() error {
+func (a *testActor) OnStop(ActorStopContext) error {
 	return nil
 }
 

@@ -27,6 +27,10 @@ func (r *contextRequestTestRequest) fromActorUID() ActorUID {
 	return r.from
 }
 
+func (r *contextRequestTestRequest) buildMigrationForwardRawPacket(s *Service, uid ActorUID, sourceLeaseID string) (packetHead, []byte, error) {
+	return nil, nil, ErrCodeActorForwardUnsupported
+}
+
 func (r *contextRequestTestRequest) deadline() (time.Time, bool) {
 	return r.deadlineValue, r.hasDeadline
 }
@@ -170,10 +174,10 @@ type contextRequestTestCBehavior struct {
 	CActor
 }
 
-func (b *contextRequestTestCBehavior) OnStart() error  { return nil }
-func (b *contextRequestTestCBehavior) OnStop() error   { return nil }
-func (b *contextRequestTestCBehavior) OnConnected()    {}
-func (b *contextRequestTestCBehavior) OnDisconnected() {}
+func (b *contextRequestTestCBehavior) OnStart() error                { return nil }
+func (b *contextRequestTestCBehavior) OnStop(ActorStopContext) error { return nil }
+func (b *contextRequestTestCBehavior) OnConnected()                  {}
+func (b *contextRequestTestCBehavior) OnDisconnected()               {}
 
 func newContextRequestTestCActor(t *testing.T) (*Service, *cactor) {
 	t.Helper()

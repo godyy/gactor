@@ -23,7 +23,7 @@ func (a *actor) OnStart() error {
 }
 
 // OnStop 停机行为.
-func (a *actor) OnStop() error {
+func (a *actor) OnStop(gactor.ActorStopContext) error {
 	return nil
 }
 
@@ -53,7 +53,7 @@ func (a *cActor) OnStart() error {
 }
 
 // OnStop 停机行为.
-func (a *cActor) OnStop() error {
+func (a *cActor) OnStop(gactor.ActorStopContext) error {
 	return nil
 }
 

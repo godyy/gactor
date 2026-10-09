@@ -146,7 +146,9 @@ func (s *Service) StartActor(ctx context.Context, uid ActorUID) error {
 	if err := s.lockState(serviceStateStarted, true); err != nil {
 		return err
 	}
-	defer s.unlockState(true)
+	// 不要跨越 send2LocalActor 持有状态读锁。迁移开始需要获取状态写锁，
+	// 而投递路径还会再次读取 Service 状态，二者叠加会形成写优先 RWMutex 死锁。
+	s.unlockState(true)
 
 	// 投递消息.
 	msg := &messageCheckAlive{
@@ -211,18 +213,31 @@ func (s *Service) startActor(uid ActorUID, leaseId string) (actorImpl, error) {
 	defineBase := define.base()
 	categoryActors := s.getCategoryActors(defineBase.priority, defineBase.category)
 	for {
+		// 与 StartMigration 的计划冻结串行化，避免 Actor 在计划快照后才完成创建。
+		s.mtxMigrationAdmission.RLock()
+
 		// 优先尝试引用当前有效的 Actor.
 		if actor, err := categoryActors.refActor(uid.ID); err != nil {
+			s.mtxMigrationAdmission.RUnlock()
 			return nil, err
 		} else if actor != nil {
+			s.mtxMigrationAdmission.RUnlock()
 			return actor, nil
+		}
+		// 迁移开始后，源节点不再创建新的本地 Actor。
+		// 缺失业务消息会由 send2LocalActor 的迁移转发路径处理，
+		// 其余本地启动请求则明确返回迁移中错误。
+		if s.isMigrating() {
+			s.mtxMigrationAdmission.RUnlock()
+			return nil, ErrCodeServiceMigrating
 		}
 
 		// singleflight 只合并 starter 的获取与触发启动。
 		// 各调用方仍需分别引用 starter, 以保留当前的 Actor 引用语义。
 		result, err, _ := s.startActorGroup.Do(uid.String(), func() (any, error) {
-			return s.ensureActorStarter(categoryActors, defineBase, uid, leaseId), nil
+			return s.ensureActorStarter(categoryActors, defineBase, uid, leaseId, nil), nil
 		})
+		s.mtxMigrationAdmission.RUnlock()
 		if err != nil {
 			return nil, err
 		}
@@ -250,7 +265,8 @@ func (s *Service) startActor(uid ActorUID, leaseId string) (actorImpl, error) {
 
 // ensureActorStarter 获取当前 uid 对应的启动器.
 // 这里仍然保留 actorStarter, 因为它还负责停机期间的续启与引用保护。
-func (s *Service) ensureActorStarter(categoryActors *categoryActors, defineBase *actorDefineBase, uid ActorUID, leaseId string) *actorStarter {
+// configure 仅在新 starter 创建后、启动前执行，用于写入 inbound migration 上下文。
+func (s *Service) ensureActorStarter(categoryActors *categoryActors, defineBase *actorDefineBase, uid ActorUID, leaseId string, configure func(*actorStarter)) *actorStarter {
 	for {
 		// 优先复用当前有效的启动器.
 		if starter := categoryActors.getStarter(uid.ID); starter != nil {
@@ -265,6 +281,9 @@ func (s *Service) ensureActorStarter(categoryActors *categoryActors, defineBase 
 		actual, loaded := categoryActors.addStarter(uid.ID, starter)
 		if loaded {
 			return actual
+		}
+		if configure != nil {
+			configure(starter)
 		}
 
 		// 更新最大优先级索引.
@@ -441,6 +460,11 @@ func (s *Service) send2LocalActor(uid ActorUID, msg message, leaseId string) err
 
 		// 若 Actor 不存在, 尝试启动 Actor.
 		if actor == nil {
+			if err := s.tryForwardMissingActor(uid, msg); err == nil && s.shouldForwardMissingActor(msg) {
+				return nil
+			} else if err != nil && s.shouldForwardMissingActor(msg) {
+				return err
+			}
 			actor, err = s.startActor(uid, leaseId)
 			if err != nil {
 				return err
@@ -467,6 +491,7 @@ func (s *Service) send2LocalActor(uid ActorUID, msg message, leaseId string) err
 // onActorStopped 处理 Actor 停机完成事件.
 func (s *Service) onActorStopped(actor actorImpl) {
 	s.logger.DebugFields("on actor stopped", s.lfdActorUID("uid", actor.ActorUID()))
+	s.markMigrationActorStopped(actor.ActorUID())
 
 	// 删除 Actor.
 	ac := actor.core()
@@ -573,14 +598,20 @@ func (s *Service) makeClientActorUID(id ActorID) ActorUID {
 
 // actorStarter Actor 启动器.
 type actorStarter struct {
-	mtx      sync.Mutex    // mtx.
-	state    int32         // 状态, 0:初始化 1:启动
-	refCount int           // 引用计数.
-	uid      ActorUID      // Actor 唯一ID
-	leaseId  string        // 租约ID.
-	done     chan struct{} // 结束信号.
-	actor    actorImpl     // Actor.
-	err      error         // Error.
+	mtx                    sync.Mutex    // mtx.
+	state                  int32         // 状态, 0:初始化 1:启动
+	refCount               int           // 引用计数.
+	uid                    ActorUID      // Actor 唯一ID
+	leaseId                string        // 租约ID.
+	isInboundMigration     bool          // 是否目标端迁移启动.
+	migrationSourceNodeID  string        // 源节点ID.
+	migrationSourceLeaseID string        // 源租约ID.
+	migrationSession       ActorSession  // 迁移会话.
+	migrationStartSeq      uint32        // 源迁移启动序号.
+	migrationLastErrCode   ErrCode       // 最近一次迁移结果.
+	done                   chan struct{} // 结束信号.
+	actor                  actorImpl     // Actor.
+	err                    error         // Error.
 }
 
 func (s *actorStarter) ref() bool {
@@ -650,6 +681,9 @@ func (s *actorStarter) start(svc *Service) {
 	// 注册 Actor.
 	if err := s.registerActor(svc); err != nil {
 		svc.getLogger().ErrorFields("reigster local actor failed", svc.lfdActorUID("uid", s.uid), lfdError(err))
+		// inbound migration 的抢占注册失败必须立即通知源节点，
+		// 让源 Actor 恢复本地处理并进入退避重试，而不是被动等待结果超时。
+		s.sendMigrationResult(svc, Err2ErrCode(err))
 		s.complete(nil, err)
 		return
 	}
@@ -667,8 +701,34 @@ func (s *actorStarter) start(svc *Service) {
 	actor := svc.createActor(s.uid, s.leaseId)
 	if err := actor.start(); err != nil {
 		svc.getLogger().ErrorFields("actor start failed", svc.lfdActorUID("uid", s.uid), lfdError(err))
+		s.sendMigrationResult(svc, Err2ErrCode(err))
 		s.complete(nil, err)
 		return
+	}
+
+	if s.isInboundMigration {
+		msg := newMessageApplyInboundMigration(
+			s.migrationSourceNodeID,
+			s.migrationSourceLeaseID,
+			s.migrationStartSeq,
+			s.migrationSession,
+		)
+		if err := actor.core().receiveMessage(msg); err != nil {
+			svc.getLogger().ErrorFields("apply inbound migration failed", svc.lfdActorUID("uid", s.uid), lfdError(err))
+			s.sendMigrationResult(svc, Err2ErrCode(err))
+			svc.monitorMigrationAction(MonitorMigrationTakeOverFailure)
+			_ = actor.stop(true)
+			s.complete(nil, err)
+			return
+		}
+		if err := <-msg.done; err != nil {
+			svc.getLogger().ErrorFields("OnMigrateIn failed", svc.lfdActorUID("uid", s.uid), lfdError(err))
+			s.sendMigrationResult(svc, Err2ErrCode(err))
+			svc.monitorMigrationAction(MonitorMigrationTakeOverFailure)
+			_ = actor.stop(true)
+			s.complete(nil, err)
+			return
+		}
 	}
 
 	// 引用并公告 Actor 启动完成.
@@ -679,8 +739,16 @@ func (s *actorStarter) start(svc *Service) {
 
 		// 公告 Actor.
 		categoryActors.addActor(actor)
+		s.sendMigrationResult(svc, ErrCodeOK)
+		if s.isInboundMigration {
+			svc.monitorMigrationAction(MonitorMigrationTakeOverSuccess)
+		}
 	} else {
 		svc.getLogger().ErrorFields("ref actor failed started", svc.lfdActorUID("uid", s.uid), lfdError(err))
+		s.sendMigrationResult(svc, Err2ErrCode(err))
+		if s.isInboundMigration {
+			svc.monitorMigrationAction(MonitorMigrationTakeOverFailure)
+		}
 		actor = nil
 	}
 
@@ -689,15 +757,27 @@ func (s *actorStarter) start(svc *Service) {
 
 // registerActor 注册 Actor.
 func (s *actorStarter) registerActor(svc *Service) error {
-	if s.leaseId != "" {
-		return nil
-	}
-
-	_, leasId, err := svc.resolveNodeOfActor(actorNodeModeLocal, s.uid)
-	if err != nil {
+	if s.isInboundMigration {
+		if s.leaseId == "" {
+			s.leaseId = svc.getCfg().Handler.GetActorRegistry().MakeLeaseID()
+		}
+		_, err := svc.getCfg().Handler.GetActorRegistry().TakeOverActor(ActorTakeOverParams{
+			UID:           s.uid,
+			NodeId:        svc.nodeId(),
+			LeaseId:       s.leaseId,
+			SourceLeaseId: s.migrationSourceLeaseID,
+			TTL:           svc.getCfg().RegistryTTL,
+		})
 		return err
 	}
-	s.leaseId = leasId
+
+	if s.leaseId == "" {
+		_, leasId, err := svc.resolveNodeOfActor(actorNodeModeLocal, s.uid)
+		if err != nil {
+			return err
+		}
+		s.leaseId = leasId
+	}
 	return nil
 }
 
@@ -727,6 +807,17 @@ func (s *actorStarter) doStop() {
 		_ = s.actor.core().deref()
 	}
 	s.state = 2
+}
+
+func (s *actorStarter) sendMigrationResult(svc *Service, errCode ErrCode) {
+	if !s.isInboundMigration || s.migrationSourceNodeID == "" {
+		return
+	}
+	s.migrationLastErrCode = errCode
+	head := newS2SMigrateResultHead(svc.genSeq(), s.uid, s.migrationSourceLeaseID, s.migrationStartSeq, errCode)
+	if err := svc.sendRemotePacket(s.migrationSourceNodeID, &head, nil); err != nil {
+		svc.getLogger().ErrorFields("send migrate result failed", svc.lfdActorUID("uid", s.uid), lfdError(err))
+	}
 }
 
 // categoryActors 聚合同一分类下的所有 Actor.

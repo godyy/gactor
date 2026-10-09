@@ -29,7 +29,18 @@ func (s *Server) OnStart() error {
 	return nil
 }
 
-func (s *Server) OnStop() error {
+func (s *Server) OnStop(gactor.ActorStopContext) error {
+	return nil
+}
+
+func (s *Server) OnMigrateOut(ctx gactor.ActorMigrationContext) error {
+	return saveMigrationSnapshot(ctx, migrationSnapshot{Name: s.name})
+}
+
+func (s *Server) OnMigrateIn(ctx gactor.ActorMigrationContext) error {
+	if snapshot, ok := loadMigrationSnapshot(ctx); ok {
+		s.name = snapshot.Name
+	}
 	return nil
 }
 

@@ -2,6 +2,7 @@ package gactor
 
 import (
 	"context"
+	"time"
 )
 
 // ServiceMonitor 封装用于更新 Service 监控数据的接口.
@@ -19,6 +20,48 @@ type ServiceMonitor interface {
 
 	// MonitorCastAction Cast 调用动作.
 	MonitorCastAction(action MonitorCAAction)
+}
+
+// ServiceMigrationMonitor 是可选的迁移监控扩展。
+// 现有 ServiceMonitor 实现无需修改；只有实现该接口时才会收到迁移事件。
+type ServiceMigrationMonitor interface {
+	MonitorMigrationAction(action MonitorMigrationAction)
+	MonitorMigrationConverged(duration time.Duration)
+}
+
+// MonitorMigrationAction 描述迁移运行时事件。
+type MonitorMigrationAction int
+
+const (
+	MonitorMigrationStart           = MonitorMigrationAction(iota + 1) // 开始一轮迁移。
+	MonitorMigrationWaitForSlot                                        // Actor 等待迁移并发槽位。
+	MonitorMigrationRetry                                              // Actor 或启动消息安排重试。
+	MonitorMigrationTakeOverSuccess                                    // 目标端完成抢占接管。
+	MonitorMigrationTakeOverFailure                                    // 目标端接管或恢复失败。
+	MonitorMigrationForwardSuccess                                     // 业务消息转发成功。
+	MonitorMigrationForwardFailure                                     // 业务消息转发失败。
+	MonitorMigrationForwardBusy                                        // 业务消息因转发背压被拒绝。
+	MonitorMigrationControlDenied                                      // 迁移控制包来源校验失败。
+	MonitorMigrationConverged                                          // 冻结计划收敛完成。
+	MonitorMigrationFinalized                                          // 源节点迁移状态已清理。
+)
+
+var monitorMigrationActionKeys = [...]string{
+	MonitorMigrationStart:           "start",
+	MonitorMigrationWaitForSlot:     "wait_for_slot",
+	MonitorMigrationRetry:           "retry",
+	MonitorMigrationTakeOverSuccess: "takeover_success",
+	MonitorMigrationTakeOverFailure: "takeover_failure",
+	MonitorMigrationForwardSuccess:  "forward_success",
+	MonitorMigrationForwardFailure:  "forward_failure",
+	MonitorMigrationForwardBusy:     "forward_busy",
+	MonitorMigrationControlDenied:   "control_denied",
+	MonitorMigrationConverged:       "converged",
+	MonitorMigrationFinalized:       "finalized",
+}
+
+func (a MonitorMigrationAction) MonitorKey() string {
+	return monitorMigrationActionKeys[a]
 }
 
 // MonitorKey 监控关键字.
@@ -111,6 +154,21 @@ var contextErr2CAAction = map[error]MonitorCAAction{
 func (s *Service) monitorActorStart(category ActorCategory) {
 	if monitor := s.cfg.Handler.GetMonitor(); monitor != nil {
 		monitor.MonitorActorAmount(MonitorActorStart, category, 1)
+	}
+}
+
+func (s *Service) monitorMigrationAction(action MonitorMigrationAction) {
+	monitor, ok := s.cfg.Handler.GetMonitor().(ServiceMigrationMonitor)
+	if ok && monitor != nil {
+		monitor.MonitorMigrationAction(action)
+	}
+}
+
+func (s *Service) monitorMigrationConverged(duration time.Duration) {
+	monitor, ok := s.cfg.Handler.GetMonitor().(ServiceMigrationMonitor)
+	if ok && monitor != nil {
+		monitor.MonitorMigrationAction(MonitorMigrationConverged)
+		monitor.MonitorMigrationConverged(duration)
 	}
 }
 

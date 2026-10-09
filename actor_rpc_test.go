@@ -12,8 +12,8 @@ type actorRPCTestBehavior struct {
 	state *actorRPCTestState
 }
 
-func (a *actorRPCTestBehavior) OnStart() error { return nil }
-func (a *actorRPCTestBehavior) OnStop() error  { return nil }
+func (a *actorRPCTestBehavior) OnStart() error                { return nil }
+func (a *actorRPCTestBehavior) OnStop(ActorStopContext) error { return nil }
 
 type actorRPCTestStub struct {
 	*actorCore

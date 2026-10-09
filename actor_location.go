@@ -42,6 +42,24 @@ type ActorRegisterResult struct {
 	ExpireAt int64  // Actor 过期时间, 秒级时间戳. 大于0表示在该时刻后会自动注销.
 }
 
+// ActorTakeOverParams Actor 抢占接管参数.
+type ActorTakeOverParams struct {
+	// Actor 唯一 ID.
+	UID ActorUID
+
+	// 目标节点ID。
+	NodeId string
+
+	// 目标节点新租约ID。
+	LeaseId string
+
+	// 源节点旧租约ID。
+	SourceLeaseId string
+
+	// Actor 存续时间, 秒级.
+	TTL int64
+}
+
 // ActorUnregisterParams Actor 注销参数.
 type ActorUnregisterParams struct {
 	UID     ActorUID // Actor 唯一 ID.
@@ -84,6 +102,13 @@ type ActorRegistry interface {
 	// 若 Actor 已注册, 且所在节点ID与当前节点ID不同, 返回 ErrActorAlreadyRegistered 错误,
 	// 否则, 使用当前租约覆盖旧租约, 并更新存续时间.
 	RegisterActor(params ActorRegisterParams) (ActorRegisterResult, error)
+
+	// TakeOverActor 基于源租约抢占接管 Actor。
+	// 该操作必须原子执行：仅当当前租约与 SourceLeaseId 匹配时，才替换节点和租约。
+	// 接管成功后，旧租约的 KeepActorAlive 和 UnregisterActor 必须返回 ErrLeaseMismatch，
+	// 不得覆盖或删除新租约对应的注册记录。
+	// 若 Actor 未注册, 返回 ErrActorNotExists 错误；租约不匹配时返回 ErrLeaseMismatch。
+	TakeOverActor(params ActorTakeOverParams) (ActorRegisterResult, error)
 
 	// UnregisterActor 注销 Actor.
 	// 若 Actor 未注册, 返回 ErrActorNotExists 错误.

@@ -168,6 +168,10 @@ func (m *messageCompletedAsyncRPC) handle(a actorImpl) {
 		err:     m.err,
 	}
 	m.cb(a, resp)
+	if a.core().pendingAsyncRPC > 0 {
+		a.core().pendingAsyncRPC--
+	}
+	a.core().onAsyncCallbackDone(a)
 	resp.release()
 }
 
@@ -239,6 +243,7 @@ func newMessageAsyncCall(id uint32, args any, err error) *messageAsynnCall {
 // handle 处理消息.
 func (m *messageAsynnCall) handle(a actorImpl) {
 	a.core().invokeAsyncCall(a, m.id, m.args, m.err)
+	a.core().onAsyncCallbackDone(a)
 }
 
 // handleError 处理错误.
@@ -249,3 +254,136 @@ func (m *messageAsynnCall) release(a actorImpl) {}
 
 // discard 在消息未进入 Actor 信箱时回收资源.
 func (m *messageAsynnCall) discard(s *Service) {}
+
+// messageStartMigration 通知源 Actor 开始迁移。
+// 当前迁移目标由 Service 统一锁定，因此该消息只负责触发 draining 流程。
+type messageStartMigration struct{}
+
+func newMessageStartMigration() *messageStartMigration {
+	return &messageStartMigration{}
+}
+
+func (m *messageStartMigration) handle(a actorImpl) {
+	core := a.core()
+	if core.isMigrated() || core.isMigratingOut() || core.isMigrationDraining() {
+		return
+	}
+
+	// 这里只切换到 draining 状态，后续会等待异步闭环完成后再真正发起迁移。
+	core.updateFlag(actorFlagMigrationDraining, true)
+	core.service().markMigrationActorDraining(a.ActorUID())
+	core.tryStartMigration(a)
+}
+
+func (m *messageStartMigration) handleError(a actorImpl, err error) {}
+func (m *messageStartMigration) release(a actorImpl)                {}
+func (m *messageStartMigration) discard(s *Service)                 {}
+
+// messageMigrationResult 表示目标节点返回的迁移结果。
+// 只有源租约和启动序号都匹配时，才允许推进源 Actor 的迁移状态。
+type messageMigrationResult struct {
+	sourceLeaseID string
+	startSeq      uint32
+	errCode       ErrCode
+}
+
+func newMessageMigrationResult(sourceLeaseID string, startSeq uint32, errCode ErrCode) *messageMigrationResult {
+	return &messageMigrationResult{
+		sourceLeaseID: sourceLeaseID,
+		startSeq:      startSeq,
+		errCode:       errCode,
+	}
+}
+
+func (m *messageMigrationResult) handle(a actorImpl) {
+	core := a.core()
+	migration := core.migrationRuntime()
+	if !core.isMigratingOut() || migration == nil || core.leaseID != m.sourceLeaseID || migration.startSeq != m.startSeq {
+		return
+	}
+	if migration.resultTimerID != TimerIdNone {
+		core.StopTimer(migration.resultTimerID)
+		migration.resultTimerID = TimerIdNone
+	}
+
+	if m.errCode == ErrCodeOK {
+		core.updateFlag(actorFlagMigratingOut, false)
+		core.updateFlag(actorFlagMigrated, true)
+		migration.startSeq = 0
+		// 目标节点已确认接管，释放源节点的迁移并发槽位供下一批 Actor 使用。
+		core.service().releaseMigrationSlot(a.ActorUID())
+		// 目标节点确认接管成功后，Service 侧计划表也同步切到 migrated，
+		// 这样整轮迁移就可以继续向“收敛完成”推进。
+		core.service().markMigrationActorMigrated(a.ActorUID())
+		if migration.retryTimerID != TimerIdNone {
+			core.StopTimer(migration.retryTimerID)
+			migration.retryTimerID = TimerIdNone
+		}
+
+		// 源 Actor 进入 migrated 后不再续租，避免旧租约继续对外暴露。
+		if core.keepAliveTimerId != TimerIdNone {
+			core.StopTimer(core.keepAliveTimerId)
+			core.keepAliveTimerId = TimerIdNone
+		}
+		return
+	}
+
+	core.restoreMigration(a, m.errCode)
+}
+
+func (m *messageMigrationResult) handleError(a actorImpl, err error) {}
+func (m *messageMigrationResult) release(a actorImpl)                {}
+func (m *messageMigrationResult) discard(s *Service)                 {}
+
+// messageApplyInboundMigration 在目标 Actor 启动后应用迁移上下文。
+// 该消息负责恢复目标侧接管所需的源租约和会话信息，并触发业务恢复回调。
+type messageApplyInboundMigration struct {
+	sourceNodeID  string
+	sourceLeaseID string
+	startSeq      uint32
+	session       ActorSession
+	done          chan error
+}
+
+func newMessageApplyInboundMigration(sourceNodeID, sourceLeaseID string, startSeq uint32, session ActorSession) *messageApplyInboundMigration {
+	return &messageApplyInboundMigration{
+		sourceNodeID:  sourceNodeID,
+		sourceLeaseID: sourceLeaseID,
+		startSeq:      startSeq,
+		session:       session,
+		done:          make(chan error, 1),
+	}
+}
+
+func (m *messageApplyInboundMigration) handle(a actorImpl) {
+	core := a.core()
+	migration := core.ensureMigrationRuntime()
+	migration.acceptedSourceNodeID = m.sourceNodeID
+	migration.acceptedSourceLeaseID = m.sourceLeaseID
+
+	// 面向客户端的 Actor 需要恢复源节点转移过来的会话，保证连接无感切换。
+	if ca, ok := a.(*cactor); ok && m.session.NodeId != "" {
+		ca.session = m.session
+	}
+
+	if behavior, ok := a.Behavior().(ActorMigrationBehavior); ok {
+		m.done <- behavior.OnMigrateIn(ActorMigrationContext{
+			UID:           a.ActorUID(),
+			SourceNodeID:  m.sourceNodeID,
+			SourceLeaseID: m.sourceLeaseID,
+			TargetNodeID:  core.service().nodeId(),
+			TargetLeaseID: core.leaseID,
+			StartSeq:      m.startSeq,
+			Session:       m.session,
+		})
+	} else {
+		// 未实现迁移恢复接口时，默认视为无需额外恢复逻辑。
+		m.done <- nil
+	}
+}
+
+func (m *messageApplyInboundMigration) handleError(a actorImpl, err error) {
+	m.done <- err
+}
+func (m *messageApplyInboundMigration) release(a actorImpl) {}
+func (m *messageApplyInboundMigration) discard(s *Service)  {}

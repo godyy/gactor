@@ -52,7 +52,7 @@ func (a *actorTimerTestBehavior) OnStart() error {
 	return nil
 }
 
-func (a *actorTimerTestBehavior) OnStop() error {
+func (a *actorTimerTestBehavior) OnStop(ActorStopContext) error {
 	atomic.AddInt32(&a.state.stopCount, 1)
 	return nil
 }

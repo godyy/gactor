@@ -74,17 +74,17 @@ type forwardTestActor struct {
 	Actor
 }
 
-func (a *forwardTestActor) OnStart() error { return nil }
-func (a *forwardTestActor) OnStop() error  { return nil }
+func (a *forwardTestActor) OnStart() error                { return nil }
+func (a *forwardTestActor) OnStop(ActorStopContext) error { return nil }
 
 type forwardTestCActor struct {
 	CActor
 }
 
-func (a *forwardTestCActor) OnStart() error  { return nil }
-func (a *forwardTestCActor) OnStop() error   { return nil }
-func (a *forwardTestCActor) OnConnected()    {}
-func (a *forwardTestCActor) OnDisconnected() {}
+func (a *forwardTestCActor) OnStart() error                { return nil }
+func (a *forwardTestCActor) OnStop(ActorStopContext) error { return nil }
+func (a *forwardTestCActor) OnConnected()                  {}
+func (a *forwardTestCActor) OnDisconnected()               {}
 
 type forwardTestServiceHandler struct {
 	registry ActorRegistry

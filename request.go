@@ -69,6 +69,10 @@ type request interface {
 
 	// zap.Field支持
 	zapcore.ObjectMarshaler
+
+	// buildMigrationForwardRawPacket 构造迁移转发包。
+	// 由具体请求类型自行决定如何恢复内层原始请求头，避免外层重复按类型分发。
+	buildMigrationForwardRawPacket(s *Service, uid ActorUID, sourceLeaseID string) (packetHead, []byte, error)
 }
 
 type requestCom struct {
@@ -230,6 +234,22 @@ func (req *rawRequest) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 	return nil
 }
 
+// buildMigrationForwardRawPacket 构造 RawReq 的迁移转发包。
+// 这里会把剩余超时时间重新编码进内层请求头，避免目标节点拿到已过期的请求。
+func (req *rawRequest) buildMigrationForwardRawPacket(s *Service, uid ActorUID, sourceLeaseID string) (packetHead, []byte, error) {
+	remaining := time.Until(time.UnixMilli(req.deadlineMs)) + time.Duration(s.getCfg().MaxRTT)*time.Millisecond
+	if remaining <= 0 {
+		return nil, nil, ErrTimeout
+	}
+	innerHead := newRawReqHead(req.seq, uid.ID, req.sid, uint32(remaining.Milliseconds()))
+	innerPacket, err := s.encodeRawPacket(&innerHead, req.payload.UnreadData())
+	if err != nil {
+		return nil, nil, err
+	}
+	outerHead := newS2SMigrateForwardHead(s.genSeq(), uid, sourceLeaseID, req.fromNodeId, PacketTypeRawReq)
+	return &outerHead, innerPacket, nil
+}
+
 // rpcRequest 对应 PacketTypeS2SRpc.
 type rpcRequest struct {
 	requestCom
@@ -325,6 +345,22 @@ func (req *rpcRequest) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 	return nil
 }
 
+// buildMigrationForwardRawPacket 构造 RPC 请求的迁移转发包。
+// 迁移时需要保留原始来源 Actor 和剩余超时，确保回复链路与超时语义不变。
+func (req *rpcRequest) buildMigrationForwardRawPacket(s *Service, uid ActorUID, sourceLeaseID string) (packetHead, []byte, error) {
+	remaining := time.Until(time.UnixMilli(req.deadlineMs)) + time.Duration(s.getCfg().MaxRTT)*time.Millisecond
+	if remaining <= 0 {
+		return nil, nil, ErrTimeout
+	}
+	innerHead := newS2SRpcHead(req.seq, req.reqId, req.fromId, uid, uint32(remaining.Milliseconds()))
+	innerPacket, err := s.encodeRawPacket(&innerHead, req.payload.UnreadData())
+	if err != nil {
+		return nil, nil, err
+	}
+	outerHead := newS2SMigrateForwardHead(s.genSeq(), uid, sourceLeaseID, req.fromNodeId, PacketTypeS2SRpc)
+	return &outerHead, innerPacket, nil
+}
+
 // castRequest 对应 PacketTypeS2SCast.
 type castRequest struct {
 	requestCom
@@ -382,4 +418,15 @@ func (req *castRequest) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 	enc.AddUint32("seq", req.seq)
 	enc.AddObject("fromId", &req.fromId)
 	return nil
+}
+
+// buildMigrationForwardRawPacket 构造 Cast 请求的迁移转发包。
+func (req *castRequest) buildMigrationForwardRawPacket(s *Service, uid ActorUID, sourceLeaseID string) (packetHead, []byte, error) {
+	innerHead := newS2SCastHead(req.seq, req.fromId, uid)
+	innerPacket, err := s.encodeRawPacket(&innerHead, req.payload.UnreadData())
+	if err != nil {
+		return nil, nil, err
+	}
+	outerHead := newS2SMigrateForwardHead(s.genSeq(), uid, sourceLeaseID, req.fromNodeId, PacketTypeS2SCast)
+	return &outerHead, innerPacket, nil
 }

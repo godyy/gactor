@@ -38,7 +38,18 @@ func (u *User) OnStart() error {
 	return nil
 }
 
-func (u *User) OnStop() error {
+func (u *User) OnStop(gactor.ActorStopContext) error {
+	return nil
+}
+
+func (u *User) OnMigrateOut(ctx gactor.ActorMigrationContext) error {
+	return saveMigrationSnapshot(ctx, migrationSnapshot{Name: u.name})
+}
+
+func (u *User) OnMigrateIn(ctx gactor.ActorMigrationContext) error {
+	if snapshot, ok := loadMigrationSnapshot(ctx); ok {
+		u.name = snapshot.Name
+	}
 	return nil
 }
 

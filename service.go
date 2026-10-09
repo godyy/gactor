@@ -59,6 +59,9 @@ type ServiceConfig struct {
 	// QueueWriteTimeAlarmThreshold 队列写入时间报警阈值.
 	// 默认值 50ms.
 	QueueWriteTimeAlarmThreshold time.Duration
+
+	// Migration 动态迁移配置.
+	Migration MigrationConfig
 }
 
 func (c *ServiceConfig) init() {
@@ -99,6 +102,15 @@ func (c *ServiceConfig) init() {
 
 	if c.QueueWriteTimeAlarmThreshold <= 0 {
 		c.QueueWriteTimeAlarmThreshold = 50 * time.Millisecond
+	}
+	if c.Migration.MigrationMaxConcurrentActors <= 0 {
+		c.Migration.MigrationMaxConcurrentActors = 16
+	}
+	if c.Migration.MigrationMaxConcurrentForwards <= 0 {
+		c.Migration.MigrationMaxConcurrentForwards = 256
+	}
+	if c.Migration.RequireTrustedMigrationNodes && len(c.Migration.TrustedMigrationNodeIDs) == 0 {
+		panic("gactor: ServiceConfig: TrustedMigrationNodeIDs required for strict migration trust")
 	}
 }
 
@@ -166,9 +178,15 @@ type Service struct {
 
 	startActorGroup singleflight.Group // 合并同一 Actor 的并发启动慢路径.
 
+	mtxMigrationAdmission sync.RWMutex // 协调迁移计划冻结与普通 Actor 创建.
+
 	mtxActor              sync.RWMutex            // Actor 读写锁.
 	priorityActors        map[int]*priorityActors // 按优先级管理的 Actor 集合.
 	maxActorPriorityIndex int                     // 当前 Actor 最大优先级索引.
+
+	mtxMigration           sync.RWMutex             // 迁移运行时读写锁.
+	migration              *serviceMigrationRuntime // 迁移运行时状态；仅在启动迁移时初始化，所有字段受 mtxMigration 保护。
+	migrationControlDenied uint64                   // 被拒绝的迁移控制包数量；迁移启动前也需要保留该观测值。
 }
 
 func NewService(cfg *ServiceConfig, option ...ServiceOption) *Service {
@@ -357,6 +375,8 @@ func (s *Service) Stop() error {
 	s.unlockState(false)
 
 	s.logger.Info("stopping")
+	// 停机不等同于迁移收敛；立即唤醒等待者并返回明确的停机错误。
+	s.abortMigrationWaiters()
 
 	s.stopActors()
 

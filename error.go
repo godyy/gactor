@@ -25,19 +25,26 @@ const (
 	_                        = ErrCode(iota + 10000)
 	ErrCodeServiceNotStarted // 服务未启动
 	ErrCodeServiceStopped    // 服务已停止
+	ErrCodeServiceMigrating  // 服务迁移中
 )
 
 const (
-	_                               = ErrCode(iota + 20000)
-	ErrCodeActorUndefined           // Actor 未定义.
-	ErrCodeActorNotExists           // Actor 不存在.
-	ErrCodeActorRegisteredByAnother // Actor 被其它节点注册.
-	ErrCodeActorStartFailed         // Actor 启动失败.
-	ErrCodeActorBusy                // Actor 繁忙.
-	ErrCodeActorLoopError           // Actor 循环错误.
-	ErrCodeActorNotConnected        // Actor 未连接.
-	ErrCodeActorForwardUnsupported  // Actor 不支持透传.
-	ErrCodeActorConnectedByAnother  // Actor 被其他人连接.
+	_                                = ErrCode(iota + 20000)
+	ErrCodeActorUndefined            // Actor 未定义.
+	ErrCodeActorNotExists            // Actor 不存在.
+	ErrCodeActorRegisteredByAnother  // Actor 被其它节点注册.
+	ErrCodeActorStartFailed          // Actor 启动失败.
+	ErrCodeActorBusy                 // Actor 繁忙.
+	ErrCodeActorLoopError            // Actor 循环错误.
+	ErrCodeActorNotConnected         // Actor 未连接.
+	ErrCodeActorForwardUnsupported   // Actor 不支持透传.
+	ErrCodeActorConnectedByAnother   // Actor 被其他人连接.
+	ErrCodeMigrationNotStarted       // 迁移尚未开始.
+	ErrCodeMigrationInProgress       // 迁移进行中.
+	ErrCodeMigrationTargetInvalid    // 迁移目标无效.
+	ErrCodeMigrationForwardingClosed // 迁移转发阶段已结束.
+	ErrCodeMigrationForwardingActive // 迁移转发阶段尚未结束.
+	ErrCodeMigrationForwardBusy      // 迁移转发背压中.
 )
 
 // errCodeStrings 错误码文本.
@@ -49,16 +56,23 @@ var errCodeStrings = map[ErrCode]string{
 
 	ErrCodeServiceNotStarted: "service not started",
 	ErrCodeServiceStopped:    "service stopped",
+	ErrCodeServiceMigrating:  "service migrating",
 
-	ErrCodeActorUndefined:           "actor undefined",
-	ErrCodeActorNotExists:           "actor not exists",
-	ErrCodeActorRegisteredByAnother: "actor registered by another",
-	ErrCodeActorStartFailed:         "actor start failed",
-	ErrCodeActorBusy:                "actor busy",
-	ErrCodeActorLoopError:           "actor loop error",
-	ErrCodeActorNotConnected:        "actor not connected",
-	ErrCodeActorForwardUnsupported:  "actor forward unsupported",
-	ErrCodeActorConnectedByAnother:  "actor connected by another",
+	ErrCodeActorUndefined:            "actor undefined",
+	ErrCodeActorNotExists:            "actor not exists",
+	ErrCodeActorRegisteredByAnother:  "actor registered by another",
+	ErrCodeActorStartFailed:          "actor start failed",
+	ErrCodeActorBusy:                 "actor busy",
+	ErrCodeActorLoopError:            "actor loop error",
+	ErrCodeActorNotConnected:         "actor not connected",
+	ErrCodeActorForwardUnsupported:   "actor forward unsupported",
+	ErrCodeActorConnectedByAnother:   "actor connected by another",
+	ErrCodeMigrationNotStarted:       "migration not started",
+	ErrCodeMigrationInProgress:       "migration in progress",
+	ErrCodeMigrationTargetInvalid:    "migration target invalid",
+	ErrCodeMigrationForwardingClosed: "migration forwarding closed",
+	ErrCodeMigrationForwardingActive: "migration forwarding active",
+	ErrCodeMigrationForwardBusy:      "migration forwarding busy",
 }
 
 func (ec ErrCode) String() string {

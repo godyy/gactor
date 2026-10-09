@@ -342,6 +342,182 @@ func svcHandlePacketS2SForward(s *Service, nodeId string, b *Buffer) error {
 	return nil
 }
 
+// svcHandlePacketS2SMigrateStart PacketTypeS2SMigrateStart 处理器.
+func svcHandlePacketS2SMigrateStart(s *Service, nodeId string, b *Buffer) error {
+	var head s2sMigrateStartPacketHead
+	if err := head.decode(b); err != nil {
+		return pkgerrors.WithMessage(err, "gactor: [HandlePacketS2SMigrateStart] decode request Head")
+	}
+
+	if err := s.sendAckPacket(nodeId, &head); err != nil {
+		s.getLogger().ErrorFields("[HandlePacketS2SMigrateStart] send ack packet failed",
+			lfdRemoteNodeId(nodeId), lfdSeq(head.getSeq()), s.lfdActorUID("uid", head.uid), lfdError(err))
+	}
+	s.freeBuffer(b)
+
+	if s.checkStarted() != nil {
+		return nil
+	}
+	// sourceNodeID 是迁移代际的一部分，必须和实际网络来源一致。
+	// 白名单由部署配置或已认证 NetAgent 提供，避免任意节点伪造接管请求。
+	if nodeId != head.sourceNodeID || !s.isTrustedMigrationNode(nodeId) {
+		s.denyMigrationControl()
+		s.getLogger().WarnFields("[HandlePacketS2SMigrateStart] ignore untrusted source node",
+			lfdRemoteNodeId(nodeId), lfdSeq(head.getSeq()), s.lfdActorUID("uid", head.uid))
+		return nil
+	}
+
+	return s.startInboundMigration(head)
+}
+
+// svcHandlePacketS2SMigrateResult PacketTypeS2SMigrateResult 处理器.
+func svcHandlePacketS2SMigrateResult(s *Service, nodeId string, b *Buffer) error {
+	var head s2sMigrateResultPacketHead
+	if err := head.decode(b); err != nil {
+		return pkgerrors.WithMessage(err, "gactor: [HandlePacketS2SMigrateResult] decode request Head")
+	}
+
+	if err := s.sendAckPacket(nodeId, &head); err != nil {
+		s.getLogger().ErrorFields("[HandlePacketS2SMigrateResult] send ack packet failed",
+			lfdRemoteNodeId(nodeId), lfdSeq(head.getSeq()), s.lfdActorUID("uid", head.uid), lfdError(err))
+	}
+	s.freeBuffer(b)
+
+	if s.checkStarted() != nil {
+		return nil
+	}
+	// 迁移结果只能由本轮锁定目标节点返回，避免异常节点或迟到包错误推进源 Actor 状态。
+	if !s.isMigrationTarget(nodeId) || !s.isTrustedMigrationNode(nodeId) {
+		s.denyMigrationControl()
+		s.getLogger().WarnFields("[HandlePacketS2SMigrateResult] ignore unexpected source node",
+			lfdRemoteNodeId(nodeId), lfdSeq(head.getSeq()), s.lfdActorUID("uid", head.uid))
+		return nil
+	}
+
+	actor, err := s.refActor(head.uid)
+	if err != nil || actor == nil {
+		return err
+	}
+	defer actor.core().deref()
+	return actor.core().receiveMessage(newMessageMigrationResult(head.sourceLeaseID, head.startSeq, head.errCode))
+}
+
+// svcHandlePacketS2SMigrateForward PacketTypeS2SMigrateForward 处理器.
+func svcHandlePacketS2SMigrateForward(s *Service, nodeId string, b *Buffer) error {
+	var head s2sMigrateForwardPacketHead
+	if err := head.decode(b); err != nil {
+		return pkgerrors.WithMessage(err, "gactor: [HandlePacketS2SMigrateForward] decode request Head")
+	}
+
+	if err := s.sendAckPacket(nodeId, &head); err != nil {
+		s.getLogger().ErrorFields("[HandlePacketS2SMigrateForward] send ack packet failed",
+			lfdRemoteNodeId(nodeId), lfdSeq(head.getSeq()), s.lfdActorUID("uid", head.uid), lfdError(err))
+	}
+
+	if s.checkStarted() != nil {
+		s.freeBuffer(b)
+		return nil
+	}
+	if !s.isTrustedMigrationNode(nodeId) || !s.acceptsMigrationLease(head.uid, nodeId, head.sourceLeaseID) {
+		s.denyMigrationControl()
+		s.freeBuffer(b)
+		return nil
+	}
+
+	return s.handleMigrateForwardPacket(head, b)
+}
+
+func (s *Service) handleMigrateForwardPacket(head s2sMigrateForwardPacketHead, b *Buffer) error {
+	var inner Buffer
+	inner.SetBuf(append([]byte(nil), b.UnreadData()...))
+	s.freeBuffer(b)
+
+	pt, err := inner.readPacketType()
+	if err != nil {
+		s.freeBuffer(&inner)
+		return err
+	}
+	if pt != head.innerPacketType {
+		s.freeBuffer(&inner)
+		return errors.New("gactor: migrate forward inner packet type mismatch")
+	}
+
+	// 先把迁移转发包恢复为本地消息，再统一投递到目标 Actor，
+	// 避免每个分支都重复 send2LocalActor / discard 逻辑。
+	msg, err := s.buildMigrateForwardMessage(head, &inner)
+	if err != nil {
+		return err
+	}
+	if msg == nil {
+		return nil
+	}
+	if err := s.send2LocalActor(head.uid, msg, ""); err != nil {
+		msg.discard(s)
+		return err
+	}
+	return nil
+}
+
+// buildMigrateForwardMessage 将迁移转发包恢复为本地可投递的消息。
+// 成功返回的 message 会接管 inner 的生命周期；返回 nil 表示该消息可直接忽略。
+func (s *Service) buildMigrateForwardMessage(head s2sMigrateForwardPacketHead, inner *Buffer) (message, error) {
+	switch head.innerPacketType {
+	case PacketTypeRawReq:
+		var innerHead rawReqPacketHead
+		if err := innerHead.decode(inner); err != nil {
+			s.freeBuffer(inner)
+			return nil, err
+		}
+		timeout := time.Duration(int(innerHead.timeout)-s.getCfg().MaxRTT) * time.Millisecond
+		if timeout <= 0 {
+			s.freeBuffer(inner)
+			return nil, nil
+		}
+		req := newContext(s, newRawRequest(head.originNodeID, innerHead.seq, innerHead.sid, *inner, time.Now().Add(timeout).UnixMilli()))
+		return req, nil
+	case PacketTypeS2SRpc:
+		var innerHead s2sRpcPacketHead
+		if err := innerHead.decode(inner); err != nil {
+			s.freeBuffer(inner)
+			return nil, err
+		}
+		timeout := time.Duration(int(innerHead.timeout)-s.getCfg().MaxRTT) * time.Millisecond
+		if timeout <= 0 {
+			s.freeBuffer(inner)
+			return nil, nil
+		}
+		req := newContext(s, newRPCRequest(head.originNodeID, innerHead.seq, innerHead.reqId, innerHead.fromId, *inner, time.Now().Add(timeout).UnixMilli()))
+		return req, nil
+	case PacketTypeS2SCast:
+		var innerHead s2sCastPacketHead
+		if err := innerHead.decode(inner); err != nil {
+			s.freeBuffer(inner)
+			return nil, err
+		}
+		req := newContext(s, newCastRequest(head.originNodeID, innerHead.seq, innerHead.fromId, *inner))
+		return req, nil
+	case PacketTypeConnect:
+		var innerHead connectPacketHead
+		if err := innerHead.decode(inner); err != nil {
+			s.freeBuffer(inner)
+			return nil, err
+		}
+		s.freeBuffer(inner)
+		return newMessageConnect(head.originNodeID, innerHead.sid), nil
+	case PacketTypeDisconnect:
+		var innerHead disconnectPacketHead
+		if err := innerHead.decode(inner); err != nil {
+			s.freeBuffer(inner)
+			return nil, err
+		}
+		s.freeBuffer(inner)
+		return newMessageDisconnected(head.originNodeID, innerHead.sid), nil
+	default:
+		s.freeBuffer(inner)
+		return nil, errors.New("gactor: unsupported migrate inner packet type")
+	}
+}
+
 // serviceLocalPacketHandlers Service 本地 Packet 处理器注册.
 var serviceLocalPacketHandlers = map[PacketType]func(s *Service, nodeId string, b *Buffer) error{
 	PacketTypeS2SRpcResp: svcHandlePacketS2SRpcResp,
@@ -370,14 +546,17 @@ func (s *Service) onLocalPacket(b []byte) error {
 
 // servicePacketHandlers Service Packet 处理器注册.
 var servicePacketHandlers = map[PacketType]func(s *Service, nodeId string, b *Buffer) error{
-	PacketTypeAck:        svcHandlePacketAck,
-	PacketTypeConnect:    svcHandlePacketConnect,
-	PacketTypeDisconnect: svcHandlePacketDisconnect,
-	PacketTypeRawReq:     svcHandlePacketRawReq,
-	PacketTypeS2SRpc:     svcHandlePacketS2SRpc,
-	PacketTypeS2SRpcResp: svcHandlePacketS2SRpcResp,
-	PacketTypeS2SCast:    svcHandlePacketS2SCast,
-	PacketTypeS2SForward: svcHandlePacketS2SForward,
+	PacketTypeAck:               svcHandlePacketAck,
+	PacketTypeConnect:           svcHandlePacketConnect,
+	PacketTypeDisconnect:        svcHandlePacketDisconnect,
+	PacketTypeRawReq:            svcHandlePacketRawReq,
+	PacketTypeS2SRpc:            svcHandlePacketS2SRpc,
+	PacketTypeS2SRpcResp:        svcHandlePacketS2SRpcResp,
+	PacketTypeS2SCast:           svcHandlePacketS2SCast,
+	PacketTypeS2SForward:        svcHandlePacketS2SForward,
+	PacketTypeS2SMigrateStart:   svcHandlePacketS2SMigrateStart,
+	PacketTypeS2SMigrateResult:  svcHandlePacketS2SMigrateResult,
+	PacketTypeS2SMigrateForward: svcHandlePacketS2SMigrateForward,
 }
 
 // HandlePacket 处理字节切片 b 指代的网络数据包.

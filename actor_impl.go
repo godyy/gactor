@@ -99,6 +99,18 @@ actor_loop_for:
 			}
 		}
 
+		// drain/等待迁移结果阶段只处理优先消息，不消费普通信箱。
+		if core.hasFlag(actorFlagMigrationDraining) || core.hasFlag(actorFlagMigratingOut) {
+			select {
+			case msg := <-core.priMessageBox:
+				actorHandleMsg(a, msg)
+			case <-core.messageNotify:
+			case <-core.sigStop:
+				break actor_loop_for
+			}
+			continue
+		}
+
 		// 处理消息, 等待前.
 		if msg, ok := core.messageBox.Dequeue(); ok {
 			core.waitMessage.Store(false)
@@ -157,8 +169,8 @@ actor_loop_for:
 func actorStopWithErr(a actorImpl, err error) {
 	core := a.core()
 
-	if err := core.stopWithErr(); err != nil {
-		core.getLogger().ErrorFields("stopWithErr failed", lfdError(err))
+	if stopErr := core.stopWithErr(); stopErr != nil {
+		core.getLogger().ErrorFields("stopWithErr failed", lfdError(stopErr))
 		return
 	}
 
@@ -274,6 +286,14 @@ func actorHandleMsg(a actorImpl, msg message) {
 	defer recoverAndLog("actor handle msg panic", a.core().getLogger(), func() {
 		a.core().service().monitorActorPanic(a.core().category)
 	})
+
+	// 迁移中的消息需要优先经过迁移状态机分流，
+	// 避免业务处理与迁移转发/回滚流程互相打架。
+	if a.core().handleMigrationMsg(a, msg) {
+		msg.release(a)
+		return
+	}
+
 	msg.handle(a)
 	msg.release(a)
 }
@@ -373,12 +393,30 @@ const (
 	// actorFlagShutdown 表示 Actor 停止时, 直接注销 Actor, 否则, 刷新 Actor TTL, 确保
 	// 在一小段时间内, 其还能在当前实例上被唤醒.
 	actorFlagShutdown = int8(1 << 0)
+	// actorFlagMigratingOut 表示源 Actor 已发出迁移开始包，正在等待目标节点结果。
+	actorFlagMigratingOut = int8(1 << 1)
+	// actorFlagMigrated 表示源 Actor 已迁移完成，但本地实例仍保留转发职责。
+	actorFlagMigrated = int8(1 << 2)
+	// actorFlagMigrationDraining 表示源 Actor 正在等待异步闭环完成，再正式发起迁移。
+	actorFlagMigrationDraining = int8(1 << 3)
 )
 
 // actorAsyncCall Actor 异步调用.
 type actorAsyncCall struct {
 	f          ActorFunc // 异步调用方法.
 	timeoutTid TimerId   // 超时定时器ID.
+}
+
+// actorMigrationRuntime 维护 Actor 迁移阶段的运行时上下文。
+// 这里同时承载源侧等待迁移结果所需的信息，以及目标侧接收转发所需的来源信息。
+type actorMigrationRuntime struct {
+	resultTimerID         TimerId // 迁移结果等待定时器.
+	retryTimerID          TimerId // 迁移失败后的重试定时器.
+	retryAttempts         uint32  // 当前迁移轮次已执行的重试次数.
+	waitingForSlot        bool    // 是否等待 Service 的迁移并发槽位，不属于失败重试。
+	startSeq              uint32  // 迁移开始包序号.
+	acceptedSourceNodeID  string  // 目标侧接收转发时绑定的源节点。
+	acceptedSourceLeaseID string  // 目标侧接收转发时绑定的源租约。
 }
 
 // actorCore Actor 内部核心实现.
@@ -393,15 +431,17 @@ type actorCore struct {
 	waitMessage      atomic.Bool               // 是否等待消息.
 	asyncCallId      uint32                    // 异步调用ID.
 	asyncCalls       map[uint32]actorAsyncCall // 异步调用.
+	pendingAsyncRPC  int                       // 未闭环的异步 RPC 数量.
 	sigStop          chan struct{}             // 停机信号.
 	logger           glog.Logger               // 日志工具.
 
-	mtx              sync.RWMutex // 读写锁.
-	state            int8         // 状态.
-	flag             int8         // 标志.
-	refCount         int          // 引用计数. 当引用计数大于 0 时，Actor 不会被回收.
-	recycleTimerId   TimerId      // 回收定时器ID.
-	keepAliveTimerId TimerId      // 存续定时器ID.
+	mtx              sync.RWMutex           // 读写锁.
+	state            int8                   // 状态.
+	flag             int8                   // 标志.
+	refCount         int                    // 引用计数. 当引用计数大于 0 时，Actor 不会被回收.
+	recycleTimerId   TimerId                // 回收定时器ID.
+	keepAliveTimerId TimerId                // 存续定时器ID.
+	migration        *actorMigrationRuntime // 迁移运行时上下文，按需初始化。
 }
 
 // newActorCore 构造 actorCore.
@@ -425,6 +465,20 @@ func newActorCore(ad *actorDefineBase, id ActorID, leaseId string, svc *Service)
 
 func (a *actorCore) core() *actorCore {
 	return a
+}
+
+// ensureMigrationRuntime 返回可写的迁移运行时上下文。
+// 迁移只会发生在少数 Actor 上，因此这里采用懒初始化降低常规场景的常驻开销。
+func (a *actorCore) ensureMigrationRuntime() *actorMigrationRuntime {
+	if a.migration == nil {
+		a.migration = &actorMigrationRuntime{}
+	}
+	return a.migration
+}
+
+// migrationRuntime 返回只读迁移运行时上下文。
+func (a *actorCore) migrationRuntime() *actorMigrationRuntime {
+	return a.migration
 }
 
 func (a *actorCore) Category() ActorCategory {
@@ -516,8 +570,15 @@ func (a *actorCore) checkNotStopped() error {
 	return nil
 }
 
-// updateFlag 更新标志
+// updateFlag 更新跨 goroutine 读取的运行标志。
 func (a *actorCore) updateFlag(flag int8, set bool) {
+	a.mtx.Lock()
+	defer a.mtx.Unlock()
+	a.updateFlagLocked(flag, set)
+}
+
+// updateFlagLocked 在已持有 a.mtx 写锁时更新运行标志。
+func (a *actorCore) updateFlagLocked(flag int8, set bool) {
 	if set {
 		a.flag |= flag
 	} else {
@@ -527,7 +588,21 @@ func (a *actorCore) updateFlag(flag int8, set bool) {
 
 // hasFlag 返回是否有标志.
 func (a *actorCore) hasFlag(flag int8) bool {
+	a.mtx.RLock()
+	defer a.mtx.RUnlock()
 	return a.flag&flag != 0
+}
+
+func (a *actorCore) isMigrationDraining() bool {
+	return a.hasFlag(actorFlagMigrationDraining)
+}
+
+func (a *actorCore) isMigratingOut() bool {
+	return a.hasFlag(actorFlagMigratingOut)
+}
+
+func (a *actorCore) isMigrated() bool {
+	return a.hasFlag(actorFlagMigrated)
 }
 
 // getLogger 返回 getLogger.
@@ -565,7 +640,7 @@ func (a *actorCore) stop(shutdown bool) error {
 	// 开始停机.
 	a.state = actorStateStopping
 	if shutdown {
-		a.updateFlag(actorFlagShutdown, true)
+		a.updateFlagLocked(actorFlagShutdown, true)
 	}
 	close(a.sigStop)
 	return nil
@@ -580,6 +655,18 @@ func (a *actorCore) stopWithErr() error {
 	a.state = actorStateStopping
 	a.unlock(false)
 	return nil
+}
+
+// getStopReason 根据最终状态实时推导 OnStop 的原因。
+// Service 停机优先于迁移回收，避免业务将停机过程错误当作正常迁移完成。
+func (a *actorCore) getStopReason() ActorStopReason {
+	if a.hasFlag(actorFlagShutdown) {
+		return ActorStopReasonShutdown
+	}
+	if a.hasFlag(actorFlagMigrated) {
+		return ActorStopReasonMigrated
+	}
+	return ActorStopReasonNormal
 }
 
 // stopped 最终停机逻辑.
@@ -634,6 +721,17 @@ func (a *actorCore) deref() error {
 func (a *actorCore) receiveMessage(msg message) error {
 	if err := a.checkStarted(); err != nil {
 		return err
+	}
+
+	// 迁移结果需要在 draining/migratingOut 阶段继续推进状态机，
+	// 因此直接进入优先信箱，避免被普通信箱阻塞。
+	if _, ok := msg.(*messageMigrationResult); ok {
+		begin := time.Now()
+		a.priMessageBox <- msg
+		if d := time.Since(begin); d > a.svc.getCfg().QueueWriteTimeAlarmThreshold {
+			a.getLogger().Warnf("receive priority migration message cost:%dms", d.Milliseconds())
+		}
+		return nil
 	}
 
 	if !a.messageBox.Enqueue(msg) {
@@ -713,6 +811,10 @@ func (a *actorCore) receiveTriggerdTimer(tid TimerId, args any, cb ActorTimerFun
 	if a.checkStarted() != nil {
 		return
 	}
+	allowMigrationTimer := isMigrationTimerArgs(args)
+	if !allowMigrationTimer && (a.isMigrationDraining() || a.isMigratingOut() || a.isMigrated()) {
+		return
+	}
 
 	msg := newMessageTriggeredTimer(tid, cb, args)
 	begin := time.Now()
@@ -727,10 +829,22 @@ func (a *actorCore) receiveTriggerdTimer(tid TimerId, args any, cb ActorTimerFun
 	}
 }
 
+func isMigrationTimerArgs(args any) bool {
+	switch args.(type) {
+	case migrationResultTimerArgs, migrationRetryTimerArgs:
+		return true
+	default:
+		return false
+	}
+}
+
 // receiveAsyncCall 接收异步调用参数.
 func (a *actorCore) receiveAsyncCall(id uint32, value any, err error) error {
-	if err := a.checkNotStopped(); err != nil {
-		return err
+	if checkErr := a.checkNotStopped(); checkErr != nil {
+		return checkErr
+	}
+	if a.isMigrated() {
+		return ErrCodeMigrationInProgress
 	}
 
 	msg := newMessageAsyncCall(id, value, err)
@@ -744,7 +858,7 @@ func (a *actorCore) receiveAsyncCall(id uint32, value any, err error) error {
 
 // invokeAsyncCall 调用异步调用.
 func (a *actorCore) invokeAsyncCall(ai actorImpl, id uint32, value any, err error) {
-	if err := a.checkNotStopped(); err != nil {
+	if checkErr := a.checkNotStopped(); checkErr != nil {
 		return
 	}
 	if a.asyncCalls == nil {
@@ -826,6 +940,8 @@ func (a *actorCore) AsyncRPCWithDeadline(to ActorUID, params any, cb ActorRPCFun
 		return err
 	}
 
+	a.pendingAsyncRPC++
+
 	return nil
 }
 
@@ -858,6 +974,8 @@ func (a *actorCore) AsyncRPCWithContext(ctx context.Context, to ActorUID, params
 		_ = a.deref()
 		return err
 	}
+
+	a.pendingAsyncRPC++
 
 	return nil
 }
@@ -894,6 +1012,9 @@ func (a *actorCore) asyncCall(ai actorImpl, f ActorFunc, timeout time.Duration) 
 	if err := a.checkNotStopped(); err != nil {
 		return nil, err
 	}
+	if a.isMigrated() || a.isMigratingOut() {
+		return nil, ErrCodeMigrationInProgress
+	}
 
 	callId := a.nextAsyncCallId()
 	timeoutTid := a.startTimer(timeout, false, callId, ai.onAsyncCallTimeout, true)
@@ -927,7 +1048,7 @@ func (a *actor) start() error {
 }
 
 func (a *actor) stopped() {
-	if err := a.Behavior().OnStop(); err != nil {
+	if err := a.Behavior().OnStop(ActorStopContext{Reason: a.getStopReason()}); err != nil {
 		a.getLogger().ErrorFields("OnStop failed", lfdError(err))
 		a.service().monitorActorOnStopErr(a.category)
 	} else {
@@ -967,7 +1088,7 @@ type cactor struct {
 func (a *cactor) stopped() {
 	a.Disconnect()
 
-	if err := a.Behavior().OnStop(); err != nil {
+	if err := a.Behavior().OnStop(ActorStopContext{Reason: a.getStopReason()}); err != nil {
 		a.getLogger().ErrorFields("OnStop failed", lfdError(err))
 	} else {
 		a.getLogger().DebugFields("OnStop")

@@ -1,6 +1,8 @@
 package gactor
 
 import (
+        "io"
+
 	"github.com/godyy/gnet"
 	pkgerrors "github.com/pkg/errors"
 )
@@ -75,4 +77,38 @@ func (b *Buffer) writeActorUID(uid ActorUID) (err error) {
 		return pkgerrors.WithMessage(err, "write actor id")
 	}
 	return
+}
+
+// readString 读取长度前缀字符串.
+func (b *Buffer) readString() (string, error) {
+        n, err := b.ReadUint16()
+        if err != nil {
+                return "", pkgerrors.WithMessage(err, "read string length")
+        }
+        if n == 0 {
+                return "", nil
+        }
+
+        data := make([]byte, n)
+        if _, err := io.ReadFull(&b.Buffer, data); err != nil {
+                return "", pkgerrors.WithMessage(err, "read string data")
+        }
+        return string(data), nil
+}
+
+// writeString 写入长度前缀字符串.
+func (b *Buffer) writeString(v string) error {
+        if len(v) > 0xffff {
+                return pkgerrors.New("string too long")
+        }
+        if err := b.WriteUint16(uint16(len(v))); err != nil {
+                return pkgerrors.WithMessage(err, "write string length")
+        }
+        if len(v) == 0 {
+                return nil
+        }
+        if _, err := b.Write([]byte(v)); err != nil {
+                return pkgerrors.WithMessage(err, "write string data")
+        }
+        return nil
 }

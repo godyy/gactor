@@ -25,6 +25,9 @@ const (
 	PacketTypeS2SRpcResp = PacketType(22) // S2S RPC调用响应.
 	PacketTypeS2SCast    = PacketType(23) // S2S 消息投递.
 	PacketTypeS2SForward = PacketType(24) // S2S 透传消息投递.
+        PacketTypeS2SMigrateStart   = PacketType(25) // S2S 迁移启动.
+        PacketTypeS2SMigrateResult  = PacketType(26) // S2S 迁移结果.
+        PacketTypeS2SMigrateForward = PacketType(27) // S2S 迁移转发.
 )
 
 const sizeOfPacketType = int(unsafe.Sizeof(PacketType(0)))
@@ -647,6 +650,243 @@ func (ph *s2sForwardPacketHead) decode(b *Buffer) (err error) {
 		return pkgerrors.WithMessage(err, "read toId")
 	}
 	return nil
+}
+
+// s2sMigrateStartPacketHead PacketTypeS2SMigrateStart 包头.
+type s2sMigrateStartPacketHead struct {
+        seq           uint32
+        uid           ActorUID
+        sourceNodeID  string
+        sourceLeaseID string
+        isCActor      bool
+        sessionNodeID string
+        sessionSID    uint32
+}
+
+func newS2SMigrateStartHead(seq uint32, uid ActorUID, sourceNodeID, sourceLeaseID string, isCActor bool, session ActorSession) s2sMigrateStartPacketHead {
+        return s2sMigrateStartPacketHead{
+                seq:           seq,
+                uid:           uid,
+                sourceNodeID:  sourceNodeID,
+                sourceLeaseID: sourceLeaseID,
+                isCActor:      isCActor,
+                sessionNodeID: session.NodeId,
+                sessionSID:    session.SID,
+        }
+}
+
+func (ph *s2sMigrateStartPacketHead) getPt() PacketType { return PacketTypeS2SMigrateStart }
+
+func (ph *s2sMigrateStartPacketHead) getSeq() uint32 { return ph.seq }
+
+func (ph *s2sMigrateStartPacketHead) getLen() int {
+        return 4 + lenOfActorUID + 2 + len(ph.sourceNodeID) + 2 + len(ph.sourceLeaseID) + 1 + 2 + len(ph.sessionNodeID) + 4
+}
+
+func (ph *s2sMigrateStartPacketHead) encode(b *Buffer) error {
+        if err := b.WriteUint32(ph.seq); err != nil {
+                return pkgerrors.WithMessage(err, "write seq")
+        }
+        if err := b.writeActorUID(ph.uid); err != nil {
+                return pkgerrors.WithMessage(err, "write uid")
+        }
+        if err := b.writeString(ph.sourceNodeID); err != nil {
+                return pkgerrors.WithMessage(err, "write source node id")
+        }
+        if err := b.writeString(ph.sourceLeaseID); err != nil {
+                return pkgerrors.WithMessage(err, "write source lease id")
+        }
+        if err := b.WriteInt8(boolToInt8(ph.isCActor)); err != nil {
+                return pkgerrors.WithMessage(err, "write is cactor")
+        }
+        if err := b.writeString(ph.sessionNodeID); err != nil {
+                return pkgerrors.WithMessage(err, "write session node id")
+        }
+        if err := b.WriteUint32(ph.sessionSID); err != nil {
+                return pkgerrors.WithMessage(err, "write session sid")
+        }
+        return nil
+}
+
+func (ph *s2sMigrateStartPacketHead) decode(b *Buffer) (err error) {
+        ph.seq, err = b.ReadUint32()
+        if err != nil {
+                return pkgerrors.WithMessage(err, "read seq")
+        }
+        ph.uid, err = b.readActorUID()
+        if err != nil {
+                return pkgerrors.WithMessage(err, "read uid")
+        }
+        ph.sourceNodeID, err = b.readString()
+        if err != nil {
+                return pkgerrors.WithMessage(err, "read source node id")
+        }
+        ph.sourceLeaseID, err = b.readString()
+        if err != nil {
+                return pkgerrors.WithMessage(err, "read source lease id")
+        }
+        var c int8
+        c, err = b.ReadInt8()
+        if err != nil {
+                return pkgerrors.WithMessage(err, "read is cactor")
+        }
+        ph.isCActor = c != 0
+        ph.sessionNodeID, err = b.readString()
+        if err != nil {
+                return pkgerrors.WithMessage(err, "read session node id")
+        }
+        ph.sessionSID, err = b.ReadUint32()
+        if err != nil {
+                return pkgerrors.WithMessage(err, "read session sid")
+        }
+        return nil
+}
+
+// s2sMigrateResultPacketHead PacketTypeS2SMigrateResult 包头.
+type s2sMigrateResultPacketHead struct {
+        seq           uint32
+        uid           ActorUID
+        sourceLeaseID string
+        startSeq      uint32
+        errCode       ErrCode
+}
+
+func newS2SMigrateResultHead(seq uint32, uid ActorUID, sourceLeaseID string, startSeq uint32, errCode ErrCode) s2sMigrateResultPacketHead {
+        return s2sMigrateResultPacketHead{
+                seq:           seq,
+                uid:           uid,
+                sourceLeaseID: sourceLeaseID,
+                startSeq:      startSeq,
+                errCode:       errCode,
+        }
+}
+
+func (ph *s2sMigrateResultPacketHead) getPt() PacketType { return PacketTypeS2SMigrateResult }
+
+func (ph *s2sMigrateResultPacketHead) getSeq() uint32 { return ph.seq }
+
+func (ph *s2sMigrateResultPacketHead) getLen() int {
+        return 4 + lenOfActorUID + 2 + len(ph.sourceLeaseID) + 4 + sizeOfErrCode
+}
+
+func (ph *s2sMigrateResultPacketHead) encode(b *Buffer) error {
+        if err := b.WriteUint32(ph.seq); err != nil {
+                return pkgerrors.WithMessage(err, "write seq")
+        }
+        if err := b.writeActorUID(ph.uid); err != nil {
+                return pkgerrors.WithMessage(err, "write uid")
+        }
+        if err := b.writeString(ph.sourceLeaseID); err != nil {
+                return pkgerrors.WithMessage(err, "write source lease id")
+        }
+        if err := b.WriteUint32(ph.startSeq); err != nil {
+                return pkgerrors.WithMessage(err, "write start seq")
+        }
+        if err := b.writeErrCode(ph.errCode); err != nil {
+                return pkgerrors.WithMessage(err, "write err code")
+        }
+        return nil
+}
+
+func (ph *s2sMigrateResultPacketHead) decode(b *Buffer) (err error) {
+        ph.seq, err = b.ReadUint32()
+        if err != nil {
+                return pkgerrors.WithMessage(err, "read seq")
+        }
+        ph.uid, err = b.readActorUID()
+        if err != nil {
+                return pkgerrors.WithMessage(err, "read uid")
+        }
+        ph.sourceLeaseID, err = b.readString()
+        if err != nil {
+                return pkgerrors.WithMessage(err, "read source lease id")
+        }
+        ph.startSeq, err = b.ReadUint32()
+        if err != nil {
+                return pkgerrors.WithMessage(err, "read start seq")
+        }
+        ph.errCode, err = b.readErrCode()
+        if err != nil {
+                return pkgerrors.WithMessage(err, "read err code")
+        }
+        return nil
+}
+
+// s2sMigrateForwardPacketHead PacketTypeS2SMigrateForward 包头.
+type s2sMigrateForwardPacketHead struct {
+        seq           uint32
+        uid           ActorUID
+        sourceLeaseID string
+        originNodeID  string
+        innerPacketType PacketType
+}
+
+func newS2SMigrateForwardHead(seq uint32, uid ActorUID, sourceLeaseID, originNodeID string, innerPacketType PacketType) s2sMigrateForwardPacketHead {
+        return s2sMigrateForwardPacketHead{
+                seq:             seq,
+                uid:             uid,
+                sourceLeaseID:   sourceLeaseID,
+                originNodeID:    originNodeID,
+                innerPacketType: innerPacketType,
+        }
+}
+
+func (ph *s2sMigrateForwardPacketHead) getPt() PacketType { return PacketTypeS2SMigrateForward }
+
+func (ph *s2sMigrateForwardPacketHead) getSeq() uint32 { return ph.seq }
+
+func (ph *s2sMigrateForwardPacketHead) getLen() int {
+        return 4 + lenOfActorUID + 2 + len(ph.sourceLeaseID) + 2 + len(ph.originNodeID) + sizeOfPacketType
+}
+
+func (ph *s2sMigrateForwardPacketHead) encode(b *Buffer) error {
+        if err := b.WriteUint32(ph.seq); err != nil {
+                return pkgerrors.WithMessage(err, "write seq")
+        }
+        if err := b.writeActorUID(ph.uid); err != nil {
+                return pkgerrors.WithMessage(err, "write uid")
+        }
+        if err := b.writeString(ph.sourceLeaseID); err != nil {
+                return pkgerrors.WithMessage(err, "write source lease id")
+        }
+        if err := b.writeString(ph.originNodeID); err != nil {
+                return pkgerrors.WithMessage(err, "write origin node id")
+        }
+        if err := b.writePacketType(ph.innerPacketType); err != nil {
+                return pkgerrors.WithMessage(err, "write inner packet type")
+        }
+        return nil
+}
+
+func (ph *s2sMigrateForwardPacketHead) decode(b *Buffer) (err error) {
+        ph.seq, err = b.ReadUint32()
+        if err != nil {
+                return pkgerrors.WithMessage(err, "read seq")
+        }
+        ph.uid, err = b.readActorUID()
+        if err != nil {
+                return pkgerrors.WithMessage(err, "read uid")
+        }
+        ph.sourceLeaseID, err = b.readString()
+        if err != nil {
+                return pkgerrors.WithMessage(err, "read source lease id")
+        }
+        ph.originNodeID, err = b.readString()
+        if err != nil {
+                return pkgerrors.WithMessage(err, "read origin node id")
+        }
+        ph.innerPacketType, err = b.readPacketType()
+        if err != nil {
+                return pkgerrors.WithMessage(err, "read inner packet type")
+        }
+        return nil
+}
+
+func boolToInt8(v bool) int8 {
+        if v {
+                return 1
+        }
+        return 0
 }
 
 // packetAllocator 数据包分配器.
