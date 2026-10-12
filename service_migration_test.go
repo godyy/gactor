@@ -21,6 +21,16 @@ func waitForCondition(t *testing.T, timeout time.Duration, f func() bool) {
 	t.Fatal("condition not satisfied before timeout")
 }
 
+func TestMigrationConfigDefaults(t *testing.T) {
+	svc, _ := newPacketHandlerTestService(t, false, false)
+	if got := svc.cfg.Migration.MigrationMaxConcurrentActors; got != 256 {
+		t.Fatalf("MigrationMaxConcurrentActors = %d, want 256", got)
+	}
+	if got := svc.cfg.Migration.MigrationMaxConcurrentForwards; got != 256 {
+		t.Fatalf("MigrationMaxConcurrentForwards = %d, want 256", got)
+	}
+}
+
 type packetHandlerMigrationTestCActor struct {
 	CActor
 	inboundMigration chan ActorMigrationContext
@@ -297,7 +307,7 @@ func TestMigrationSlotWaitAndMonitorObservability(t *testing.T) {
 	}
 }
 
-func TestMigrationForwardBackpressureAndStrictTarget(t *testing.T) {
+func TestMigrationForwardBackpressure(t *testing.T) {
 	svc, _ := newPacketHandlerTestService(t, true, true)
 	defer func() {
 		if err := svc.Stop(); err != nil {
@@ -306,10 +316,8 @@ func TestMigrationForwardBackpressureAndStrictTarget(t *testing.T) {
 	}()
 
 	svc.cfg.Migration.MigrationMaxConcurrentForwards = 1
-	svc.cfg.Migration.RequireTrustedMigrationNodes = true
-	svc.cfg.Migration.TrustedMigrationNodeIDs = []string{"target-node"}
 	if err := svc.StartMigration("target-node", nil); err != nil {
-		t.Fatalf("StartMigration with trusted target: %v", err)
+		t.Fatalf("StartMigration: %v", err)
 	}
 	if !svc.tryAcquireMigrationForwardSlot() {
 		t.Fatal("first forward slot was not acquired")
@@ -964,7 +972,7 @@ func TestMigrateStartWithMismatchedSourceNodeIsIgnored(t *testing.T) {
 	}
 
 	if actor, err := svc.getActor(uid); err != nil || actor != nil {
-		t.Fatalf("untrusted migrate start created actor = %v, err = %v", actor, err)
+		t.Fatalf("mismatched-source migrate start created actor = %v, err = %v", actor, err)
 	}
 	if svc.MigrationSnapshot().ControlDeniedCount != 1 {
 		t.Fatalf("control denied count = %d, want 1", svc.MigrationSnapshot().ControlDeniedCount)

@@ -104,13 +104,10 @@ func (c *ServiceConfig) init() {
 		c.QueueWriteTimeAlarmThreshold = 50 * time.Millisecond
 	}
 	if c.Migration.MigrationMaxConcurrentActors <= 0 {
-		c.Migration.MigrationMaxConcurrentActors = 16
+		c.Migration.MigrationMaxConcurrentActors = 256
 	}
 	if c.Migration.MigrationMaxConcurrentForwards <= 0 {
 		c.Migration.MigrationMaxConcurrentForwards = 256
-	}
-	if c.Migration.RequireTrustedMigrationNodes && len(c.Migration.TrustedMigrationNodeIDs) == 0 {
-		panic("gactor: ServiceConfig: TrustedMigrationNodeIDs required for strict migration trust")
 	}
 }
 

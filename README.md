@@ -240,10 +240,10 @@ func (a *UserActor) OnMigrateIn(ctx gactor.ActorMigrationContext) error {
 
 迁移配置位于 `ServiceConfig.Migration`：
 
-- `MigrationMaxConcurrentActors`：同时等待目标端接管结果的 Actor 数，默认 16。
+- `MigrationMaxConcurrentActors`：同时等待目标端接管结果的 Actor 数，默认 256。
 - `MigrationMaxConcurrentForwards`：源节点同时发送的迁移转发请求数，默认 256。
-- `TrustedMigrationNodeIDs`：迁移控制包来源白名单。生产环境建议显式配置。
-- `RequireTrustedMigrationNodes`：开启后目标节点与控制包来源必须在白名单内。
+
+迁移目标节点由调用方指定；节点身份认证与网络访问控制由上层部署及 `NetAgent` 负责。
 
 典型迁移流程如下：
 

@@ -13,20 +13,12 @@ import (
 // MigrationConfig Service 动态迁移配置.
 type MigrationConfig struct {
 	// MigrationMaxConcurrentActors 限制同时等待目标节点结果的 Actor 数量。
-	// 默认值 16；小于等于 0 时使用默认值。
+	// 默认值 256；小于等于 0 时使用默认值。
 	MigrationMaxConcurrentActors int
 
 	// MigrationMaxConcurrentForwards 限制源节点同时发送的迁移转发请求数量。
 	// 默认值 256；小于等于 0 时使用默认值。
 	MigrationMaxConcurrentForwards int
-
-	// TrustedMigrationNodeIDs 是可发送迁移控制包的节点白名单。
-	// 为空时兼容既有部署，信任 NetAgent 提供的节点身份；生产环境建议显式配置。
-	TrustedMigrationNodeIDs []string
-
-	// RequireTrustedMigrationNodes 要求迁移目标和迁移控制包必须来自白名单节点。
-	// 开启时 TrustedMigrationNodeIDs 不能为空；仍需由 NetAgent 或传输层认证 nodeID。
-	RequireTrustedMigrationNodes bool
 }
 
 // serviceMigrationRuntime 收拢单轮 Service 迁移的可变运行时状态。
@@ -213,24 +205,6 @@ func (s *Service) isMigrationTarget(nodeID string) bool {
 	s.mtxMigration.RLock()
 	defer s.mtxMigration.RUnlock()
 	return s.migration != nil && s.migration.migrationStarted && s.migration.migrationTargetNodeID == nodeID
-}
-
-// isTrustedMigrationNode 校验迁移控制包的网络来源。
-// 未配置白名单时沿用既有信任边界，由 NetAgent 负责提供已认证的 nodeID。
-func (s *Service) isTrustedMigrationNode(nodeID string) bool {
-	if nodeID == "" || nodeID == s.nodeId() {
-		return false
-	}
-	trustedNodeIDs := s.cfg.Migration.TrustedMigrationNodeIDs
-	if len(trustedNodeIDs) == 0 {
-		return !s.cfg.Migration.RequireTrustedMigrationNodes
-	}
-	for _, trustedNodeID := range trustedNodeIDs {
-		if nodeID == trustedNodeID {
-			return true
-		}
-	}
-	return false
 }
 
 // denyMigrationControl 记录因来源校验而拒绝的迁移控制包。
@@ -666,10 +640,6 @@ func (s *Service) beginMigration(targetNodeID string, cb ServiceMigrationConverg
 	if targetNodeID == "" || targetNodeID == s.nodeId() {
 		return ErrCodeMigrationTargetInvalid
 	}
-	if s.cfg.Migration.RequireTrustedMigrationNodes && !s.isTrustedMigrationNode(targetNodeID) {
-		return ErrCodeMigrationTargetInvalid
-	}
-
 	s.mtxMigration.Lock()
 	defer s.mtxMigration.Unlock()
 	if s.migration == nil {

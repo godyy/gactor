@@ -359,10 +359,9 @@ func svcHandlePacketS2SMigrateStart(s *Service, nodeId string, b *Buffer) error 
 		return nil
 	}
 	// sourceNodeID 是迁移代际的一部分，必须和实际网络来源一致。
-	// 白名单由部署配置或已认证 NetAgent 提供，避免任意节点伪造接管请求。
-	if nodeId != head.sourceNodeID || !s.isTrustedMigrationNode(nodeId) {
+	if nodeId != head.sourceNodeID {
 		s.denyMigrationControl()
-		s.getLogger().WarnFields("[HandlePacketS2SMigrateStart] ignore untrusted source node",
+		s.getLogger().WarnFields("[HandlePacketS2SMigrateStart] ignore mismatched source node",
 			lfdRemoteNodeId(nodeId), lfdSeq(head.getSeq()), s.lfdActorUID("uid", head.uid))
 		return nil
 	}
@@ -387,7 +386,7 @@ func svcHandlePacketS2SMigrateResult(s *Service, nodeId string, b *Buffer) error
 		return nil
 	}
 	// 迁移结果只能由本轮锁定目标节点返回，避免异常节点或迟到包错误推进源 Actor 状态。
-	if !s.isMigrationTarget(nodeId) || !s.isTrustedMigrationNode(nodeId) {
+	if !s.isMigrationTarget(nodeId) {
 		s.denyMigrationControl()
 		s.getLogger().WarnFields("[HandlePacketS2SMigrateResult] ignore unexpected source node",
 			lfdRemoteNodeId(nodeId), lfdSeq(head.getSeq()), s.lfdActorUID("uid", head.uid))
@@ -418,7 +417,7 @@ func svcHandlePacketS2SMigrateForward(s *Service, nodeId string, b *Buffer) erro
 		s.freeBuffer(b)
 		return nil
 	}
-	if !s.isTrustedMigrationNode(nodeId) || !s.acceptsMigrationLease(head.uid, nodeId, head.sourceLeaseID) {
+	if !s.acceptsMigrationLease(head.uid, nodeId, head.sourceLeaseID) {
 		s.denyMigrationControl()
 		s.freeBuffer(b)
 		return nil
