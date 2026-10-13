@@ -953,6 +953,44 @@ func TestFinalizeMigrationStopsMigratedActors(t *testing.T) {
 	}
 }
 
+func TestMigratedCActorStopDoesNotDisconnectSession(t *testing.T) {
+	svc, netAgent := newPacketHandlerMigrationCTestService(t, true, false)
+	defer func() {
+		if err := svc.Stop(); err != nil {
+			t.Fatalf("stop service: %v", err)
+		}
+	}()
+
+	uid := ActorUID{Category: 2, ID: 1017}
+	started, err := svc.startActor(uid, "")
+	if err != nil {
+		t.Fatalf("start actor: %v", err)
+	}
+	actor, ok := started.(*cactor)
+	if !ok {
+		t.Fatalf("started actor type = %T, want *cactor", started)
+	}
+	actor.session = ActorSession{NodeId: "agent-node", SID: 1}
+	actor.core().updateFlag(actorFlagMigrated, true)
+	if err := actor.core().deref(); err != nil {
+		t.Fatalf("release actor reference: %v", err)
+	}
+	if err := actor.core().stop(false); err != nil {
+		t.Fatalf("stop migrated actor: %v", err)
+	}
+
+	waitForCondition(t, time.Second, func() bool {
+		stopped, getErr := svc.getActor(uid)
+		return getErr == nil && stopped == nil
+	})
+	for _, send := range netAgent.snapshot() {
+		packetType, _ := decodePacketType(t, send.data)
+		if packetType == PacketTypeDisconnect {
+			t.Fatal("migrated CActor emitted a disconnect packet")
+		}
+	}
+}
+
 func TestMigrateStartWithMismatchedSourceNodeIsIgnored(t *testing.T) {
 	svc, _ := newPacketHandlerTestService(t, true, true)
 	defer func() {

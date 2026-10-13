@@ -1086,7 +1086,10 @@ type cactor struct {
 }
 
 func (a *cactor) stopped() {
-	a.Disconnect()
+	// 迁移回收时会话已经由目标 Actor 接管，源端不能再通知 agent 断开。
+	if !a.isMigrated() {
+		a.Disconnect()
+	}
 
 	if err := a.Behavior().OnStop(ActorStopContext{Reason: a.getStopReason()}); err != nil {
 		a.getLogger().ErrorFields("OnStop failed", lfdError(err))
