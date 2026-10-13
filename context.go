@@ -20,6 +20,7 @@ type Context struct {
 	handlers    []HandlerFunc // handlers.
 	handlerIdx  int8          // handler index.
 	suspendFlag int32         // 挂起计数标记.
+	released    bool          // 是否调用release.
 }
 
 var poolOfContext = &sync.Pool{
@@ -121,7 +122,7 @@ func (c *Context) resumeAndNext() {
 	// 执行 Handler 后, 若 ctx 未挂起.
 	// 回收.
 	if !c.isSuspend() {
-		c.release(nil)
+		c.doRelease()
 	}
 }
 
@@ -282,9 +283,17 @@ func (c *Context) Clone() *Context {
 
 // release 回收.
 func (c *Context) release(_ actorImpl) {
+	if c.released {
+		return
+	}
+	c.released = true
 	if c.isSuspend() {
 		return
 	}
+	c.doRelease()
+}
+
+func (c *Context) doRelease() {
 	c.req.release(c)
 	c.svc = nil
 	c.req = nil
@@ -292,6 +301,7 @@ func (c *Context) release(_ actorImpl) {
 	c.kv = nil
 	c.handlers = nil
 	c.handlerIdx = -1
+	c.released = false
 	poolOfContext.Put(c)
 }
 
