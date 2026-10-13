@@ -121,7 +121,7 @@ func (c *Context) resumeAndNext() {
 
 	// 执行 Handler 后, 若 ctx 未挂起.
 	// 回收.
-	if !c.isSuspend() {
+	if !c.isSuspend() && c.released {
 		c.doRelease()
 	}
 }
