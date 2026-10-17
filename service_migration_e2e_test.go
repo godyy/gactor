@@ -172,6 +172,80 @@ func TestMigrationEndToEndAcrossServices(t *testing.T) {
 	}
 }
 
+func TestMigrationEndToEndConvergesTwoSourcesToOneTarget(t *testing.T) {
+	network := &migrationE2ENetwork{
+		nodes:     make(map[string]*Service),
+		delivered: make(map[PacketType]int),
+	}
+	registry := &testActorRegistry{actorMap: make(map[ActorUID]*testActorLocation)}
+	sourceA := newMigrationE2EService(t, "source-a", registry, network)
+	sourceB := newMigrationE2EService(t, "source-b", registry, network)
+	target := newMigrationE2EService(t, "target-c", registry, network)
+	defer func() {
+		_ = sourceA.Stop()
+		_ = sourceB.Stop()
+		_ = target.Stop()
+	}()
+
+	uids := []struct {
+		source *Service
+		uid    ActorUID
+	}{
+		{source: sourceA, uid: ActorUID{Category: 1, ID: 7101}},
+		{source: sourceA, uid: ActorUID{Category: 1, ID: 7102}},
+		{source: sourceB, uid: ActorUID{Category: 1, ID: 7201}},
+		{source: sourceB, uid: ActorUID{Category: 1, ID: 7202}},
+	}
+	for _, item := range uids {
+		actor, err := item.source.startActor(item.uid, "")
+		if err != nil {
+			t.Fatalf("start source actor %v: %v", item.uid, err)
+		}
+		if err := actor.core().deref(); err != nil {
+			t.Fatalf("release source actor %v: %v", item.uid, err)
+		}
+	}
+
+	// 两个源节点同时向同一目标节点迁移，模拟节点汇聚缩容。
+	startErr := make(chan error, 2)
+	go func() { startErr <- sourceA.StartMigration("target-c", nil) }()
+	go func() { startErr <- sourceB.StartMigration("target-c", nil) }()
+	for i := 0; i < cap(startErr); i++ {
+		if err := <-startErr; err != nil {
+			t.Fatalf("start migration: %v", err)
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	for _, source := range []*Service{sourceA, sourceB} {
+		if err := source.WaitMigrationConverged(ctx); err != nil {
+			t.Fatalf("wait source migration convergence: %v", err)
+		}
+	}
+
+	for _, item := range uids {
+		waitForCondition(t, time.Second, func() bool {
+			targetActor, _ := target.getActor(item.uid)
+			return targetActor != nil
+		})
+		location, err := registry.GetActorLocation(item.uid)
+		if err != nil {
+			t.Fatalf("get migrated actor location %v: %v", item.uid, err)
+		}
+		if location.NodeId != "target-c" {
+			t.Fatalf("actor %v registry node = %q, want target-c", item.uid, location.NodeId)
+		}
+	}
+
+	for _, source := range []*Service{sourceA, sourceB} {
+		snapshot := source.MigrationSnapshot()
+		if snapshot.MigratedActorCount != 2 || !snapshot.Converged {
+			t.Fatalf("unexpected migration snapshot: %+v", snapshot)
+		}
+	}
+}
+
 func TestMigrationEndToEndRecoversFromDroppedResult(t *testing.T) {
 	var dropped atomic.Bool
 	network := &migrationE2ENetwork{
