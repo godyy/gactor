@@ -188,8 +188,8 @@ type Service struct {
 	migration              *serviceMigrationRuntime // 迁移运行时状态；仅在启动迁移时初始化，所有字段受 mtxMigration 保护。
 	migrationControlDenied uint64                   // 被拒绝的迁移控制包数量；迁移启动前也需要保留该观测值。
 
-	mtxInboundMigration      sync.Mutex                           // 目标端接管并发控制锁.
-	inboundMigrationInFlight map[ActorUID]inboundMigrationAttempt // 正在接管的 Actor。
+	mtxInboundMigration sync.Mutex               // 目标端接管运行时锁.
+	inboundMigration    *inboundMigrationRuntime // 目标端接管运行时；所有字段受 mtxInboundMigration 保护。
 }
 
 func NewService(cfg *ServiceConfig, option ...ServiceOption) *Service {

@@ -32,6 +32,12 @@ type inboundMigrationAttempt struct {
 	sourceLeaseID string
 }
 
+// inboundMigrationRuntime 收拢本节点作为迁移目标时的接管运行时状态。
+// 所有字段必须在持有 Service.mtxInboundMigration 时访问。
+type inboundMigrationRuntime struct {
+	inFlight map[ActorUID]inboundMigrationAttempt // 正在接管的 Actor。
+}
+
 type inboundMigrationSlotResult uint8
 
 const (
@@ -1060,19 +1066,24 @@ func (s *Service) tryAcquireInboundMigrationSlot(head s2sMigrateStartPacketHead)
 	s.mtxInboundMigration.Lock()
 	defer s.mtxInboundMigration.Unlock()
 
-	if current, ok := s.inboundMigrationInFlight[head.uid]; ok {
-		if current == attempt {
-			return inboundMigrationSlotDuplicate
+	if s.inboundMigration != nil {
+		if current, ok := s.inboundMigration.inFlight[head.uid]; ok {
+			if current == attempt {
+				return inboundMigrationSlotDuplicate
+			}
+			return inboundMigrationSlotConflict
 		}
-		return inboundMigrationSlotConflict
 	}
-	if len(s.inboundMigrationInFlight) >= s.cfg.Migration.MigrationMaxConcurrentInboundActors {
+	if s.inboundMigration != nil &&
+		len(s.inboundMigration.inFlight) >= s.cfg.Migration.MigrationMaxConcurrentInboundActors {
 		return inboundMigrationSlotBusy
 	}
-	if s.inboundMigrationInFlight == nil {
-		s.inboundMigrationInFlight = make(map[ActorUID]inboundMigrationAttempt)
+	if s.inboundMigration == nil {
+		s.inboundMigration = &inboundMigrationRuntime{
+			inFlight: make(map[ActorUID]inboundMigrationAttempt),
+		}
 	}
-	s.inboundMigrationInFlight[head.uid] = attempt
+	s.inboundMigration.inFlight[head.uid] = attempt
 	return inboundMigrationSlotAcquired
 }
 
@@ -1081,9 +1092,15 @@ func (s *Service) releaseInboundMigrationSlot(uid ActorUID, sourceNodeID, source
 	s.mtxInboundMigration.Lock()
 	defer s.mtxInboundMigration.Unlock()
 
-	if current, ok := s.inboundMigrationInFlight[uid]; ok &&
+	if s.inboundMigration == nil {
+		return
+	}
+	if current, ok := s.inboundMigration.inFlight[uid]; ok &&
 		current.sourceNodeID == sourceNodeID && current.sourceLeaseID == sourceLeaseID {
-		delete(s.inboundMigrationInFlight, uid)
+		delete(s.inboundMigration.inFlight, uid)
+	}
+	if len(s.inboundMigration.inFlight) == 0 {
+		s.inboundMigration = nil
 	}
 }
 
