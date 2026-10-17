@@ -241,6 +241,7 @@ func (a *UserActor) OnMigrateIn(ctx gactor.ActorMigrationContext) error {
 迁移配置位于 `ServiceConfig.Migration`：
 
 - `MigrationMaxConcurrentActors`：同时等待目标端接管结果的 Actor 数，默认 256。
+- `MigrationMaxConcurrentInboundActors`：目标节点同时执行接管的 Actor 数，默认 256；超出限制时源节点会退避重试。
 - `MigrationMaxConcurrentForwards`：源节点同时发送的迁移转发请求数，默认 256。
 
 迁移目标节点由调用方指定；节点身份认证与网络访问控制由上层部署及 `NetAgent` 负责。
@@ -273,7 +274,21 @@ if err := svc.FinalizeMigration(ctx); err != nil {
 }
 ```
 
-通过 `MigrationSnapshot()` 可查询迁移的目标节点、阶段统计、重试信息、转发统计和每个 Actor 的迁移状态。可选的 `ServiceMigrationMonitor` 会收到迁移开始、重试、接管、转发、收敛和最终清理等事件。
+扩容时可通过规划函数将同一源节点上的 Actor 分散到多个目标节点：
+
+```go
+err := svc.StartMigrationWithPlanner(func(uid gactor.ActorUID) (string, error) {
+	if uid.ID%2 == 0 {
+		return "node-b", nil
+	}
+	return "node-c", nil
+}, nil)
+if err != nil {
+	panic(err)
+}
+```
+
+规划函数只会在迁移开始前为冻结计划中的每个 Actor 调用一次；重试和转发始终复用冻结结果。通过 `MigrationSnapshot()` 可查询迁移的阶段统计、重试信息、转发统计和每个 Actor 的迁移状态。单目标计划可读取 `TargetNodeID`；多目标计划中该字段为空，应读取 `Actors` 内每个 Actor 的 `TargetNodeID`。可选的 `ServiceMigrationMonitor` 会收到迁移开始、重试、接管、转发、收敛和最终清理等事件。
 
 ## 项目结构
 

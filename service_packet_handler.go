@@ -385,8 +385,8 @@ func svcHandlePacketS2SMigrateResult(s *Service, nodeId string, b *Buffer) error
 	if s.checkStarted() != nil {
 		return nil
 	}
-	// 迁移结果只能由本轮锁定目标节点返回，避免异常节点或迟到包错误推进源 Actor 状态。
-	if !s.isMigrationTarget(nodeId) {
+	// 迁移结果只能由该 Actor 锁定目标节点返回，避免异常节点或迟到包错误推进源 Actor 状态。
+	if !s.isMigrationTargetOf(head.uid, nodeId) {
 		s.denyMigrationControl()
 		s.getLogger().WarnFields("[HandlePacketS2SMigrateResult] ignore unexpected source node",
 			lfdRemoteNodeId(nodeId), lfdSeq(head.getSeq()), s.lfdActorUID("uid", head.uid))

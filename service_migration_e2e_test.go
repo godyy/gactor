@@ -246,6 +246,88 @@ func TestMigrationEndToEndConvergesTwoSourcesToOneTarget(t *testing.T) {
 	}
 }
 
+func TestMigrationEndToEndDistributesOneSourceAcrossTargets(t *testing.T) {
+	network := &migrationE2ENetwork{
+		nodes:     make(map[string]*Service),
+		delivered: make(map[PacketType]int),
+	}
+	registry := &testActorRegistry{actorMap: make(map[ActorUID]*testActorLocation)}
+	source := newMigrationE2EService(t, "source-a", registry, network)
+	targetB := newMigrationE2EService(t, "target-b", registry, network)
+	targetC := newMigrationE2EService(t, "target-c", registry, network)
+	defer func() {
+		_ = source.Stop()
+		_ = targetB.Stop()
+		_ = targetC.Stop()
+	}()
+
+	targets := map[ActorUID]string{
+		{Category: 1, ID: 7301}: "target-b",
+		{Category: 1, ID: 7302}: "target-b",
+		{Category: 1, ID: 7303}: "target-c",
+		{Category: 1, ID: 7304}: "target-c",
+	}
+	for uid := range targets {
+		actor, err := source.startActor(uid, "")
+		if err != nil {
+			t.Fatalf("start source actor %v: %v", uid, err)
+		}
+		if err := actor.core().deref(); err != nil {
+			t.Fatalf("release source actor %v: %v", uid, err)
+		}
+	}
+
+	if err := source.StartMigrationWithPlanner(func(uid ActorUID) (string, error) {
+		return targets[uid], nil
+	}, nil); err != nil {
+		t.Fatalf("start distributed migration: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := source.WaitMigrationConverged(ctx); err != nil {
+		t.Fatalf("wait distributed migration convergence: %v", err)
+	}
+
+	for uid, targetNodeID := range targets {
+		target := targetB
+		if targetNodeID == "target-c" {
+			target = targetC
+		}
+		waitForCondition(t, time.Second, func() bool {
+			targetActor, _ := target.getActor(uid)
+			return targetActor != nil
+		})
+		location, err := registry.GetActorLocation(uid)
+		if err != nil {
+			t.Fatalf("get migrated actor location %v: %v", uid, err)
+		}
+		if location.NodeId != targetNodeID {
+			t.Fatalf("actor %v registry node = %q, want %q", uid, location.NodeId, targetNodeID)
+		}
+	}
+
+	snapshot := source.MigrationSnapshot()
+	if !snapshot.Converged || snapshot.MigratedActorCount != len(targets) {
+		t.Fatalf("unexpected distributed migration snapshot: %+v", snapshot)
+	}
+	if snapshot.TargetNodeID != "" {
+		t.Fatalf("mixed target snapshot.TargetNodeID = %q, want empty", snapshot.TargetNodeID)
+	}
+	for _, actorSnapshot := range snapshot.Actors {
+		if actorSnapshot.TargetNodeID != targets[actorSnapshot.UID] {
+			t.Fatalf("actor %v target = %q, want %q",
+				actorSnapshot.UID, actorSnapshot.TargetNodeID, targets[actorSnapshot.UID])
+		}
+	}
+
+	if err := source.FinishMigrationForwarding(); err != nil {
+		t.Fatalf("finish forwarding: %v", err)
+	}
+	if err := source.FinalizeMigration(ctx); err != nil {
+		t.Fatalf("finalize migration: %v", err)
+	}
+}
+
 func TestMigrationEndToEndRecoversFromDroppedResult(t *testing.T) {
 	var dropped atomic.Bool
 	network := &migrationE2ENetwork{

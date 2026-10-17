@@ -2,6 +2,7 @@ package gactor
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -25,6 +26,9 @@ func TestMigrationConfigDefaults(t *testing.T) {
 	svc, _ := newPacketHandlerTestService(t, false, false)
 	if got := svc.cfg.Migration.MigrationMaxConcurrentActors; got != 256 {
 		t.Fatalf("MigrationMaxConcurrentActors = %d, want 256", got)
+	}
+	if got := svc.cfg.Migration.MigrationMaxConcurrentInboundActors; got != 256 {
+		t.Fatalf("MigrationMaxConcurrentInboundActors = %d, want 256", got)
 	}
 	if got := svc.cfg.Migration.MigrationMaxConcurrentForwards; got != 256 {
 		t.Fatalf("MigrationMaxConcurrentForwards = %d, want 256", got)
@@ -265,6 +269,159 @@ func TestOnMigrateOutReceivesMigrationContext(t *testing.T) {
 	}
 }
 
+func TestStartMigrationWithPlannerFreezesActorTargets(t *testing.T) {
+	svc, netAgent := newPacketHandlerTestService(t, true, true)
+	defer func() {
+		if err := svc.Stop(); err != nil {
+			t.Fatalf("stop service: %v", err)
+		}
+	}()
+
+	targets := map[ActorUID]string{
+		{Category: 1, ID: 1020}: "target-b",
+		{Category: 1, ID: 1021}: "target-c",
+	}
+	for uid := range targets {
+		actor, err := svc.startActor(uid, "")
+		if err != nil {
+			t.Fatalf("start actor %v: %v", uid, err)
+		}
+		_ = actor.core().deref()
+	}
+
+	if err := svc.StartMigrationWithPlanner(func(uid ActorUID) (string, error) {
+		return targets[uid], nil
+	}, nil); err != nil {
+		t.Fatalf("StartMigrationWithPlanner: %v", err)
+	}
+
+	waitForCondition(t, time.Second, func() bool {
+		snapshot := svc.MigrationSnapshot()
+		return snapshot.MigratingOutCount == len(targets)
+	})
+	snapshot := svc.MigrationSnapshot()
+	if snapshot.TargetNodeID != "" {
+		t.Fatalf("mixed target snapshot.TargetNodeID = %q, want empty", snapshot.TargetNodeID)
+	}
+	for _, actorSnapshot := range snapshot.Actors {
+		if want := targets[actorSnapshot.UID]; actorSnapshot.TargetNodeID != want {
+			t.Fatalf("actor %v target = %q, want %q", actorSnapshot.UID, actorSnapshot.TargetNodeID, want)
+		}
+	}
+
+	gotTargets := make(map[ActorUID]string)
+	for _, send := range netAgent.snapshot() {
+		pt, buf := decodePacketType(t, send.data)
+		if pt != PacketTypeS2SMigrateStart {
+			continue
+		}
+		var head s2sMigrateStartPacketHead
+		if err := head.decode(&buf); err != nil {
+			t.Fatalf("decode migrate start: %v", err)
+		}
+		gotTargets[head.uid] = send.nodeId
+	}
+	for uid, want := range targets {
+		if gotTargets[uid] != want {
+			t.Fatalf("migrate start target for %v = %q, want %q", uid, gotTargets[uid], want)
+		}
+	}
+}
+
+func TestStartMigrationWithPlannerRejectsPlanningError(t *testing.T) {
+	svc, netAgent := newPacketHandlerTestService(t, true, true)
+	defer func() {
+		if err := svc.Stop(); err != nil {
+			t.Fatalf("stop service: %v", err)
+		}
+	}()
+
+	uid := ActorUID{Category: 1, ID: 1022}
+	actor, err := svc.startActor(uid, "")
+	if err != nil {
+		t.Fatalf("start actor: %v", err)
+	}
+	_ = actor.core().deref()
+
+	wantErr := errors.New("capacity unavailable")
+	err = svc.StartMigrationWithPlanner(func(ActorUID) (string, error) {
+		return "", wantErr
+	}, nil)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("planner error = %v, want wrapped %v", err, wantErr)
+	}
+	if svc.MigrationSnapshot().Started {
+		t.Fatal("migration started after planner error")
+	}
+	if len(netAgent.snapshot()) != 0 {
+		t.Fatal("migration packet sent after planner error")
+	}
+}
+
+func TestStartMigrationRejectsInvalidTargetWithoutActors(t *testing.T) {
+	for _, targetNodeID := range []string{"", "svc-node"} {
+		t.Run(targetNodeID, func(t *testing.T) {
+			svc, _ := newPacketHandlerTestService(t, true, true)
+			defer func() {
+				if err := svc.Stop(); err != nil {
+					t.Fatalf("stop service: %v", err)
+				}
+			}()
+
+			if err := svc.StartMigration(targetNodeID, nil); err != ErrCodeMigrationTargetInvalid {
+				t.Fatalf("StartMigration(%q) error = %v, want %v",
+					targetNodeID, err, ErrCodeMigrationTargetInvalid)
+			}
+			if svc.MigrationSnapshot().Started {
+				t.Fatalf("migration started for invalid target %q", targetNodeID)
+			}
+		})
+	}
+}
+
+func TestInboundMigrationCapacityRejectsBusyTarget(t *testing.T) {
+	svc, netAgent := newPacketHandlerTestService(t, true, true)
+	defer func() {
+		if err := svc.Stop(); err != nil {
+			t.Fatalf("stop service: %v", err)
+		}
+	}()
+	svc.cfg.Migration.MigrationMaxConcurrentInboundActors = 1
+
+	first := newS2SMigrateStartHead(1, ActorUID{Category: 1, ID: 1023}, "source-a", "lease-a", false, ActorSession{})
+	if got := svc.tryAcquireInboundMigrationSlot(first); got != inboundMigrationSlotAcquired {
+		t.Fatalf("first inbound slot result = %d, want acquired", got)
+	}
+	if got := svc.tryAcquireInboundMigrationSlot(first); got != inboundMigrationSlotDuplicate {
+		t.Fatalf("duplicate inbound slot result = %d, want duplicate", got)
+	}
+
+	second := newS2SMigrateStartHead(2, ActorUID{Category: 1, ID: 1024}, "source-b", "lease-b", false, ActorSession{})
+	if err := svc.startInboundMigration(second); err != nil {
+		t.Fatalf("start inbound migration on busy target: %v", err)
+	}
+	sends := netAgent.snapshot()
+	if len(sends) != 1 {
+		t.Fatalf("migration result sends = %d, want 1", len(sends))
+	}
+	pt, buf := decodePacketType(t, sends[0].data)
+	if pt != PacketTypeS2SMigrateResult || sends[0].nodeId != "source-b" {
+		t.Fatalf("unexpected busy migration result destination: type=%d node=%q", pt, sends[0].nodeId)
+	}
+	var result s2sMigrateResultPacketHead
+	if err := result.decode(&buf); err != nil {
+		t.Fatalf("decode busy migration result: %v", err)
+	}
+	if result.uid != second.uid || result.startSeq != second.seq || result.errCode != ErrCodeActorBusy {
+		t.Fatalf("unexpected busy migration result: %+v", result)
+	}
+
+	svc.releaseInboundMigrationSlot(first.uid, first.sourceNodeID, first.sourceLeaseID)
+	if got := svc.tryAcquireInboundMigrationSlot(second); got != inboundMigrationSlotAcquired {
+		t.Fatalf("inbound slot after release = %d, want acquired", got)
+	}
+}
+
 func TestMigrationSlotWaitAndMonitorObservability(t *testing.T) {
 	svc, _ := newPacketHandlerTestService(t, true, true)
 	defer func() {
@@ -492,7 +649,7 @@ func TestMigrationActorPhaseDoesNotRollbackFromMigrated(t *testing.T) {
 		migrationTargetNodeID: "target-node",
 	}
 	svc.mtxMigration.Unlock()
-	svc.initMigrationPlan([]ActorUID{uid})
+	svc.initMigrationPlan(map[ActorUID]string{uid: "target-node"})
 
 	svc.markMigrationActorDraining(uid)
 	svc.updateMigrationStart(uid, "source-lease", 1)
@@ -525,10 +682,10 @@ func TestMigrationSnapshotActorsAreSorted(t *testing.T) {
 		migrationTargetNodeID: "target-node",
 	}
 	svc.mtxMigration.Unlock()
-	svc.initMigrationPlan([]ActorUID{
-		{Category: 2, ID: 1},
-		{Category: 1, ID: 3},
-		{Category: 1, ID: 2},
+	svc.initMigrationPlan(map[ActorUID]string{
+		{Category: 2, ID: 1}: "target-node",
+		{Category: 1, ID: 3}: "target-node",
+		{Category: 1, ID: 2}: "target-node",
 	})
 
 	actors := svc.MigrationSnapshot().Actors
@@ -566,7 +723,7 @@ func TestWaitMigrationConverged(t *testing.T) {
 		migrationTargetNodeID: "target-node",
 	}
 	svc.mtxMigration.Unlock()
-	svc.initMigrationPlan([]ActorUID{uid})
+	svc.initMigrationPlan(map[ActorUID]string{uid: "target-node"})
 
 	done := make(chan error, 1)
 	go func() {
@@ -599,7 +756,7 @@ func TestWaitMigrationConvergedReturnsWhenServiceStops(t *testing.T) {
 		migrationStoppedCh:    make(chan struct{}),
 	}
 	svc.mtxMigration.Unlock()
-	svc.initMigrationPlan([]ActorUID{uid})
+	svc.initMigrationPlan(map[ActorUID]string{uid: "target-node"})
 
 	done := make(chan error, 1)
 	go func() {
@@ -653,7 +810,7 @@ func TestMigrationStartRetryRecordsDiagnostics(t *testing.T) {
 		migrationStoppedCh:    make(chan struct{}),
 	}
 	svc.mtxMigration.Unlock()
-	svc.initMigrationPlan([]ActorUID{uid})
+	svc.initMigrationPlan(map[ActorUID]string{uid: "target-node"})
 
 	svc.scheduleMigrationStartRetry(uid, ErrTimeout)
 	svc.scheduleMigrationStartRetry(uid, ErrCodeActorBusy)
@@ -701,7 +858,7 @@ func TestMigrationConvergedCallbackPanicIsIsolated(t *testing.T) {
 		},
 	}
 	svc.mtxMigration.Unlock()
-	svc.initMigrationPlan([]ActorUID{uid})
+	svc.initMigrationPlan(map[ActorUID]string{uid: "target-node"})
 
 	svc.markMigrationActorDraining(uid)
 	svc.updateMigrationStart(uid, "source-lease", 1)

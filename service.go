@@ -106,6 +106,9 @@ func (c *ServiceConfig) init() {
 	if c.Migration.MigrationMaxConcurrentActors <= 0 {
 		c.Migration.MigrationMaxConcurrentActors = 256
 	}
+	if c.Migration.MigrationMaxConcurrentInboundActors <= 0 {
+		c.Migration.MigrationMaxConcurrentInboundActors = 256
+	}
 	if c.Migration.MigrationMaxConcurrentForwards <= 0 {
 		c.Migration.MigrationMaxConcurrentForwards = 256
 	}
@@ -184,6 +187,9 @@ type Service struct {
 	mtxMigration           sync.RWMutex             // 迁移运行时读写锁.
 	migration              *serviceMigrationRuntime // 迁移运行时状态；仅在启动迁移时初始化，所有字段受 mtxMigration 保护。
 	migrationControlDenied uint64                   // 被拒绝的迁移控制包数量；迁移启动前也需要保留该观测值。
+
+	mtxInboundMigration      sync.Mutex                           // 目标端接管并发控制锁.
+	inboundMigrationInFlight map[ActorUID]inboundMigrationAttempt // 正在接管的 Actor。
 }
 
 func NewService(cfg *ServiceConfig, option ...ServiceOption) *Service {

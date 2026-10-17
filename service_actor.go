@@ -598,20 +598,21 @@ func (s *Service) makeClientActorUID(id ActorID) ActorUID {
 
 // actorStarter Actor 启动器.
 type actorStarter struct {
-	mtx                    sync.Mutex    // mtx.
-	state                  int32         // 状态, 0:初始化 1:启动
-	refCount               int           // 引用计数.
-	uid                    ActorUID      // Actor 唯一ID
-	leaseId                string        // 租约ID.
-	isInboundMigration     bool          // 是否目标端迁移启动.
-	migrationSourceNodeID  string        // 源节点ID.
-	migrationSourceLeaseID string        // 源租约ID.
-	migrationSession       ActorSession  // 迁移会话.
-	migrationStartSeq      uint32        // 源迁移启动序号.
-	migrationLastErrCode   ErrCode       // 最近一次迁移结果.
-	done                   chan struct{} // 结束信号.
-	actor                  actorImpl     // Actor.
-	err                    error         // Error.
+	mtx                      sync.Mutex    // mtx.
+	state                    int32         // 状态, 0:初始化 1:启动
+	refCount                 int           // 引用计数.
+	uid                      ActorUID      // Actor 唯一ID
+	leaseId                  string        // 租约ID.
+	isInboundMigration       bool          // 是否目标端迁移启动.
+	migrationSourceNodeID    string        // 源节点ID.
+	migrationSourceLeaseID   string        // 源租约ID.
+	migrationSession         ActorSession  // 迁移会话.
+	migrationStartSeq        uint32        // 源迁移启动序号.
+	migrationLastErrCode     ErrCode       // 最近一次迁移结果.
+	inboundMigrationSlotHeld bool          // 是否持有目标端接管并发槽位。
+	done                     chan struct{} // 结束信号.
+	actor                    actorImpl     // Actor.
+	err                      error         // Error.
 }
 
 func (s *actorStarter) ref() bool {
@@ -668,6 +669,10 @@ func (s *actorStarter) start(svc *Service) {
 
 	categoryActors := svc.getCategoryActorsByCategory(s.uid.Category)
 	defer categoryActors.delStarter(s.uid.ID)
+	if s.isInboundMigration && s.inboundMigrationSlotHeld {
+		// 接管流程无论成功、失败或因停机退出，都必须归还目标端并发容量。
+		defer svc.releaseInboundMigrationSlot(s.uid, s.migrationSourceNodeID, s.migrationSourceLeaseID)
+	}
 
 	// 检查服务状态
 	if err := svc.checkStarted(); err != nil {
