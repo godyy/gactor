@@ -390,6 +390,12 @@ func TestContextAsyncCallSuspendsAndResumes(t *testing.T) {
 		t.Fatalf("async call timeout = %v, want %v", actor.asyncCallTimeout, time.Second)
 	}
 
+	// Actor 完成当前消息处理后会调用 release；挂起中的 Context 仅标记待回收。
+	ctx.release(actor)
+	if ctx.req == nil {
+		t.Fatal("expected suspended context retained until async callback")
+	}
+
 	if err := caller("payload", wantErr); err != nil {
 		t.Fatalf("invoke async caller: %v", err)
 	}
