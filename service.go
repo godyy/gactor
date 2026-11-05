@@ -103,14 +103,14 @@ func (c *ServiceConfig) init() {
 	if c.QueueWriteTimeAlarmThreshold <= 0 {
 		c.QueueWriteTimeAlarmThreshold = 50 * time.Millisecond
 	}
-	if c.Migration.MigrationMaxConcurrentActors <= 0 {
-		c.Migration.MigrationMaxConcurrentActors = 256
+	if c.Migration.MaxConcurrentActors <= 0 {
+		c.Migration.MaxConcurrentActors = 256
 	}
-	if c.Migration.MigrationMaxConcurrentInboundActors <= 0 {
-		c.Migration.MigrationMaxConcurrentInboundActors = 256
+	if c.Migration.MaxConcurrentInboundActors <= 0 {
+		c.Migration.MaxConcurrentInboundActors = 256
 	}
-	if c.Migration.MigrationMaxConcurrentForwards <= 0 {
-		c.Migration.MigrationMaxConcurrentForwards = 256
+	if c.Migration.MaxConcurrentForwards <= 0 {
+		c.Migration.MaxConcurrentForwards = 256
 	}
 }
 

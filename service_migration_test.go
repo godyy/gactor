@@ -24,13 +24,13 @@ func waitForCondition(t *testing.T, timeout time.Duration, f func() bool) {
 
 func TestMigrationConfigDefaults(t *testing.T) {
 	svc, _ := newPacketHandlerTestService(t, false, false)
-	if got := svc.cfg.Migration.MigrationMaxConcurrentActors; got != 256 {
+	if got := svc.cfg.Migration.MaxConcurrentActors; got != 256 {
 		t.Fatalf("MigrationMaxConcurrentActors = %d, want 256", got)
 	}
-	if got := svc.cfg.Migration.MigrationMaxConcurrentInboundActors; got != 256 {
+	if got := svc.cfg.Migration.MaxConcurrentInboundActors; got != 256 {
 		t.Fatalf("MigrationMaxConcurrentInboundActors = %d, want 256", got)
 	}
-	if got := svc.cfg.Migration.MigrationMaxConcurrentForwards; got != 256 {
+	if got := svc.cfg.Migration.MaxConcurrentForwards; got != 256 {
 		t.Fatalf("MigrationMaxConcurrentForwards = %d, want 256", got)
 	}
 }
@@ -386,7 +386,7 @@ func TestInboundMigrationCapacityRejectsBusyTarget(t *testing.T) {
 			t.Fatalf("stop service: %v", err)
 		}
 	}()
-	svc.cfg.Migration.MigrationMaxConcurrentInboundActors = 1
+	svc.cfg.Migration.MaxConcurrentInboundActors = 1
 
 	first := newS2SMigrateStartHead(1, ActorUID{Category: 1, ID: 1023}, "source-a", "lease-a", false, ActorSession{})
 	if got := svc.tryAcquireInboundMigrationSlot(first); got != inboundMigrationSlotAcquired {
@@ -433,7 +433,7 @@ func TestMigrationSlotWaitAndMonitorObservability(t *testing.T) {
 	handler := svc.getCfg().Handler.(*packetHandlerTestServiceHandler)
 	monitor := &migrationMonitorTest{}
 	handler.monitor = monitor
-	svc.cfg.Migration.MigrationMaxConcurrentActors = 1
+	svc.cfg.Migration.MaxConcurrentActors = 1
 
 	uid1 := ActorUID{Category: 1, ID: 1006}
 	uid2 := ActorUID{Category: 1, ID: 1007}
@@ -472,7 +472,7 @@ func TestMigrationForwardBackpressure(t *testing.T) {
 		}
 	}()
 
-	svc.cfg.Migration.MigrationMaxConcurrentForwards = 1
+	svc.cfg.Migration.MaxConcurrentForwards = 1
 	if err := svc.StartMigration("target-node", nil); err != nil {
 		t.Fatalf("StartMigration: %v", err)
 	}
@@ -645,8 +645,8 @@ func TestMigrationActorPhaseDoesNotRollbackFromMigrated(t *testing.T) {
 	uid := ActorUID{Category: 1, ID: 1007}
 	svc.mtxMigration.Lock()
 	svc.migration = &serviceMigrationRuntime{
-		migrationStarted:      true,
-		migrationTargetNodeID: "target-node",
+		started:      true,
+		targetNodeID: "target-node",
 	}
 	svc.mtxMigration.Unlock()
 	svc.initMigrationPlan(map[ActorUID]string{uid: "target-node"})
@@ -678,8 +678,8 @@ func TestMigrationSnapshotActorsAreSorted(t *testing.T) {
 
 	svc.mtxMigration.Lock()
 	svc.migration = &serviceMigrationRuntime{
-		migrationStarted:      true,
-		migrationTargetNodeID: "target-node",
+		started:      true,
+		targetNodeID: "target-node",
 	}
 	svc.mtxMigration.Unlock()
 	svc.initMigrationPlan(map[ActorUID]string{
@@ -719,8 +719,8 @@ func TestWaitMigrationConverged(t *testing.T) {
 	uid := ActorUID{Category: 1, ID: 1008}
 	svc.mtxMigration.Lock()
 	svc.migration = &serviceMigrationRuntime{
-		migrationStarted:      true,
-		migrationTargetNodeID: "target-node",
+		started:      true,
+		targetNodeID: "target-node",
 	}
 	svc.mtxMigration.Unlock()
 	svc.initMigrationPlan(map[ActorUID]string{uid: "target-node"})
@@ -750,10 +750,10 @@ func TestWaitMigrationConvergedReturnsWhenServiceStops(t *testing.T) {
 	uid := ActorUID{Category: 1, ID: 1010}
 	svc.mtxMigration.Lock()
 	svc.migration = &serviceMigrationRuntime{
-		migrationStarted:      true,
-		migrationTargetNodeID: "target-node",
-		migrationConvergedCh:  make(chan struct{}),
-		migrationStoppedCh:    make(chan struct{}),
+		started:      true,
+		targetNodeID: "target-node",
+		convergedCh:  make(chan struct{}),
+		stoppedCh:    make(chan struct{}),
 	}
 	svc.mtxMigration.Unlock()
 	svc.initMigrationPlan(map[ActorUID]string{uid: "target-node"})
@@ -804,10 +804,10 @@ func TestMigrationStartRetryRecordsDiagnostics(t *testing.T) {
 	uid := ActorUID{Category: 1, ID: 1012}
 	svc.mtxMigration.Lock()
 	svc.migration = &serviceMigrationRuntime{
-		migrationStarted:      true,
-		migrationTargetNodeID: "target-node",
-		migrationConvergedCh:  make(chan struct{}),
-		migrationStoppedCh:    make(chan struct{}),
+		started:      true,
+		targetNodeID: "target-node",
+		convergedCh:  make(chan struct{}),
+		stoppedCh:    make(chan struct{}),
 	}
 	svc.mtxMigration.Unlock()
 	svc.initMigrationPlan(map[ActorUID]string{uid: "target-node"})
@@ -849,10 +849,10 @@ func TestMigrationConvergedCallbackPanicIsIsolated(t *testing.T) {
 	uid := ActorUID{Category: 1, ID: 1009}
 	svc.mtxMigration.Lock()
 	svc.migration = &serviceMigrationRuntime{
-		migrationStarted:      true,
-		migrationTargetNodeID: "target-node",
-		migrationConvergedCh:  make(chan struct{}),
-		migrationConvergedCb: func(ServiceMigrationSnapshot) {
+		started:      true,
+		targetNodeID: "target-node",
+		convergedCh:  make(chan struct{}),
+		convergedCb: func(ServiceMigrationSnapshot) {
 			callbackStarted <- struct{}{}
 			panic("test migration callback panic")
 		},
@@ -999,7 +999,7 @@ func TestMigrationSlotsLimitConcurrentActors(t *testing.T) {
 		}
 	}()
 
-	svc.cfg.Migration.MigrationMaxConcurrentActors = 1
+	svc.cfg.Migration.MaxConcurrentActors = 1
 	uid1 := ActorUID{Category: 1, ID: 1014}
 	uid2 := ActorUID{Category: 1, ID: 1015}
 	if err := svc.StartMigration("target-node", nil); err != nil {
