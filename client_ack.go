@@ -49,7 +49,7 @@ func (c *Client) receivePacketAck(pt PacketType, seq uint32) {
 }
 
 // sendAckPacket 发送 Ack 数据包.
-func (c *Client) sendAckPacket(nodeId string, ph packetHead) error {
+func (c *Client) sendAckPacket(nodeId string, ph PacketHead) error {
 	if !c.ackEnabled() {
 		return nil
 	}
@@ -60,8 +60,7 @@ func (c *Client) sendAckPacket(nodeId string, ph packetHead) error {
 	}
 
 	// 编码数据包.
-	head := newAckHeadFrom(ph)
-	b, err := c.encodePacket(&head, nil)
+	b, err := c.encodePacket(newAckHeadFrom(ph), nil)
 	if err != nil {
 		c.logger.ErrorFields("encode ack packet failed", lfdPacketTypeSeq(ph), lfdError(err))
 		return ErrCodeEncodePacketFailed

@@ -540,14 +540,15 @@ func (s *Service) cast(from, to ActorUID, payload any) error {
 		}
 
 		ph := newS2SCastHead(seq, from, to)
-		if err = s.sendRemotePacket(toNodeId, &ph, payload); err != nil {
+		defer ph.release()
+		if err = s.sendRemotePacket(toNodeId, ph, payload); err != nil {
 			s.monitorCastActionSend2RemoteErr(err)
 			return err
 		}
 	}
 
 	// 编码 payload
-	encodedPayload, err := s.encodePayload(PacketTypeS2SCast, payload)
+	payloadBuf, err := s.encodePayload(PacketTypeS2SCast, payload)
 	if err != nil {
 		s.monitorCastAction(MonitorCASend2LocalErr)
 		return err
@@ -555,9 +556,7 @@ func (s *Service) cast(from, to ActorUID, payload any) error {
 
 	// 创建 castRequest 并发送给 Actor.
 	// actor 成功接收 cast 请求，就一定会处理.
-	buf := Buffer{}
-	buf.SetBuf(encodedPayload)
-	request := newContext(s, newCastRequest(s.nodeId(), seq, from, buf))
+	request := newContext(s, newCastRequest(s.nodeId(), seq, from, payloadBuf))
 	if err := s.send2LocalActor(to, request, leaseId); err != nil {
 		request.discard(s)
 		s.monitorCastActionSend2LocalErr(err)
@@ -820,7 +819,8 @@ func (s *actorStarter) sendMigrationResult(svc *Service, errCode ErrCode) {
 	}
 	s.migrationLastErrCode = errCode
 	head := newS2SMigrateResultHead(svc.genSeq(), s.uid, s.migrationSourceLeaseID, s.migrationStartSeq, errCode)
-	if err := svc.sendRemotePacket(s.migrationSourceNodeID, &head, nil); err != nil {
+	defer head.release()
+	if err := svc.sendRemotePacket(s.migrationSourceNodeID, head, nil); err != nil {
 		svc.getLogger().ErrorFields("send migrate result failed", svc.lfdActorUID("uid", s.uid), lfdError(err))
 	}
 }

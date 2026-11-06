@@ -755,8 +755,6 @@ func (a *actorCore) receiveCompletedAsyncRPC(resp RPCResp, cb ActorRPCFunc) erro
 	}
 
 	msg := newMessageCompletedAsyncRPC(resp.payload, resp.err, cb)
-	resp.payload.SetBuf(nil)
-
 	begin := time.Now()
 	a.priMessageBox <- msg
 	if d := time.Since(begin); d > a.svc.getCfg().QueueWriteTimeAlarmThreshold {
@@ -911,12 +909,16 @@ type actorAsyncRPCFunc struct {
 
 func (f *actorAsyncRPCFunc) invoke(resp RPCResp) {
 	if actor, err := f.svc.getActor(f.uid); err != nil {
+		f.svc.freeBuffer(resp.payload)
 		f.svc.getLogger().ErrorFields("get actor failed inside actorAsyncRPCFunc", f.svc.lfdActorUID("uid", f.uid), lfdError(err))
+		return
 	} else if actor == nil {
+		f.svc.freeBuffer(resp.payload)
 		f.svc.getLogger().WarnFields("actor not found inside actorAsyncRPCFunc", f.svc.lfdActorUID("uid", f.uid))
 	} else {
 		defer actor.core().deref()
 		if err := actor.core().receiveCompletedAsyncRPC(resp, f.cb); err != nil {
+			f.svc.freeBuffer(resp.payload)
 			actor.core().getLogger().ErrorFields("receive async rpc call failed", lfdError(err))
 		}
 	}
@@ -1146,8 +1148,7 @@ func (a *cactor) PushRawMessage(payload any) error {
 	if a.session.NodeId == "" {
 		return ErrCodeActorNotConnected
 	}
-	ph := newRawPushHead(a.service().genSeq(), a.id, a.session.SID)
-	return a.svc.sendRemotePacket(a.session.NodeId, &ph, payload)
+	return a.svc.sendRemotePacket(a.session.NodeId, newRawPushHead(a.service().genSeq(), a.id, a.session.SID), payload)
 }
 
 // pushRawPayload 向客户端直推已编码 payload.
@@ -1156,8 +1157,7 @@ func (a *cactor) pushRawPayload(payload []byte) error {
 	if a.session.NodeId == "" {
 		return ErrCodeActorNotConnected
 	}
-	ph := newRawPushHead(a.service().genSeq(), a.id, a.session.SID)
-	return a.svc.sendRemoteRawPacket(a.session.NodeId, &ph, payload)
+	return a.svc.sendRemoteRawPacket(a.session.NodeId, newRawPushHead(a.service().genSeq(), a.id, a.session.SID), payload)
 }
 
 // Disconnect 端开与客户端的连接.
@@ -1166,8 +1166,7 @@ func (a *cactor) Disconnect() {
 		return
 	}
 
-	ph := newDisconnectHead(a.svc.genSeq(), a.id, a.session.SID)
-	if err := a.svc.sendRemotePacket(a.session.NodeId, &ph, nil); err != nil {
+	if err := a.svc.sendRemotePacket(a.session.NodeId, newDisconnectHead(a.svc.genSeq(), a.id, a.session.SID), nil); err != nil {
 		a.getLogger().ErrorFields("send disconnect packet failed", lfdSession(a.session), lfdError(err))
 	} else {
 		a.getLogger().DebugFields("disconnect", lfdSession(a.session))

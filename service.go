@@ -395,13 +395,52 @@ func (s *Service) Stop() error {
 }
 
 // encodePacket 编码数据包.
-func (s *Service) encodePacket(ph packetHead, payload any) ([]byte, error) {
-	return encodePacket(ph, payload, s.cfg.Handler.GetPacketCodec())
+func (s *Service) encodePacket(ph PacketHead, payload any) ([]byte, error) {
+	var (
+		buf *Buffer
+		err error
+	)
+
+	if payload == nil {
+		buf, err = s.allocPacketBuf(ph, 0)
+	} else {
+		codec := s.cfg.Handler.GetPacketCodec()
+		buf, err = codec.Encode(s.allocPacketBuf, ph, payload)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	data := buf.SetBuf(nil)
+	s.freeBuffer(buf)
+	return data, nil
+}
+
+// allocPacketBuf 分配数据包缓冲区.
+func (s *Service) allocPacketBuf(ph PacketHead, payloadLen int) (*Buffer, error) {
+	// 分配字节切片.
+	l := sizeOfPacketType + ph.getLen() + payloadLen
+	buf := s.allocBuffer(l)
+
+	// 编码包头.
+	if err := buf.WritePacketType(ph.PacketType()); err != nil {
+		s.freeBuffer(buf)
+		return nil, err
+	}
+	if err := ph.encode(buf); err != nil {
+		s.freeBuffer(buf)
+		return nil, err
+	}
+	return buf, nil
 }
 
 // encodePayload 编码负载数据.
-func (s *Service) encodePayload(pt PacketType, payload any) ([]byte, error) {
-	return s.cfg.Handler.GetPacketCodec().EncodePayload(pt, payload)
+func (s *Service) encodePayload(pt PacketType, payload any) (*Buffer, error) {
+	data, err := s.cfg.Handler.GetPacketCodec().EncodePayload(pt, payload)
+	if err != nil {
+		return nil, err
+	}
+	return NewBuffer(data), nil
 }
 
 // decodePayload 解码负载数据.
@@ -420,17 +459,21 @@ func (s *Service) putBytes(b []byte) {
 }
 
 // allocBuffer 分配缓冲区.
-func (s *Service) allocBuffer(buf *Buffer, len int) {
-	b := s.cfg.Handler.GetPacketCodec().GetBytes(len)
-	buf.SetBuf(b)
+func (s *Service) allocBuffer(len int) *Buffer {
+	return NewBuffer(s.getBytes(len))
 }
 
 // freeBuffer 回收缓冲区.
 func (s *Service) freeBuffer(buf *Buffer) {
-	if b := buf.Data(); b != nil {
-		s.cfg.Handler.GetPacketCodec().PutBytes(b)
-		buf.SetBuf(nil)
+	if buf == nil {
+		return
 	}
+
+	bytes := buf.SetBuf(nil)
+	if bytes != nil {
+		s.putBytes(bytes)
+	}
+	buf.Release()
 }
 
 // send 发送字节数据.
@@ -439,11 +482,11 @@ func (s *Service) send(nodeId string, b []byte) error {
 }
 
 // sendLocalPacket 发送本地数据包.
-func (s *Service) sendLocalPacket(ph packetHead, payload any) error {
+func (s *Service) sendLocalPacket(ph PacketHead, payload any) error {
 	// 编码数据包.
 	b, err := s.encodePacket(ph, payload)
 	if err != nil {
-		s.logger.ErrorFields("[sendLocalPacket] encode packet failed", lfdPacketType(ph.getPt()), lfdError(err))
+		s.logger.ErrorFields("[sendLocalPacket] encode packet failed", lfdPacketType(ph.PacketType()), lfdError(err))
 		return ErrCodeEncodePacketFailed
 	}
 
@@ -451,21 +494,21 @@ func (s *Service) sendLocalPacket(ph packetHead, payload any) error {
 }
 
 // sendRemotePacket 发送远程数据包.
-func (s *Service) sendRemotePacket(nodeId string, ph packetHead, payload any) error {
+func (s *Service) sendRemotePacket(nodeId string, ph PacketHead, payload any) error {
 	// 编码数据包.
 	b, err := s.encodePacket(ph, payload)
 	if err != nil {
-		s.logger.ErrorFields("[sendRemotePacket] encode packet failed", lfdPacketType(ph.getPt()), lfdError(err))
+		s.logger.ErrorFields("[sendRemotePacket] encode packet failed", lfdPacketType(ph.PacketType()), lfdError(err))
 		return ErrCodeEncodePacketFailed
 	}
 
 	// 添加待确认数据包.
-	s.addPacket2Ack(nodeId, ph.getPt(), ph.getSeq(), b)
+	s.addPacket2Ack(nodeId, ph.PacketType(), ph.getSeq(), b)
 
 	// 发送数据.
 	if err = s.send(nodeId, b); err != nil {
 		// 若发送失败, 直接移除待确认数据包.
-		s.remPacket2Ack(ph.getPt(), ph.getSeq())
+		s.remPacket2Ack(ph.PacketType(), ph.getSeq())
 		return pkgerrors.WithMessage(err, "send packet")
 	}
 
@@ -473,42 +516,35 @@ func (s *Service) sendRemotePacket(nodeId string, ph packetHead, payload any) er
 }
 
 // encodeRawPacket 将原始 payload 直接拼装为数据包.
-func (s *Service) encodeRawPacket(ph packetHead, payload []byte) ([]byte, error) {
-	l := sizeOfPacketType + ph.getLen() + len(payload)
-	b := s.getBytes(l)
-	var buf Buffer
-	buf.SetBuf(b)
+func (s *Service) encodeRawPacket(ph PacketHead, payload []byte) ([]byte, error) {
+	buf, err := s.allocPacketBuf(ph, len(payload))
+	if err != nil {
+		return nil, err
+	}
+	defer s.freeBuffer(buf)
 
-	if err := buf.writePacketType(ph.getPt()); err != nil {
-		s.putBytes(b)
-		return nil, pkgerrors.WithMessage(err, "write packet type")
-	}
-	if err := ph.encode(&buf); err != nil {
-		s.putBytes(b)
-		return nil, pkgerrors.WithMessage(err, "encode packet head")
-	}
+	// allocPacketBuf 已完成包类型和包头编码，此处仅追加原始 payload。
 	if len(payload) > 0 {
 		if _, err := buf.Write(payload); err != nil {
-			s.putBytes(b)
 			return nil, pkgerrors.WithMessage(err, "write raw payload")
 		}
 	}
 
-	return buf.Data(), nil
+	return buf.SetBuf(nil), nil
 }
 
 // sendRemoteRawPacket 发送携带原始 payload 的远程数据包.
-func (s *Service) sendRemoteRawPacket(nodeId string, ph packetHead, payload []byte) error {
+func (s *Service) sendRemoteRawPacket(nodeId string, ph PacketHead, payload []byte) error {
 	// 直接拼包，避免对 payload 做二次业务编码.
 	b, err := s.encodeRawPacket(ph, payload)
 	if err != nil {
-		s.logger.ErrorFields("[sendRemoteRawPacket] encode packet failed", lfdPacketType(ph.getPt()), lfdError(err))
+		s.logger.ErrorFields("[sendRemoteRawPacket] encode packet failed", lfdPacketType(ph.PacketType()), lfdError(err))
 		return ErrCodeEncodePacketFailed
 	}
 
-	s.addPacket2Ack(nodeId, ph.getPt(), ph.getSeq(), b)
+	s.addPacket2Ack(nodeId, ph.PacketType(), ph.getSeq(), b)
 	if err = s.send(nodeId, b); err != nil {
-		s.remPacket2Ack(ph.getPt(), ph.getSeq())
+		s.remPacket2Ack(ph.PacketType(), ph.getSeq())
 		return pkgerrors.WithMessage(err, "send packet")
 	}
 
@@ -516,7 +552,7 @@ func (s *Service) sendRemoteRawPacket(nodeId string, ph packetHead, payload []by
 }
 
 // sendPacket 编码数据包, 并发送数据包到 nodeId 指定的节点.
-func (s *Service) sendPacket(nodeId string, ph packetHead, payload any) error {
+func (s *Service) sendPacket(nodeId string, ph PacketHead, payload any) error {
 	if nodeId == s.nodeId() {
 		return s.sendLocalPacket(ph, payload)
 	} else {

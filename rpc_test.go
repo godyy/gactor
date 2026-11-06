@@ -29,13 +29,13 @@ func (c *rpcTestCmd) exec(rm *rpcManager) {
 	}
 }
 
-func (c *rpcTestCmd) release() {
+func (c *rpcTestCmd) release(rm *rpcManager) {
 	c.mu.Lock()
 	c.releaseCount++
 	c.mu.Unlock()
 }
 
-func (c *rpcTestCmd) discard() {
+func (c *rpcTestCmd) discard(rm *rpcManager) {
 	c.mu.Lock()
 	c.discardCount++
 	c.mu.Unlock()
@@ -157,17 +157,19 @@ func TestRPCManagerEnqueueCmdDiscardOnBusyAndStopping(t *testing.T) {
 }
 
 func TestRPCCmdAddDiscardReleasesCall(t *testing.T) {
+	_, rm := newRPCTestManager(t, 1)
+
 	call := &rpcCall{
 		reqId: 1,
 		err:   errors.New("test"),
 		cb:    func(RPCResp) {},
 	}
-	buf := Buffer{}
-	buf.SetBuf([]byte{1, 2, 3})
+
+	buf := NewBuffer([]byte{1, 2, 3})
 	call.respPayload = buf
 
 	cmd := newRPCCmdAdd(call)
-	cmd.discard()
+	cmd.discard(rm)
 
 	if call.cb != nil {
 		t.Fatal("expected call callback cleared after discard")
@@ -175,8 +177,8 @@ func TestRPCCmdAddDiscardReleasesCall(t *testing.T) {
 	if call.err != nil {
 		t.Fatal("expected call error cleared after discard")
 	}
-	if data := call.respPayload.Data(); data != nil {
-		t.Fatalf("expected call payload cleared after discard, got %v", data)
+	if call.respPayload != nil {
+		t.Fatalf("expected call payload cleared after discard, got %v", call.respPayload)
 	}
 	if cmd.call != nil {
 		t.Fatal("expected rpcCmdAdd.call cleared after discard")

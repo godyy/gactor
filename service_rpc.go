@@ -38,7 +38,6 @@ func (s *Service) doRPC(from ActorUID, to ActorUID, params any, cb RPCFunc, dead
 	var (
 		toNodeId string
 		leaseId  string
-		b        []byte
 	)
 
 	// 检查deadline
@@ -92,7 +91,8 @@ func (s *Service) doRPC(from ActorUID, to ActorUID, params any, cb RPCFunc, dead
 		// 目标节点非本地.
 		// 编码数据包并发送到远端节点.
 		ph := newS2SRpcHead(seq, reqId, from, to, uint32(remaining.Milliseconds()))
-		if err = s.sendRemotePacket(toNodeId, &ph, params); err != nil {
+		defer ph.release()
+		if err = s.sendRemotePacket(toNodeId, ph, params); err != nil {
 			s.monitorRPCActionSend2RemoteErr(err)
 		}
 
@@ -100,15 +100,12 @@ func (s *Service) doRPC(from ActorUID, to ActorUID, params any, cb RPCFunc, dead
 		// 目标节点为本地.
 
 		// 编码 payload, 创建 rpcRequest 并发送给 Actor.
-		if b, err = s.encodePayload(PacketTypeS2SRpc, params); err != nil {
+		if payloadBuf, err := s.encodePayload(PacketTypeS2SRpc, params); err != nil {
 			s.monitorRPCAction(MonitorCASend2LocalErr)
 		} else {
-			buf := Buffer{}
-			buf.SetBuf(b)
-
 			// 根据是否异步，创建请求上下文.
 			// 并发送给目标actor.
-			req := newContext(s, newRPCRequest(toNodeId, seq, reqId, from, buf, deadline.UnixMilli()))
+			req := newContext(s, newRPCRequest(toNodeId, seq, reqId, from, payloadBuf, deadline.UnixMilli()))
 			if err = s.send2LocalActor(to, req, leaseId); err != nil {
 				req.discard(s)
 				s.monitorRPCActionSend2LocalErr(err)
@@ -123,7 +120,7 @@ func (s *Service) doRPC(from ActorUID, to ActorUID, params any, cb RPCFunc, dead
 type rpcDoneFunc struct {
 	done    chan struct{} // 完成信号.
 	svc     *Service      // 提供解码辅助.
-	payload []byte        // payload 拷贝.
+	payload *Buffer       // payload.
 	err     error         // 错误信息.
 }
 
@@ -133,21 +130,24 @@ func (cb *rpcDoneFunc) invoke(resp RPCResp) {
 		cb.err = err
 		return
 	}
-	cb.payload = append(cb.payload[:0], resp.payload.UnreadData()...)
+	cb.payload = resp.payload
 }
 
 func (cb *rpcDoneFunc) decode(reply any) error {
 	if cb.err != nil {
 		return cb.err
 	}
-	var buf Buffer
-	buf.SetBuf(cb.payload)
-	if err := cb.svc.decodePayload(PacketTypeS2SRpcResp, &buf, reply); err == nil {
-		return nil
-	} else if err == ErrBytesEscape {
+	if err := cb.svc.decodePayload(PacketTypeS2SRpcResp, cb.payload, reply); err == nil {
 		return nil
 	} else {
 		return err
+	}
+}
+
+func (cb *rpcDoneFunc) release() {
+	if cb.payload != nil {
+		cb.svc.freeBuffer(cb.payload)
+		cb.payload = nil
 	}
 }
 
@@ -156,6 +156,7 @@ func (cb *rpcDoneFunc) decode(reply any) error {
 func (s *Service) rpcWithDeadline(from, to ActorUID, params any, reply any, deadline time.Time) error {
 	// 执行同步RPC 调用.
 	doneFunc := rpcDoneFunc{done: make(chan struct{}), svc: s}
+	defer doneFunc.release()
 	if _, err := s.doRPC(from, to, params, doneFunc.invoke, deadline); err != nil {
 		return err
 	}
@@ -192,6 +193,7 @@ func (s *Service) rpcWithContext(ctx context.Context, from, to ActorUID, params 
 
 	// 执行同步RPC 调用.
 	doneFunc := rpcDoneFunc{done: make(chan struct{}), svc: s}
+	defer doneFunc.release()
 	reqId, err := s.doRPC(from, to, params, doneFunc.invoke, deadline)
 	if err != nil {
 		return err

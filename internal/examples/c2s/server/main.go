@@ -120,22 +120,22 @@ func (s *server) PutBytes(b []byte) {
 //
 //	PacketTypeRawResp, PacketTypeRawPush
 //	PacketTypeS2SRpc, PacketTypeS2SRpcResp, PacketTypeS2SCast, PacketTypeS2SForward
-func (s *server) Encode(allocator gactor.PacketAllocator, payload any) ([]byte, error) {
-	switch allocator.PacketType() {
+func (s *server) Encode(allocator gactor.PacketBufAllocator, ph gactor.PacketHead, payload any) (*gactor.Buffer, error) {
+	switch ph.PacketType() {
 	case gactor.PacketTypeRawReq:
-		return payload.(*message.ReqMessage).EncodePacket(allocator)
+		return payload.(*message.ReqMessage).EncodePacket(allocator, ph)
 	case gactor.PacketTypeRawResp:
-		return payload.(*message.RespMessage).EncodePacket(allocator)
+		return payload.(*message.RespMessage).EncodePacket(allocator, ph)
 	case gactor.PacketTypeRawPush:
-		return payload.(*message.PushMessage).EncodePacket(allocator)
+		return payload.(*message.PushMessage).EncodePacket(allocator, ph)
 	case gactor.PacketTypeS2SRpc:
-		return payload.(*message.RpcMessage).EncodePacket(allocator)
+		return payload.(*message.RpcMessage).EncodePacket(allocator, ph)
 	case gactor.PacketTypeS2SRpcResp:
-		return payload.(*message.RpcRespMessage).EncodePacket(allocator)
+		return payload.(*message.RpcRespMessage).EncodePacket(allocator, ph)
 	case gactor.PacketTypeS2SForward:
-		return payload.(*message.PushMessage).EncodePacket(allocator)
+		return payload.(*message.PushMessage).EncodePacket(allocator, ph)
 	default:
-		return nil, fmt.Errorf("unsupported packet type %d", allocator.PacketType())
+		return nil, fmt.Errorf("unsupported packet type %d", ph.PacketType())
 	}
 }
 

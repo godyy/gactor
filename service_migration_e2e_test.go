@@ -32,7 +32,7 @@ type migrationE2ENetwork struct {
 func migrationE2EPacketType(data []byte) PacketType {
 	var buf Buffer
 	buf.SetBuf(data)
-	pt, _ := buf.readPacketType()
+	pt, _ := buf.ReadPacketType()
 	return pt
 }
 
@@ -389,10 +389,10 @@ func TestMigrationPacketHandlersRejectMalformedPackets(t *testing.T) {
 		PacketTypeS2SMigrateForward,
 	} {
 		t.Run(fmt.Sprintf("packet_%d", pt), func(t *testing.T) {
-			packet := make([]byte, sizeOfPacketType+1)
+			packet := make([]byte, 0, sizeOfPacketType+1)
 			var buf Buffer
 			buf.SetBuf(packet)
-			if err := buf.writePacketType(pt); err != nil {
+			if err := buf.WritePacketType(pt); err != nil {
 				t.Fatalf("write packet type: %v", err)
 			}
 			if err := svc.HandlePacket("source-node", packet); err == nil {

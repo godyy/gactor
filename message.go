@@ -107,10 +107,10 @@ func (m *messageCheckAlive) discard(_ *Service) {}
 
 // messageForward 封装 Service 透传消息.
 type messageForward struct {
-	payload Buffer
+	payload *Buffer
 }
 
-func newMessageForward(payload Buffer) *messageForward {
+func newMessageForward(payload *Buffer) *messageForward {
 	msg := &messageForward{
 		payload: payload,
 	}
@@ -138,21 +138,21 @@ func (m *messageForward) handle(a actorImpl) {
 func (m *messageForward) handleError(a actorImpl, err error) {}
 
 func (m *messageForward) release(a actorImpl) {
-	a.core().service().freeBuffer(&m.payload)
+	a.core().service().freeBuffer(m.payload)
 }
 
 func (m *messageForward) discard(s *Service) {
-	s.freeBuffer(&m.payload)
+	s.freeBuffer(m.payload)
 }
 
 // messageCompletedAsyncRPC 封装异步 RPC 完成消息.
 type messageCompletedAsyncRPC struct {
-	payload Buffer       // 响应负载数据.
+	payload *Buffer      // 响应负载数据.
 	err     error        // 错误信息.
 	cb      ActorRPCFunc // 回调函数.
 }
 
-func newMessageCompletedAsyncRPC(payload Buffer, err error, cb ActorRPCFunc) *messageCompletedAsyncRPC {
+func newMessageCompletedAsyncRPC(payload *Buffer, err error, cb ActorRPCFunc) *messageCompletedAsyncRPC {
 	return &messageCompletedAsyncRPC{
 		payload: payload,
 		err:     err,
@@ -172,7 +172,6 @@ func (m *messageCompletedAsyncRPC) handle(a actorImpl) {
 		a.core().pendingAsyncRPC--
 	}
 	a.core().onAsyncCallbackDone(a)
-	resp.release()
 }
 
 // handleError 处理错误.
@@ -180,12 +179,12 @@ func (m *messageCompletedAsyncRPC) handleError(a actorImpl, err error) {}
 
 // release 在消息经由 Actor 处理完成后回收资源.
 func (m *messageCompletedAsyncRPC) release(a actorImpl) {
-	a.core().service().freeBuffer(&m.payload)
+	a.core().service().freeBuffer(m.payload)
 }
 
 // discard 在消息未进入 Actor 信箱时回收资源.
 func (m *messageCompletedAsyncRPC) discard(s *Service) {
-	s.freeBuffer(&m.payload)
+	s.freeBuffer(m.payload)
 }
 
 // messageTriggeredTimer 封装已触发定时器消息.

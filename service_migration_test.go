@@ -219,7 +219,7 @@ func TestServiceStartMigrationSendsMigrateStartPacket(t *testing.T) {
 			continue
 		}
 		var head s2sMigrateStartPacketHead
-		if err := head.decode(&buf); err != nil {
+		if err := head.decode(buf); err != nil {
 			t.Fatalf("decode migrate start: %v", err)
 		}
 		if send.nodeId != "target-node" {
@@ -316,7 +316,7 @@ func TestStartMigrationWithPlannerFreezesActorTargets(t *testing.T) {
 			continue
 		}
 		var head s2sMigrateStartPacketHead
-		if err := head.decode(&buf); err != nil {
+		if err := head.decode(buf); err != nil {
 			t.Fatalf("decode migrate start: %v", err)
 		}
 		gotTargets[head.uid] = send.nodeId
@@ -409,7 +409,7 @@ func TestInboundMigrationCapacityRejectsBusyTarget(t *testing.T) {
 		t.Fatalf("unexpected busy migration result destination: type=%d node=%q", pt, sends[0].nodeId)
 	}
 	var result s2sMigrateResultPacketHead
-	if err := result.decode(&buf); err != nil {
+	if err := result.decode(buf); err != nil {
 		t.Fatalf("decode busy migration result: %v", err)
 	}
 	if result.uid != second.uid || result.startSeq != second.seq || result.errCode != ErrCodeActorBusy {
@@ -515,7 +515,7 @@ func TestHandlePacketS2SMigrateResultMarksActorMigrated(t *testing.T) {
 
 	startSeq := actor.core().migrationRuntime().startSeq
 	resultHead := newS2SMigrateResultHead(svc.genSeq(), uid, actor.core().leaseID, startSeq, ErrCodeOK)
-	packet, err := svc.encodePacket(&resultHead, nil)
+	packet, err := svc.encodePacket(resultHead, nil)
 	if err != nil {
 		t.Fatalf("encode migrate result: %v", err)
 	}
@@ -922,7 +922,7 @@ func TestMigrationConvergedCallbackFiresOnceAfterRetryRecovered(t *testing.T) {
 
 	startSeq := actor.core().migrationRuntime().startSeq
 	resultHead := newS2SMigrateResultHead(svc.genSeq(), uid, actor.core().leaseID, startSeq, ErrCodeOK)
-	packet, err := svc.encodePacket(&resultHead, nil)
+	packet, err := svc.encodePacket(resultHead, nil)
 	if err != nil {
 		t.Fatalf("encode migrate result: %v", err)
 	}
@@ -978,7 +978,7 @@ func TestMigrateResultFromUnexpectedNodeIsIgnored(t *testing.T) {
 
 	migration := actor.core().migrationRuntime()
 	head := newS2SMigrateResultHead(svc.genSeq(), uid, actor.core().leaseID, migration.startSeq, ErrCodeOK)
-	packet, encodeErr := svc.encodePacket(&head, nil)
+	packet, encodeErr := svc.encodePacket(head, nil)
 	if encodeErr != nil {
 		t.Fatalf("encode migrate result: %v", encodeErr)
 	}
@@ -1075,7 +1075,7 @@ func TestFinalizeMigrationStopsMigratedActors(t *testing.T) {
 	})
 	startSeq := actor.core().migrationRuntime().startSeq
 	result := newS2SMigrateResultHead(svc.genSeq(), uid, actor.core().leaseID, startSeq, ErrCodeOK)
-	packet, err := svc.encodePacket(&result, nil)
+	packet, err := svc.encodePacket(result, nil)
 	if err != nil {
 		t.Fatalf("encode migration result: %v", err)
 	}
@@ -1158,7 +1158,7 @@ func TestMigrateStartWithMismatchedSourceNodeIsIgnored(t *testing.T) {
 
 	uid := ActorUID{Category: 1, ID: 1016}
 	head := newS2SMigrateStartHead(1, uid, "declared-source", "source-lease", false, ActorSession{})
-	packet, err := svc.encodePacket(&head, nil)
+	packet, err := svc.encodePacket(head, nil)
 	if err != nil {
 		t.Fatalf("encode migrate start: %v", err)
 	}
@@ -1233,14 +1233,14 @@ func TestDuplicateMigrateStartReusesInboundTakeover(t *testing.T) {
 	registry := migrationTestRegistry(t, svc)
 	seedMigrationSourceLease(t, registry, uid, "source-node", "source-lease")
 	head := newS2SMigrateStartHead(1, uid, "source-node", "source-lease", false, ActorSession{})
-	packet, err := svc.encodePacket(&head, nil)
+	packet, err := svc.encodePacket(head, nil)
 	if err != nil {
 		t.Fatalf("encode migrate start: %v", err)
 	}
 	if handleErr := svc.HandlePacket("source-node", packet); handleErr != nil {
 		t.Fatalf("handle first migrate start: %v", handleErr)
 	}
-	packet, err = svc.encodePacket(&head, nil)
+	packet, err = svc.encodePacket(head, nil)
 	if err != nil {
 		t.Fatalf("encode duplicate migrate start: %v", err)
 	}
@@ -1278,7 +1278,7 @@ func TestMigrateStartForDifferentLeaseGetsImmediateFailure(t *testing.T) {
 	registry := migrationTestRegistry(t, svc)
 	seedMigrationSourceLease(t, registry, uid, "source-node", "current-lease")
 	current := newS2SMigrateStartHead(1, uid, "source-node", "current-lease", true, ActorSession{})
-	packet, err := svc.encodePacket(&current, nil)
+	packet, err := svc.encodePacket(current, nil)
 	if err != nil {
 		t.Fatalf("encode current migrate start: %v", err)
 	}
@@ -1291,7 +1291,7 @@ func TestMigrateStartForDifferentLeaseGetsImmediateFailure(t *testing.T) {
 	})
 
 	stale := newS2SMigrateStartHead(2, uid, "source-node", "stale-lease", true, ActorSession{})
-	packet, err = svc.encodePacket(&stale, nil)
+	packet, err = svc.encodePacket(stale, nil)
 	if err != nil {
 		t.Fatalf("encode stale migrate start: %v", err)
 	}
@@ -1305,7 +1305,7 @@ func TestMigrateStartForDifferentLeaseGetsImmediateFailure(t *testing.T) {
 				continue
 			}
 			var result s2sMigrateResultPacketHead
-			if result.decode(&buf) == nil && result.startSeq == stale.seq && result.errCode == ErrCodeMigrationInProgress {
+			if result.decode(buf) == nil && result.startSeq == stale.seq && result.errCode == ErrCodeMigrationInProgress {
 				return true
 			}
 		}
@@ -1336,7 +1336,7 @@ func TestDuplicateAndOldMigrateResultDoNotRollbackMigratedActor(t *testing.T) {
 
 	startSeq := actor.core().migrationRuntime().startSeq
 	success := newS2SMigrateResultHead(svc.genSeq(), uid, actor.core().leaseID, startSeq, ErrCodeOK)
-	packet, err := svc.encodePacket(&success, nil)
+	packet, err := svc.encodePacket(success, nil)
 	if err != nil {
 		t.Fatalf("encode success result: %v", err)
 	}
@@ -1348,7 +1348,7 @@ func TestDuplicateAndOldMigrateResultDoNotRollbackMigratedActor(t *testing.T) {
 	})
 
 	late := newS2SMigrateResultHead(svc.genSeq(), uid, "old-lease", startSeq, ErrCodeInternalError)
-	packet, err = svc.encodePacket(&late, nil)
+	packet, err = svc.encodePacket(late, nil)
 	if err != nil {
 		t.Fatalf("encode late result: %v", err)
 	}
@@ -1372,7 +1372,7 @@ func TestTargetRestartReturnsFailureInsteadOfTakingOverNewLease(t *testing.T) {
 	registry := migrationTestRegistry(t, svc)
 	seedMigrationSourceLease(t, registry, uid, svc.nodeId(), "target-lease")
 	head := newS2SMigrateStartHead(1, uid, "source-node", "source-lease", false, ActorSession{})
-	packet, err := svc.encodePacket(&head, nil)
+	packet, err := svc.encodePacket(head, nil)
 	if err != nil {
 		t.Fatalf("encode migrate start: %v", err)
 	}
@@ -1387,7 +1387,7 @@ func TestTargetRestartReturnsFailureInsteadOfTakingOverNewLease(t *testing.T) {
 				continue
 			}
 			var result s2sMigrateResultPacketHead
-			if result.decode(&buf) == nil && result.errCode != ErrCodeOK {
+			if result.decode(buf) == nil && result.errCode != ErrCodeOK {
 				return true
 			}
 		}
@@ -1411,7 +1411,7 @@ func TestInboundCActorMigrationRestoresSession(t *testing.T) {
 	seedMigrationSourceLease(t, registry, uid, "source-node", "source-lease")
 	session := ActorSession{NodeId: "gateway-node", SID: 77}
 	head := newS2SMigrateStartHead(1, uid, "source-node", "source-lease", true, session)
-	packet, err := svc.encodePacket(&head, nil)
+	packet, err := svc.encodePacket(head, nil)
 	if err != nil {
 		t.Fatalf("encode migrate start: %v", err)
 	}
@@ -1473,12 +1473,12 @@ func TestHandleMigrateForwardRawReqRepliesToOriginNode(t *testing.T) {
 	_ = actor.core().deref()
 
 	innerHead := newRawReqHead(100, uid.ID, 7, 500)
-	innerPacket, err := svc.encodeRawPacket(&innerHead, nil)
+	innerPacket, err := svc.encodeRawPacket(innerHead, nil)
 	if err != nil {
 		t.Fatalf("encode inner raw req: %v", err)
 	}
 	outerHead := newS2SMigrateForwardHead(svc.genSeq(), uid, "lease-source-1", "origin-node", PacketTypeRawReq)
-	outerPacket, err := svc.encodeRawPacket(&outerHead, innerPacket)
+	outerPacket, err := svc.encodeRawPacket(outerHead, innerPacket)
 	if err != nil {
 		t.Fatalf("encode migrate forward packet: %v", err)
 	}

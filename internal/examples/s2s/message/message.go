@@ -24,7 +24,7 @@ func (m *Msg) DecodePayload(v any) error {
 		return fmt.Errorf("v Type not match")
 	}
 
-	buf := m.Payload.(gactor.Buffer)
+	buf := m.Payload.(*gactor.Buffer)
 	if err := json.Unmarshal(buf.UnreadData(), v); err != nil {
 		return pkgerrors.WithMessage(err, "unmarshal payload")
 	}
@@ -43,14 +43,14 @@ func NewMsgWithPayload(payload any) Msg {
 	}
 }
 
-func EncodePacket(pa gactor.PacketAllocator, msg *Msg) ([]byte, error) {
+func EncodePacket(pa gactor.PacketBufAllocator, ph gactor.PacketHead, msg *Msg) (*gactor.Buffer, error) {
 	payloadBytes, err := json.Marshal(msg.Payload)
 	if err != nil {
 		return nil, pkgerrors.WithMessage(err, "marshal payload")
 	}
 
-	var buf gactor.Buffer
-	if err := pa.AllocBuf(&buf, 4+len(payloadBytes)); err != nil {
+	buf, err := pa(ph, 4+len(payloadBytes))
+	if err != nil {
 		return nil, err
 	}
 
@@ -62,7 +62,7 @@ func EncodePacket(pa gactor.PacketAllocator, msg *Msg) ([]byte, error) {
 		return nil, pkgerrors.WithMessage(err, "write payload")
 	}
 
-	return buf.Data(), nil
+	return buf, nil
 }
 
 func EncodeMsg(bm gactor.BytesManager, msg *Msg) ([]byte, error) {
@@ -96,8 +96,8 @@ func DecodeMsgWithoutDecodePayload(b *gactor.Buffer, msg *Msg) error {
 	}
 
 	msg.ID = int(msgId)
-	msg.Payload = *b
-	return gactor.ErrBytesEscape
+	msg.Payload = b.CloneAndClear()
+	return nil
 }
 
 var (

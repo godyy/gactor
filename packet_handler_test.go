@@ -305,13 +305,12 @@ func newPacketHandlerTestClient(t *testing.T) (*Client, *packetHandlerTestClient
 	return cli, handler
 }
 
-func decodePacketType(t *testing.T, data []byte) (PacketType, Buffer) {
+func decodePacketType(t *testing.T, data []byte) (PacketType, *Buffer) {
 	t.Helper()
 
-	var buf Buffer
-	buf.SetBuf(data)
+	buf := NewBuffer(data)
 
-	pt, err := buf.readPacketType()
+	pt, err := buf.ReadPacketType()
 	if err != nil {
 		t.Fatalf("read packet type: %v", err)
 	}
@@ -327,7 +326,7 @@ func decodeAckPacketHead(t *testing.T, data []byte) ackPacketHead {
 	}
 
 	var head ackPacketHead
-	if err := head.decode(&buf); err != nil {
+	if err := head.decode(buf); err != nil {
 		t.Fatalf("decode ack head: %v", err)
 	}
 	return head
@@ -342,7 +341,7 @@ func decodeS2SRpcRespPacketHead(t *testing.T, data []byte) s2sRpcRespPacketHead 
 	}
 
 	var head s2sRpcRespPacketHead
-	if err := head.decode(&buf); err != nil {
+	if err := head.decode(buf); err != nil {
 		t.Fatalf("decode s2s rpc resp head: %v", err)
 	}
 	return head
@@ -357,18 +356,18 @@ func decodeRawRespPacketHead(t *testing.T, data []byte) rawRespPacketHead {
 	}
 
 	var head rawRespPacketHead
-	if err := head.decode(&buf); err != nil {
+	if err := head.decode(buf); err != nil {
 		t.Fatalf("decode raw resp head: %v", err)
 	}
 	return head
 }
 
-func encodeIncomingPacket(t *testing.T, ph packetHead, payload []byte) []byte {
+func encodeIncomingPacket(t *testing.T, ph PacketHead, payload []byte) []byte {
 	t.Helper()
 
 	var buf Buffer
 	buf.SetBuf(make([]byte, 0, sizeOfPacketType+ph.getLen()+len(payload)))
-	if err := buf.writePacketType(ph.getPt()); err != nil {
+	if err := buf.WritePacketType(ph.PacketType()); err != nil {
 		t.Fatalf("write packet type: %v", err)
 	}
 	if err := ph.encode(&buf); err != nil {
@@ -402,7 +401,7 @@ func TestServiceHandlePacketS2SRpcTimeoutDropsExpiredRequest(t *testing.T) {
 		payload: &testMessagePing{Time: time.Now()},
 	}
 
-	b, err := svc.encodePacket(&head, payload)
+	b, err := svc.encodePacket(head, payload)
 	if err != nil {
 		t.Fatalf("encode packet: %v", err)
 	}
@@ -443,7 +442,7 @@ func TestServiceHandlePacketS2SRpcWhenNotStartedReturnsStoppedResp(t *testing.T)
 		payload: &testMessagePing{Time: time.Now()},
 	}
 
-	b, err := svc.encodePacket(&head, payload)
+	b, err := svc.encodePacket(head, payload)
 	if err != nil {
 		t.Fatalf("encode packet: %v", err)
 	}
@@ -479,7 +478,7 @@ func TestServiceHandlePacketS2SForwardWhenNotStartedOnlyAcks(t *testing.T) {
 	svc, netAgent := newPacketHandlerTestService(t, false, true)
 
 	head := newS2SForwardHead(51, ActorUID{Category: 9, ID: 9001}, ActorUID{Category: 1, ID: 401})
-	b := encodeIncomingPacket(t, &head, []byte("forward-payload"))
+	b := encodeIncomingPacket(t, head, []byte("forward-payload"))
 
 	if err := svc.HandlePacket("remote-node", b); err != nil {
 		t.Fatalf("handle packet: %v", err)
@@ -507,7 +506,7 @@ func TestServiceHandlePacketS2SForwardMissingActorOnlyAcks(t *testing.T) {
 	defer func() { _ = svc.Stop() }()
 
 	head := newS2SForwardHead(61, ActorUID{Category: 9, ID: 9002}, ActorUID{Category: 1, ID: 402})
-	b := encodeIncomingPacket(t, &head, []byte("forward-missing-actor"))
+	b := encodeIncomingPacket(t, head, []byte("forward-missing-actor"))
 
 	if err := svc.HandlePacket("remote-node", b); err != nil {
 		t.Fatalf("handle packet: %v", err)
@@ -537,7 +536,7 @@ func TestClientHandlePacketRawRespDispatchesResponse(t *testing.T) {
 	head := newRawRespHead(7, 9001, 88, ErrCodeOK)
 	payload := []byte("hello-response")
 
-	b, err := cli.encodePacket(&head, payload)
+	b, err := cli.encodePacket(head, payload)
 	if err != nil {
 		t.Fatalf("encode packet: %v", err)
 	}
@@ -571,7 +570,7 @@ func TestServiceHandlePacketRawReqTimeoutDropsExpiredRequest(t *testing.T) {
 	defer func() { _ = svc.Stop() }()
 
 	head := newRawReqHead(31, 401, 99, 10)
-	b := encodeIncomingPacket(t, &head, []byte("raw-timeout"))
+	b := encodeIncomingPacket(t, head, []byte("raw-timeout"))
 
 	if err := svc.HandlePacket("remote-node", b); err != nil {
 		t.Fatalf("handle packet: %v", err)
@@ -591,7 +590,7 @@ func TestServiceHandlePacketRawReqWhenNotStartedReturnsStoppedResp(t *testing.T)
 	svc, netAgent := newPacketHandlerTestService(t, false, false)
 
 	head := newRawReqHead(41, 501, 77, 1000)
-	b := encodeIncomingPacket(t, &head, []byte("raw-request"))
+	b := encodeIncomingPacket(t, head, []byte("raw-request"))
 
 	if err := svc.HandlePacket("remote-node", b); err != nil {
 		t.Fatalf("handle packet: %v", err)
@@ -612,7 +611,7 @@ func TestClientHandlePacketAfterStopReturnsErrClientStopped(t *testing.T) {
 	cli.Stop()
 
 	head := newRawRespHead(9, 1001, 66, ErrCodeOK)
-	b, err := cli.encodePacket(&head, []byte("after-stop"))
+	b, err := cli.encodePacket(head, []byte("after-stop"))
 	if err != nil {
 		t.Fatalf("encode packet: %v", err)
 	}
@@ -665,7 +664,7 @@ func TestServiceHandlePacketS2SRpcRespDispatchesCallback(t *testing.T) {
 
 	head := newS2SRpcRespHead(81, reqID, to, from, ErrCodeOK)
 	payload := &testS2SMessage{msgId: msgIdPong, payload: &testMessagePong{Time: time.Now()}}
-	b, err := svc.encodePacket(&head, payload)
+	b, err := svc.encodePacket(head, payload)
 	if err != nil {
 		t.Fatalf("encode packet: %v", err)
 	}
@@ -703,7 +702,7 @@ func TestClientHandlePacketRawPushDispatchesPush(t *testing.T) {
 	defer cli.Stop()
 
 	head := newRawPushHead(13, 2001, 77)
-	b, err := cli.encodePacket(&head, []byte("push-data"))
+	b, err := cli.encodePacket(head, []byte("push-data"))
 	if err != nil {
 		t.Fatalf("encode packet: %v", err)
 	}
@@ -725,7 +724,7 @@ func TestClientHandlePacketDisconnectDispatchesDisconnect(t *testing.T) {
 	defer cli.Stop()
 
 	head := newDisconnectHead(15, 3001, 88)
-	b, err := cli.encodePacket(&head, nil)
+	b, err := cli.encodePacket(head, nil)
 	if err != nil {
 		t.Fatalf("encode packet: %v", err)
 	}

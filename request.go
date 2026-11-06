@@ -72,13 +72,13 @@ type request interface {
 
 	// buildMigrationForwardRawPacket 构造迁移转发包。
 	// 由具体请求类型自行决定如何恢复内层原始请求头，避免外层重复按类型分发。
-	buildMigrationForwardRawPacket(s *Service, uid ActorUID, sourceLeaseID string) (packetHead, []byte, error)
+	buildMigrationForwardRawPacket(s *Service, uid ActorUID, sourceLeaseID string) (PacketHead, []byte, error)
 }
 
 type requestCom struct {
-	fromNodeId string // 请求发起节点ID
-	replied    bool   // 是否已回复
-	payload    Buffer // 负载数据
+	fromNodeId string  // 请求发起节点ID
+	replied    bool    // 是否已回复
+	payload    *Buffer // 负载数据
 }
 
 func (req *requestCom) deadline() (time.Time, bool) {
@@ -90,10 +90,7 @@ func (req *requestCom) isTimeout(now time.Time) bool {
 }
 
 func (req *requestCom) decode(ctx *Context, pt PacketType, v any) error {
-	if err := ctx.service().decodePayload(pt, &req.payload, v); err == nil {
-		return nil
-	} else if errors.Is(err, ErrBytesEscape) {
-		req.payload.SetBuf(nil)
+	if err := ctx.service().decodePayload(pt, req.payload, v); err == nil {
 		return nil
 	} else {
 		return err
@@ -111,7 +108,7 @@ func (req *requestCom) clone(ctx *Context) requestCom {
 }
 
 func (req *requestCom) release(ctx *Context) {
-	ctx.service().freeBuffer(&req.payload)
+	ctx.service().freeBuffer(req.payload)
 	req.fromNodeId = ""
 	req.replied = false
 }
@@ -132,7 +129,7 @@ var poolOfRawRequest = &sync.Pool{New: func() interface{} {
 	return &rawRequest{}
 }}
 
-func newRawRequest(fromNodeId string, seq, sid uint32, payload Buffer, deadlineMs int64) *rawRequest {
+func newRawRequest(fromNodeId string, seq, sid uint32, payload *Buffer, deadlineMs int64) *rawRequest {
 	req := poolOfRawRequest.Get().(*rawRequest)
 	req.fromNodeId = fromNodeId
 	req.payload = payload
@@ -172,7 +169,8 @@ func (req *rawRequest) reply(ctx *Context, payload any, ec ErrCode) error {
 	}
 
 	head := newRawRespHead(ctx.service().genSeq(), ctx.actor.core().id, req.sid, ec)
-	if err := ctx.service().sendRemotePacket(req.fromNodeId, &head, payload); err != nil {
+	defer head.release()
+	if err := ctx.service().sendRemotePacket(req.fromNodeId, head, payload); err != nil {
 		if errors.Is(err, ErrCodeEncodePacketFailed) {
 			return req.reply(ctx, nil, ErrCodeEncodePacketFailed)
 		}
@@ -236,18 +234,19 @@ func (req *rawRequest) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 
 // buildMigrationForwardRawPacket 构造 RawReq 的迁移转发包。
 // 这里会把剩余超时时间重新编码进内层请求头，避免目标节点拿到已过期的请求。
-func (req *rawRequest) buildMigrationForwardRawPacket(s *Service, uid ActorUID, sourceLeaseID string) (packetHead, []byte, error) {
+func (req *rawRequest) buildMigrationForwardRawPacket(s *Service, uid ActorUID, sourceLeaseID string) (PacketHead, []byte, error) {
 	remaining := time.Until(time.UnixMilli(req.deadlineMs)) + time.Duration(s.getCfg().MaxRTT)*time.Millisecond
 	if remaining <= 0 {
 		return nil, nil, ErrTimeout
 	}
 	innerHead := newRawReqHead(req.seq, uid.ID, req.sid, uint32(remaining.Milliseconds()))
-	innerPacket, err := s.encodeRawPacket(&innerHead, req.payload.UnreadData())
+	defer innerHead.release()
+	innerPacket, err := s.encodeRawPacket(innerHead, req.payload.UnreadData())
 	if err != nil {
 		return nil, nil, err
 	}
 	outerHead := newS2SMigrateForwardHead(s.genSeq(), uid, sourceLeaseID, req.fromNodeId, PacketTypeRawReq)
-	return &outerHead, innerPacket, nil
+	return outerHead, innerPacket, nil
 }
 
 // rpcRequest 对应 PacketTypeS2SRpc.
@@ -263,7 +262,7 @@ var poolOfRpcRequest = &sync.Pool{New: func() interface{} {
 	return &rpcRequest{}
 }}
 
-func newRPCRequest(remoteNodeId string, seq, reqId uint32, fromId ActorUID, payload Buffer, deadlineMs int64) *rpcRequest {
+func newRPCRequest(remoteNodeId string, seq, reqId uint32, fromId ActorUID, payload *Buffer, deadlineMs int64) *rpcRequest {
 	req := poolOfRpcRequest.Get().(*rpcRequest)
 	req.fromNodeId = remoteNodeId
 	req.payload = payload
@@ -304,7 +303,8 @@ func (req *rpcRequest) reply(ctx *Context, payload any, ec ErrCode) error {
 	}
 
 	head := newS2SRpcRespHead(ctx.service().genSeq(), req.reqId, ctx.actor.ActorUID(), req.fromId, ec)
-	if err := ctx.service().sendPacket(req.fromNodeId, &head, payload); err != nil {
+	defer head.release()
+	if err := ctx.service().sendPacket(req.fromNodeId, head, payload); err != nil {
 		if errors.Is(err, ErrCodeEncodePacketFailed) {
 			return req.reply(ctx, nil, ErrCodeEncodePacketFailed)
 		}
@@ -347,18 +347,19 @@ func (req *rpcRequest) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 
 // buildMigrationForwardRawPacket 构造 RPC 请求的迁移转发包。
 // 迁移时需要保留原始来源 Actor 和剩余超时，确保回复链路与超时语义不变。
-func (req *rpcRequest) buildMigrationForwardRawPacket(s *Service, uid ActorUID, sourceLeaseID string) (packetHead, []byte, error) {
+func (req *rpcRequest) buildMigrationForwardRawPacket(s *Service, uid ActorUID, sourceLeaseID string) (PacketHead, []byte, error) {
 	remaining := time.Until(time.UnixMilli(req.deadlineMs)) + time.Duration(s.getCfg().MaxRTT)*time.Millisecond
 	if remaining <= 0 {
 		return nil, nil, ErrTimeout
 	}
 	innerHead := newS2SRpcHead(req.seq, req.reqId, req.fromId, uid, uint32(remaining.Milliseconds()))
-	innerPacket, err := s.encodeRawPacket(&innerHead, req.payload.UnreadData())
+	defer innerHead.release()
+	innerPacket, err := s.encodeRawPacket(innerHead, req.payload.UnreadData())
 	if err != nil {
 		return nil, nil, err
 	}
 	outerHead := newS2SMigrateForwardHead(s.genSeq(), uid, sourceLeaseID, req.fromNodeId, PacketTypeS2SRpc)
-	return &outerHead, innerPacket, nil
+	return outerHead, innerPacket, nil
 }
 
 // castRequest 对应 PacketTypeS2SCast.
@@ -372,7 +373,7 @@ var poolOfCastRequest = &sync.Pool{New: func() interface{} {
 	return &castRequest{}
 }}
 
-func newCastRequest(fromNodeId string, seq uint32, fromId ActorUID, payload Buffer) *castRequest {
+func newCastRequest(fromNodeId string, seq uint32, fromId ActorUID, payload *Buffer) *castRequest {
 	req := poolOfCastRequest.Get().(*castRequest)
 	req.fromNodeId = fromNodeId
 	req.payload = payload
@@ -421,12 +422,13 @@ func (req *castRequest) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 }
 
 // buildMigrationForwardRawPacket 构造 Cast 请求的迁移转发包。
-func (req *castRequest) buildMigrationForwardRawPacket(s *Service, uid ActorUID, sourceLeaseID string) (packetHead, []byte, error) {
+func (req *castRequest) buildMigrationForwardRawPacket(s *Service, uid ActorUID, sourceLeaseID string) (PacketHead, []byte, error) {
 	innerHead := newS2SCastHead(req.seq, req.fromId, uid)
-	innerPacket, err := s.encodeRawPacket(&innerHead, req.payload.UnreadData())
+	defer innerHead.release()
+	innerPacket, err := s.encodeRawPacket(innerHead, req.payload.UnreadData())
 	if err != nil {
 		return nil, nil, err
 	}
 	outerHead := newS2SMigrateForwardHead(s.genSeq(), uid, sourceLeaseID, req.fromNodeId, PacketTypeS2SCast)
-	return &outerHead, innerPacket, nil
+	return outerHead, innerPacket, nil
 }

@@ -137,7 +137,7 @@ type msg interface {
 
 type msgResp struct {
 	sid     uint32
-	payload gactor.Buffer
+	payload *gactor.Buffer
 	err     error
 }
 
@@ -153,7 +153,7 @@ func (m *msgResp) handle(u *user) {
 	}
 
 	var respMsg message.RespMessage
-	if err := respMsg.Decode(&m.payload); err != nil && !errors.Is(err, gactor.ErrBytesEscape) {
+	if err := respMsg.Decode(m.payload); err != nil {
 		logger.Logger().ErrorFields("user decode resp failed", zap.Error(err))
 		return
 	}
@@ -163,7 +163,7 @@ func (m *msgResp) handle(u *user) {
 
 type msgPush struct {
 	sid     uint32
-	payload gactor.Buffer
+	payload *gactor.Buffer
 }
 
 func (m *msgPush) handle(u *user) {
@@ -173,7 +173,7 @@ func (m *msgPush) handle(u *user) {
 	}
 
 	var pushMsg message.PushMessage
-	if err := pushMsg.Decode(&m.payload); err != nil && !errors.Is(err, gactor.ErrBytesEscape) {
+	if err := pushMsg.Decode(m.payload); err != nil {
 		logger.Logger().ErrorFields("user decode push failed", zap.Error(err))
 		return
 	}

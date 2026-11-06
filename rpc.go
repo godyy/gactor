@@ -16,7 +16,7 @@ var errRPCCallDuplicate = errors.New("gactor: rpc call duplicate")
 // RPCResp RPC 响应参数.
 type RPCResp struct {
 	svc     *Service // Service.
-	payload Buffer   // 响应负载数据.
+	payload *Buffer  // 响应负载数据.
 	err     error    // 错误信息.
 }
 
@@ -25,10 +25,7 @@ func (resp *RPCResp) DecodeReply(v any) error {
 	if resp.err != nil {
 		return resp.err
 	}
-	if err := resp.svc.decodePayload(PacketTypeS2SRpcResp, &resp.payload, v); err == nil {
-		return nil
-	} else if errors.Is(err, ErrBytesEscape) {
-		resp.payload.SetBuf(nil)
+	if err := resp.svc.decodePayload(PacketTypeS2SRpcResp, resp.payload, v); err == nil {
 		return nil
 	} else {
 		return err
@@ -38,10 +35,6 @@ func (resp *RPCResp) DecodeReply(v any) error {
 // Err 返回错误信息.
 func (resp *RPCResp) Err() error {
 	return resp.err
-}
-
-func (resp *RPCResp) release() {
-	resp.svc.freeBuffer(&resp.payload)
 }
 
 // RPCFunc RPC回调.
@@ -54,7 +47,7 @@ type rpcCall struct {
 	reqId       uint32   // RPC 调用序列 ID.
 	from, to    ActorUID // 来源, 目标 ActorUID.
 	expiredAt   int64    // 过期时间.
-	respPayload Buffer   // RPC 响应负载数据.
+	respPayload *Buffer  // RPC 响应负载数据.
 	err         error    // 错误信息.
 	cb          RPCFunc  // 回调函数.
 }
@@ -76,14 +69,24 @@ func (call *rpcCall) HeapIndex() int {
 }
 
 func (call *rpcCall) onResponse(payload *Buffer, err error) {
-	if payload != nil {
-		call.respPayload = *payload
-	}
+	call.respPayload = payload
 	call.err = err
 }
 
-func (call *rpcCall) release() {
-	call.respPayload.SetBuf(nil)
+func (call *rpcCall) callback(rm *rpcManager) {
+	call.cb(RPCResp{
+		svc:     rm.getSvc(),
+		payload: call.respPayload,
+		err:     call.err,
+	})
+	call.respPayload = nil
+}
+
+func (call *rpcCall) release(rm *rpcManager) {
+	if call.respPayload != nil {
+		rm.getSvc().freeBuffer(call.respPayload)
+		call.respPayload = nil
+	}
 	call.err = nil
 	call.cb = nil
 	poolOfRPCCall.Put(call)
@@ -140,7 +143,7 @@ func (m *rpcManager) drainCmds() {
 		select {
 		case c := <-m.chCmds:
 			c.exec(m)
-			c.release()
+			c.release(m)
 		default:
 			return
 		}
@@ -170,7 +173,7 @@ func (m *rpcManager) run() {
 		select {
 		case c := <-m.chCmds:
 			c.exec(m)
-			c.release()
+			c.release(m)
 		case <-stopWait.C:
 			m.enqueueMu.Lock()
 			m.stopping = true
@@ -188,7 +191,7 @@ func (m *rpcManager) enqueueCmd(c rpcCmd, ignoreBusy bool) error {
 	m.enqueueMu.RLock()
 	defer m.enqueueMu.RUnlock()
 	if m.stopping {
-		c.discard()
+		c.discard(m)
 		return errServiceStopped
 	}
 	chStop := m.svc.getStopWait().C
@@ -201,7 +204,7 @@ func (m *rpcManager) enqueueCmd(c rpcCmd, ignoreBusy bool) error {
 			}
 			return nil
 		case <-chStop:
-			c.discard()
+			c.discard(m)
 			return errServiceStopped
 		}
 	}
@@ -209,13 +212,18 @@ func (m *rpcManager) enqueueCmd(c rpcCmd, ignoreBusy bool) error {
 	case m.chCmds <- c:
 		return nil
 	case <-chStop:
-		c.discard()
+		c.discard(m)
 		return errServiceStopped
 	default:
 		m.svc.getLogger().Warn("rpc enqueue failed, service busy")
-		c.discard()
+		c.discard(m)
 		return ErrServiceBusy
 	}
+}
+
+// getSvc 获取 Service.
+func (m *rpcManager) getSvc() *Service {
+	return m.svc
 }
 
 // genReqId 生成 req id.
@@ -239,14 +247,8 @@ func (m *rpcManager) rem(call *rpcCall) {
 func (m *rpcManager) invokeCallback(call *rpcCall) {
 	defer recoverAndLog("invoke rpc callback panic", m.svc.getLogger(), nil)
 
-	resp := RPCResp{
-		svc:     m.svc,
-		payload: call.respPayload,
-		err:     call.err,
-	}
-	call.cb(resp)
-	resp.release()
-	call.release()
+	call.callback(m)
+	call.release(m)
 }
 
 // resetTimer 重置定时器.
@@ -360,8 +362,8 @@ func (m *rpcManager) handleResponse(reqId uint32, from, to ActorUID, payload *Bu
 // rpcCmd RPC 指令.
 type rpcCmd interface {
 	exec(rm *rpcManager)
-	release()
-	discard()
+	release(rm *rpcManager)
+	discard(rm *rpcManager)
 }
 
 // rpcCmdAdd 添加 Call 指令.
@@ -394,15 +396,16 @@ func (c *rpcCmdAdd) exec(rm *rpcManager) {
 	}
 }
 
-func (c *rpcCmdAdd) release() {
+func (c *rpcCmdAdd) release(rm *rpcManager) {
 	c.call = nil
 	poolOfRPCCmdAdd.Put(c)
 }
-func (c *rpcCmdAdd) discard() {
+func (c *rpcCmdAdd) discard(rm *rpcManager) {
 	if c.call != nil {
-		c.call.release()
+		c.call.release(rm)
+		c.call = nil
 	}
-	c.release()
+	c.release(rm)
 }
 
 // rpcCmdRem 移除 Call 指令.
@@ -414,18 +417,18 @@ type rpcCmdRem struct {
 func (c *rpcCmdRem) exec(rm *rpcManager) {
 	call := rm.popCall(c.reqId, c.from, c.to)
 	if call != nil {
-		call.release()
+		call.release(rm)
 	}
 }
 
-func (c *rpcCmdRem) release() {}
-func (c *rpcCmdRem) discard() {}
+func (c *rpcCmdRem) release(rm *rpcManager) {}
+func (c *rpcCmdRem) discard(rm *rpcManager) {}
 
 // rpcCmdResp Response 指令.
 type rpcCmdResp struct {
 	reqId    uint32
 	from, to ActorUID
-	payload  Buffer
+	payload  *Buffer
 	err      error
 }
 
@@ -439,9 +442,7 @@ func newRPCCmdResp(reqId uint32, from, to ActorUID, payload *Buffer, err error) 
 	c := poolOfRPCCmdResp.Get().(*rpcCmdResp)
 	c.reqId = reqId
 	c.from, c.to = from, to
-	if payload != nil {
-		c.payload = *payload
-	}
+	c.payload = payload
 	c.err = err
 	return c
 }
@@ -453,15 +454,19 @@ func (c *rpcCmdResp) exec(rm *rpcManager) {
 			lfdReqId(c.reqId), rm.svc.lfdActorUID("fromId", c.from), rm.svc.lfdActorUID("toId", c.to))
 		return
 	}
-	rm.handleCallDone(call, &c.payload, c.err)
+	rm.handleCallDone(call, c.payload, c.err)
+	c.payload = nil
 }
 
-func (c *rpcCmdResp) release() {
-	c.payload.SetBuf(nil)
+func (c *rpcCmdResp) release(rm *rpcManager) {
+	if c.payload != nil {
+		rm.getSvc().freeBuffer(c.payload)
+		c.payload = nil
+	}
 	c.err = nil
 	poolOfRPCCmdResp.Put(c)
 }
-func (c *rpcCmdResp) discard() { c.release() }
+func (c *rpcCmdResp) discard(rm *rpcManager) { c.release(rm) }
 
 // rpcCmdTick tick 指令.
 type rpcCmdTick struct {
@@ -476,5 +481,5 @@ func (c *rpcCmdTick) exec(rm *rpcManager) {
 	rm.tick()
 }
 
-func (c *rpcCmdTick) release() {}
-func (c *rpcCmdTick) discard() {}
+func (c *rpcCmdTick) release(rm *rpcManager) {}
+func (c *rpcCmdTick) discard(rm *rpcManager) {}

@@ -67,11 +67,13 @@ func (t *timer) release() {}
 
 func (t *timer) trigger() {
 	defer t.release()
-	t.f(TimerArgs{
-		TID:  t.id,
-		Args: t.args,
-		Err:  t.err,
-	})
+	if t.f != nil {
+		t.f(TimerArgs{
+			TID:  t.id,
+			Args: t.args,
+			Err:  t.err,
+		})
+	}
 }
 
 // timerCmd 定时器命令.
@@ -141,7 +143,6 @@ func (m *timerManager) run() {
 			c.release()
 		case <-m.svc.getStopWait().C:
 			m.timeWheel.Stop()
-			close(m.chTriggerd)
 			return
 		}
 	}

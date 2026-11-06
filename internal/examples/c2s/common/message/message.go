@@ -11,7 +11,7 @@ import (
 )
 
 type Message interface {
-	EncodePacket(pa gactor.PacketAllocator) ([]byte, error)
+	EncodePacket(pa gactor.PacketBufAllocator) ([]byte, error)
 	Encode() ([]byte, error)
 	Decode(b *gactor.Buffer) error
 	DecodePayload(v any) error
@@ -23,14 +23,14 @@ type ReqMessage struct {
 	Payload any
 }
 
-func (m *ReqMessage) EncodePacket(pa gactor.PacketAllocator) ([]byte, error) {
+func (m *ReqMessage) EncodePacket(pa gactor.PacketBufAllocator, ph gactor.PacketHead) (*gactor.Buffer, error) {
 	payloadBytes, err := json.Marshal(m.Payload)
 	if err != nil {
 		return nil, pkgerrors.WithMessage(err, "marshal payload")
 	}
 
-	var buf gactor.Buffer
-	if err := pa.AllocBuf(&buf, 4+2+len(payloadBytes)); err != nil {
+	buf, err := pa(ph, 4+2+len(payloadBytes))
+	if err != nil {
 		return nil, pkgerrors.WithMessage(err, "allocate bytes")
 	}
 
@@ -46,7 +46,7 @@ func (m *ReqMessage) EncodePacket(pa gactor.PacketAllocator) ([]byte, error) {
 		return nil, pkgerrors.WithMessage(err, "write payload")
 	}
 
-	return buf.Data(), nil
+	return buf, nil
 }
 
 func (m *ReqMessage) Encode() ([]byte, error) {
@@ -86,14 +86,14 @@ func (m *ReqMessage) Decode(b *gactor.Buffer) error {
 		return pkgerrors.WithMessage(err, "read msgId")
 	}
 
-	m.Payload = *b
+	m.Payload = b.CloneAndClear()
 
-	return gactor.ErrBytesEscape
+	return nil
 }
 
 func (m *ReqMessage) DecodePayload(v any) error {
-	buf := m.Payload.(gactor.Buffer)
-	return decodePayload(&buf, m.MsgId, v)
+	buf := m.Payload.(*gactor.Buffer)
+	return decodePayload(buf, m.MsgId, v)
 }
 
 func NewReqMessageWithPayload(reqId uint32, payload any) ReqMessage {
@@ -114,15 +114,15 @@ type RespMessage struct {
 	Payload any
 }
 
-func (m *RespMessage) EncodePacket(pa gactor.PacketAllocator) ([]byte, error) {
+func (m *RespMessage) EncodePacket(pa gactor.PacketBufAllocator, ph gactor.PacketHead) (*gactor.Buffer, error) {
 	payloadBytes, err := json.Marshal(m.Payload)
 	if err != nil {
 		return nil, pkgerrors.WithMessage(err, "marshal payload")
 	}
 
-	var buf gactor.Buffer
-	if err := pa.AllocBuf(&buf, 4+2+len(payloadBytes)); err != nil {
-		return nil, pkgerrors.WithMessage(err, "allocate packet")
+	buf, err := pa(ph, 4+2+len(payloadBytes))
+	if err != nil {
+		return nil, pkgerrors.WithMessage(err, "allocate bytes")
 	}
 
 	if err := buf.WriteUint32(m.ReqId); err != nil {
@@ -137,7 +137,7 @@ func (m *RespMessage) EncodePacket(pa gactor.PacketAllocator) ([]byte, error) {
 		return nil, pkgerrors.WithMessage(err, "write payload")
 	}
 
-	return buf.Data(), nil
+	return buf, nil
 }
 
 func (m *RespMessage) Encode() ([]byte, error) {
@@ -177,14 +177,14 @@ func (m *RespMessage) Decode(b *gactor.Buffer) error {
 		return pkgerrors.WithMessage(err, "read msgId")
 	}
 
-	m.Payload = *b
+	m.Payload = b.CloneAndClear()
 
-	return gactor.ErrBytesEscape
+	return nil
 }
 
 func (m *RespMessage) DecodePayload(v any) error {
-	buf := m.Payload.(gactor.Buffer)
-	return decodePayload(&buf, m.MsgId, v)
+	buf := m.Payload.(*gactor.Buffer)
+	return decodePayload(buf, m.MsgId, v)
 }
 
 func NewRespMessageWithPayload(reqId uint32, payload any) RespMessage {
@@ -204,15 +204,15 @@ type PushMessage struct {
 	Payload any
 }
 
-func (m *PushMessage) EncodePacket(pa gactor.PacketAllocator) ([]byte, error) {
+func (m *PushMessage) EncodePacket(pa gactor.PacketBufAllocator, ph gactor.PacketHead) (*gactor.Buffer, error) {
 	payloadBytes, err := json.Marshal(m.Payload)
 	if err != nil {
 		return nil, pkgerrors.WithMessage(err, "marshal payload")
 	}
 
-	var buf gactor.Buffer
-	if err := pa.AllocBuf(&buf, 2+len(payloadBytes)); err != nil {
-		return nil, pkgerrors.WithMessage(err, "allocate packet")
+	buf, err := pa(ph, 2+len(payloadBytes))
+	if err != nil {
+		return nil, pkgerrors.WithMessage(err, "allocate bytes")
 	}
 
 	if err := buf.WriteUint16(m.MsgId); err != nil {
@@ -223,7 +223,7 @@ func (m *PushMessage) EncodePacket(pa gactor.PacketAllocator) ([]byte, error) {
 		return nil, pkgerrors.WithMessage(err, "write payload")
 	}
 
-	return buf.Data(), nil
+	return buf, nil
 }
 
 func (m *PushMessage) Encode() ([]byte, error) {
@@ -254,14 +254,14 @@ func (m *PushMessage) Decode(b *gactor.Buffer) error {
 		return pkgerrors.WithMessage(err, "read msgId")
 	}
 
-	m.Payload = *b
+	m.Payload = b.CloneAndClear()
 
-	return gactor.ErrBytesEscape
+	return nil
 }
 
 func (m *PushMessage) DecodePayload(v any) error {
-	buf := m.Payload.(gactor.Buffer)
-	return decodePayload(&buf, m.MsgId, v)
+	buf := m.Payload.(*gactor.Buffer)
+	return decodePayload(buf, m.MsgId, v)
 }
 
 func NewPushMessageWithPayload(payload any) PushMessage {
@@ -281,15 +281,15 @@ type RpcMessage struct {
 	Payload any
 }
 
-func (m *RpcMessage) EncodePacket(pa gactor.PacketAllocator) ([]byte, error) {
+func (m *RpcMessage) EncodePacket(pa gactor.PacketBufAllocator, ph gactor.PacketHead) (*gactor.Buffer, error) {
 	payloadBytes, err := json.Marshal(m.Payload)
 	if err != nil {
 		return nil, pkgerrors.WithMessage(err, "marshal payload")
 	}
 
-	var buf gactor.Buffer
-	if err := pa.AllocBuf(&buf, 2+len(payloadBytes)); err != nil {
-		return nil, pkgerrors.WithMessage(err, "allocate packet")
+	buf, err := pa(ph, 2+len(payloadBytes))
+	if err != nil {
+		return nil, pkgerrors.WithMessage(err, "allocate bytes")
 	}
 
 	if err := buf.WriteUint16(m.MsgId); err != nil {
@@ -300,7 +300,7 @@ func (m *RpcMessage) EncodePacket(pa gactor.PacketAllocator) ([]byte, error) {
 		return nil, pkgerrors.WithMessage(err, "write payload")
 	}
 
-	return buf.Data(), nil
+	return buf, nil
 }
 
 func (m *RpcMessage) Encode() ([]byte, error) {
@@ -331,13 +331,13 @@ func (m *RpcMessage) Decode(b *gactor.Buffer) error {
 		return pkgerrors.WithMessage(err, "read msgId")
 	}
 
-	m.Payload = *b
-	return gactor.ErrBytesEscape
+	m.Payload = b.CloneAndClear()
+	return nil
 }
 
 func (m *RpcMessage) DecodePayload(v any) error {
-	buf := m.Payload.(gactor.Buffer)
-	return decodePayload(&buf, m.MsgId, v)
+	buf := m.Payload.(*gactor.Buffer)
+	return decodePayload(buf, m.MsgId, v)
 }
 
 func NewRpcMessageWithPayload(payload any) RpcMessage {
@@ -357,15 +357,15 @@ type RpcRespMessage struct {
 	Payload any
 }
 
-func (m *RpcRespMessage) EncodePacket(pa gactor.PacketAllocator) ([]byte, error) {
+func (m *RpcRespMessage) EncodePacket(pa gactor.PacketBufAllocator, ph gactor.PacketHead) (*gactor.Buffer, error) {
 	payloadBytes, err := json.Marshal(m.Payload)
 	if err != nil {
 		return nil, pkgerrors.WithMessage(err, "marshal payload")
 	}
 
-	var buf gactor.Buffer
-	if err := pa.AllocBuf(&buf, 2+len(payloadBytes)); err != nil {
-		return nil, pkgerrors.WithMessage(err, "allocate packet")
+	buf, err := pa(ph, 2+len(payloadBytes))
+	if err != nil {
+		return nil, pkgerrors.WithMessage(err, "allocate bytes")
 	}
 
 	if err := buf.WriteUint16(m.MsgId); err != nil {
@@ -376,7 +376,7 @@ func (m *RpcRespMessage) EncodePacket(pa gactor.PacketAllocator) ([]byte, error)
 		return nil, pkgerrors.WithMessage(err, "write payload")
 	}
 
-	return buf.Data(), nil
+	return buf, nil
 }
 
 func (m *RpcRespMessage) Encode() ([]byte, error) {
@@ -407,14 +407,14 @@ func (m *RpcRespMessage) Decode(b *gactor.Buffer) error {
 		return pkgerrors.WithMessage(err, "read msgId")
 	}
 
-	m.Payload = *b
+	m.Payload = b.CloneAndClear()
 
-	return gactor.ErrBytesEscape
+	return nil
 }
 
 func (m *RpcRespMessage) DecodePayload(v any) error {
-	buf := m.Payload.(gactor.Buffer)
-	return decodePayload(&buf, m.MsgId, v)
+	buf := m.Payload.(*gactor.Buffer)
+	return decodePayload(buf, m.MsgId, v)
 }
 
 func NewRpcRespMessageWithPayload(payload any) RpcRespMessage {

@@ -100,13 +100,12 @@ func newClientAPITestClient(t *testing.T) (*Client, *clientAPITestNetAgent) {
 	return cli, netAgent
 }
 
-func decodeClientPacketType(t *testing.T, data []byte) (PacketType, Buffer) {
+func decodeClientPacketType(t *testing.T, data []byte) (PacketType, *Buffer) {
 	t.Helper()
 
-	var buf Buffer
-	buf.SetBuf(data)
+	buf := NewBuffer(data)
 
-	pt, err := buf.readPacketType()
+	pt, err := buf.ReadPacketType()
 	if err != nil {
 		t.Fatalf("read packet type: %v", err)
 	}
@@ -122,7 +121,7 @@ func decodeConnectPacketHead(t *testing.T, data []byte) connectPacketHead {
 	}
 
 	var head connectPacketHead
-	if err := head.decode(&buf); err != nil {
+	if err := head.decode(buf); err != nil {
 		t.Fatalf("decode connect head: %v", err)
 	}
 	return head
@@ -137,7 +136,7 @@ func decodeDisconnectPacketHead(t *testing.T, data []byte) disconnectPacketHead 
 	}
 
 	var head disconnectPacketHead
-	if err := head.decode(&buf); err != nil {
+	if err := head.decode(buf); err != nil {
 		t.Fatalf("decode disconnect head: %v", err)
 	}
 	return head
@@ -152,7 +151,7 @@ func decodeRawReqPacketHead(t *testing.T, data []byte) rawReqPacketHead {
 	}
 
 	var head rawReqPacketHead
-	if err := head.decode(&buf); err != nil {
+	if err := head.decode(buf); err != nil {
 		t.Fatalf("decode raw req head: %v", err)
 	}
 	return head

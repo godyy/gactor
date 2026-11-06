@@ -27,7 +27,7 @@ func (r *contextRequestTestRequest) fromActorUID() ActorUID {
 	return r.from
 }
 
-func (r *contextRequestTestRequest) buildMigrationForwardRawPacket(s *Service, uid ActorUID, sourceLeaseID string) (packetHead, []byte, error) {
+func (r *contextRequestTestRequest) buildMigrationForwardRawPacket(s *Service, uid ActorUID, sourceLeaseID string) (PacketHead, []byte, error) {
 	return nil, nil, ErrCodeActorForwardUnsupported
 }
 
@@ -444,7 +444,7 @@ func TestRawRequestBeforeHandleGuardsSession(t *testing.T) {
 	svc, cActor := newContextRequestTestCActor(t)
 
 	t.Run("not cactor", func(t *testing.T) {
-		req := newRawRequest("node-a", 1, 10, Buffer{}, time.Now().Add(time.Second).UnixMilli())
+		req := newRawRequest("node-a", 1, 10, &Buffer{}, time.Now().Add(time.Second).UnixMilli())
 		ctx := &Context{
 			svc: svc,
 			req: req,
@@ -460,7 +460,7 @@ func TestRawRequestBeforeHandleGuardsSession(t *testing.T) {
 	})
 
 	t.Run("not connected", func(t *testing.T) {
-		req := newRawRequest("node-a", 1, 10, Buffer{}, time.Now().Add(time.Second).UnixMilli())
+		req := newRawRequest("node-a", 1, 10, &Buffer{}, time.Now().Add(time.Second).UnixMilli())
 		ctx := &Context{
 			svc:   svc,
 			req:   req,
@@ -474,7 +474,7 @@ func TestRawRequestBeforeHandleGuardsSession(t *testing.T) {
 	})
 
 	t.Run("connected by another", func(t *testing.T) {
-		req := newRawRequest("node-a", 1, 10, Buffer{}, time.Now().Add(time.Second).UnixMilli())
+		req := newRawRequest("node-a", 1, 10, &Buffer{}, time.Now().Add(time.Second).UnixMilli())
 		cActor.session = ActorSession{NodeId: "node-b", SID: 11}
 		ctx := &Context{
 			svc:   svc,
@@ -489,7 +489,7 @@ func TestRawRequestBeforeHandleGuardsSession(t *testing.T) {
 	})
 
 	t.Run("matched session", func(t *testing.T) {
-		req := newRawRequest("node-a", 1, 10, Buffer{}, time.Now().Add(time.Second).UnixMilli())
+		req := newRawRequest("node-a", 1, 10, &Buffer{}, time.Now().Add(time.Second).UnixMilli())
 		cActor.session = ActorSession{NodeId: "node-a", SID: 10}
 		ctx := &Context{
 			svc:   svc,

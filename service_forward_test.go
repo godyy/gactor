@@ -225,7 +225,7 @@ func decodeRawPushPacketHead(t *testing.T, data []byte) (rawPushPacketHead, []by
 	}
 
 	var head rawPushPacketHead
-	if err := head.decode(&buf); err != nil {
+	if err := head.decode(buf); err != nil {
 		t.Fatalf("decode raw push head: %v", err)
 	}
 
@@ -468,8 +468,7 @@ func TestMessageForwardReleaseUsesActorService(t *testing.T) {
 	}
 
 	before := codec.snapshotPutCount()
-	buf := Buffer{}
-	buf.SetBuf([]byte("release-buffer"))
+	buf := NewBuffer([]byte("release-buffer"))
 	actorHandleMsg(ca, newMessageForward(buf))
 	if got := codec.snapshotPutCount(); got != before+1 {
 		t.Fatalf("put count = %d, want %d", got, before+1)

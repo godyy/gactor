@@ -32,9 +32,9 @@ func lfdSeq(seq uint32) zap.Field {
 	return zap.Uint32("seq", seq)
 }
 
-func lfdPacketTypeSeq(ph packetHead) zap.Field {
+func lfdPacketTypeSeq(ph PacketHead) zap.Field {
 	return zap.Dict("packet",
-		zap.Int8("type", ph.getPt()),
+		zap.Int8("type", ph.PacketType()),
 		zap.Uint32("seq", ph.getSeq()),
 	)
 }

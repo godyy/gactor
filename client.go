@@ -25,7 +25,7 @@ type ClientRequest struct {
 type ClientResponse struct {
 	ID      ActorID // 来源 Actor ID.
 	SID     uint32  // 会话ID.
-	Payload Buffer  // 负载数据.
+	Payload *Buffer // 负载数据. 回调结束后回收.
 	ErrCode ErrCode // 错误码.
 }
 
@@ -34,7 +34,7 @@ type ClientResponse struct {
 type ClientPush struct {
 	ID      ActorID // 来源 Actor ID.
 	SID     uint32  // 会话ID.
-	Payload Buffer  // 负载数据.
+	Payload *Buffer // 负载数据. 回调结束后回收.
 }
 
 // ClientHandler Client 处理器.
@@ -206,26 +206,38 @@ func (c *Client) getStopWait() *utils.StopWait {
 
 // getBytes 获取容量为 cap 的字节切片.
 func (c *Client) getBytes(cap int) []byte {
-	return c.cfg.Handler.GetBytesManager().GetBytes(cap)
+	bytesManager := c.cfg.Handler.GetBytesManager()
+	if bytesManager != nil {
+		return bytesManager.GetBytes(cap)
+	}
+	return make([]byte, 0, cap)
 }
 
 // putBytes 回收字节切片.
 func (c *Client) putBytes(b []byte) {
-	c.cfg.Handler.GetBytesManager().PutBytes(b)
+	bytesManager := c.cfg.Handler.GetBytesManager()
+	if bytesManager != nil {
+		bytesManager.PutBytes(b)
+	}
 }
 
 // allocBuffer 分配 Buffer.
-func (c *Client) allocBuffer(buf *Buffer, len int) {
-	b := c.cfg.Handler.GetBytesManager().GetBytes(len)
-	buf.SetBuf(b)
+func (c *Client) allocBuffer(len int) *Buffer {
+	bytes := c.getBytes(len)
+	return NewBuffer(bytes)
 }
 
 // freeBuffer 释放 Buffer.
 func (c *Client) freeBuffer(buf *Buffer) {
-	if b := buf.Data(); b != nil {
-		c.cfg.Handler.GetBytesManager().PutBytes(b)
-		buf.SetBuf(nil)
+	if buf == nil {
+		return
 	}
+
+	bytes := buf.SetBuf(nil)
+	if bytes != nil {
+		c.putBytes(bytes)
+	}
+	buf.Release()
 }
 
 // genSeq 生成序号.
@@ -234,16 +246,16 @@ func (c *Client) genSeq() uint32 {
 }
 
 // encodePacket 编码数据包. payload 为已编码的自定义负载数据.
-func (c *Client) encodePacket(ph packetHead, payload []byte) ([]byte, error) {
+func (c *Client) encodePacket(ph PacketHead, payload []byte) ([]byte, error) {
 	// 分配缓冲区.
-	var buf Buffer
-	c.allocBuffer(&buf, sizeOfPacketType+ph.getLen()+len(payload))
+	buf := c.allocBuffer(sizeOfPacketType + ph.getLen() + len(payload))
+	defer c.freeBuffer(buf)
 
 	// 编码填充数据.
-	if err := buf.writePacketType(ph.getPt()); err != nil {
+	if err := buf.WritePacketType(ph.PacketType()); err != nil {
 		return nil, err
 	}
-	if err := ph.encode(&buf); err != nil {
+	if err := ph.encode(buf); err != nil {
 		return nil, err
 	}
 	if len(payload) > 0 {
@@ -252,7 +264,8 @@ func (c *Client) encodePacket(ph packetHead, payload []byte) ([]byte, error) {
 		}
 	}
 
-	return buf.Data(), nil
+	data := buf.SetBuf(nil)
+	return data, nil
 }
 
 // send 发送字节数据.
@@ -261,7 +274,7 @@ func (c *Client) send(nodeId string, b []byte) error {
 }
 
 // sendPacket 编码数据包并发送到 nodeId 指定的节点. payload 为已编码的自定义负载数据.
-func (c *Client) sendPacket(nodeId string, ph packetHead, payload []byte) error {
+func (c *Client) sendPacket(nodeId string, ph PacketHead, payload []byte) error {
 	// 编码数据.
 	b, err := c.encodePacket(ph, payload)
 	if err != nil {
@@ -269,12 +282,12 @@ func (c *Client) sendPacket(nodeId string, ph packetHead, payload []byte) error 
 	}
 
 	// 添加待确认数据包.
-	c.addPacket2Ack(nodeId, ph.getPt(), ph.getSeq(), b)
+	c.addPacket2Ack(nodeId, ph.PacketType(), ph.getSeq(), b)
 
 	// 发送数据.
 	if err = c.send(nodeId, b); err != nil {
 		// 若发送失败, 直接移除待确认数据包.
-		c.remPacket2Ack(ph.getPt(), ph.getSeq())
+		c.remPacket2Ack(ph.PacketType(), ph.getSeq())
 		return pkgerrors.WithMessage(err, "send packet")
 	}
 
@@ -337,7 +350,8 @@ func (c *Client) Connect(id ActorID, sid uint32) error {
 
 	// 编码并发送消息.
 	ph := newConnectHead(c.genSeq(), id, sid)
-	return c.sendPacket(nodeId, &ph, nil)
+	defer ph.release()
+	return c.sendPacket(nodeId, ph, nil)
 }
 
 // Disconnect 通知 uid 指定的 Actor 断开连接.
@@ -356,7 +370,8 @@ func (c *Client) Disconnect(id ActorID, sid uint32) error {
 
 	// 编码并发送消息.
 	ph := newDisconnectHead(c.genSeq(), id, sid)
-	return c.sendPacket(nodeId, &ph, nil)
+	defer ph.release()
+	return c.sendPacket(nodeId, ph, nil)
 }
 
 // SendRequest 发送请求.
@@ -381,7 +396,8 @@ func (c *Client) SendRequest(req ClientRequest) error {
 
 	// 编码并发送消息.
 	ph := newRawReqHead(c.genSeq(), req.ID, req.SID, uint32(req.Timeout.Milliseconds()))
-	return c.sendPacket(nodeId, &ph, req.Payload)
+	defer ph.release()
+	return c.sendPacket(nodeId, ph, req.Payload)
 }
 
 // handleResponse 处理响应.

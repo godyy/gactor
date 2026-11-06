@@ -369,29 +369,29 @@ func (r *actorRegistry) RegisterActor(params gactor.ActorRegisterParams) (gactor
 }
 
 func (r *actorRegistry) TakeOverActor(params gactor.ActorTakeOverParams) (gactor.ActorRegisterResult, error) {
-        r.mtx.Lock()
-        defer r.mtx.Unlock()
-        location := r.actorMap[params.UID]
-        if location == nil {
-                return gactor.ActorRegisterResult{}, gactor.ErrActorNotExists
-        }
-        if params.SourceLeaseId != location.leaseId {
-                return gactor.ActorRegisterResult{
-                        NodeId:   location.nodeId,
-                        ExpireAt: location.expireAt,
-                }, gactor.ErrLeaseMismatch
-        }
-        location.nodeId = params.NodeId
-        location.leaseId = params.LeaseId
-        if params.TTL > 0 {
-                location.expireAt = time.Now().Unix() + params.TTL
-        } else {
-                location.expireAt = 0
-        }
-        return gactor.ActorRegisterResult{
-                NodeId:   location.nodeId,
-                ExpireAt: location.expireAt,
-        }, nil
+	r.mtx.Lock()
+	defer r.mtx.Unlock()
+	location := r.actorMap[params.UID]
+	if location == nil {
+		return gactor.ActorRegisterResult{}, gactor.ErrActorNotExists
+	}
+	if params.SourceLeaseId != location.leaseId {
+		return gactor.ActorRegisterResult{
+			NodeId:   location.nodeId,
+			ExpireAt: location.expireAt,
+		}, gactor.ErrLeaseMismatch
+	}
+	location.nodeId = params.NodeId
+	location.leaseId = params.LeaseId
+	if params.TTL > 0 {
+		location.expireAt = time.Now().Unix() + params.TTL
+	} else {
+		location.expireAt = 0
+	}
+	return gactor.ActorRegisterResult{
+		NodeId:   location.nodeId,
+		ExpireAt: location.expireAt,
+	}, nil
 }
 
 // UnregisterActor 注销 Actor.
@@ -488,8 +488,8 @@ func (c *packetCodec) GetBytes(size int) []byte {
 func (c *packetCodec) PutBytes(b []byte) {
 }
 
-func (c *packetCodec) Encode(allocator gactor.PacketAllocator, payload any) ([]byte, error) {
-	return message.EncodePacket(allocator, payload.(*message.Msg))
+func (c *packetCodec) Encode(allocator gactor.PacketBufAllocator, ph gactor.PacketHead, payload any) (*gactor.Buffer, error) {
+	return message.EncodePacket(allocator, ph, payload.(*message.Msg))
 }
 
 func (c *packetCodec) EncodePayload(pt gactor.PacketType, payload any) ([]byte, error) {

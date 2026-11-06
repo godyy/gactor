@@ -345,8 +345,8 @@ func (pc *testPacketCodec) GetBytes(size int) []byte {
 func (pc *testPacketCodec) PutBytes(b []byte) {
 }
 
-func (pc *testPacketCodec) Encode(allocator PacketAllocator, payload any) ([]byte, error) {
-	switch allocator.PacketType() {
+func (pc *testPacketCodec) Encode(allocator PacketBufAllocator, ph PacketHead, payload any) (*Buffer, error) {
+	switch ph.PacketType() {
 	case PacketTypeS2SRpcResp, PacketTypeS2SRpc, PacketTypeS2SCast, PacketTypeS2SForward:
 		s2sMsg, ok := payload.(*testS2SMessage)
 		if !ok {
@@ -356,8 +356,9 @@ func (pc *testPacketCodec) Encode(allocator PacketAllocator, payload any) ([]byt
 		if err != nil {
 			return nil, pkgerrors.WithMessage(err, "marshal RPC payload")
 		}
-		var buf Buffer
-		if err := allocator.AllocBuf(&buf, 4+len(bytes)); err != nil {
+		var buf *Buffer
+		buf, err = allocator(ph, 4+len(bytes))
+		if err != nil {
 			return nil, pkgerrors.WithMessage(err, "allocate buffer")
 		}
 		if err := buf.WriteUint32(uint32(s2sMsg.msgId)); err != nil {
@@ -366,9 +367,9 @@ func (pc *testPacketCodec) Encode(allocator PacketAllocator, payload any) ([]byt
 		if _, err := buf.Write(bytes); err != nil {
 			return nil, pkgerrors.WithMessage(err, "write msg bytes")
 		}
-		return buf.Data(), nil
+		return buf, nil
 	default:
-		return nil, fmt.Errorf("invalid packet type %d", allocator.PacketType())
+		return nil, fmt.Errorf("invalid packet type %d", ph.PacketType())
 	}
 }
 

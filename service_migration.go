@@ -1058,7 +1058,7 @@ func (s *Service) snapshotPriorityActorUIDs(priority int) []ActorUID {
 
 // tryAcquireInboundMigrationSlot 为目标端接管预留并发容量。
 // 重复包不会重复占用容量，不同源租约则拒绝覆盖正在处理的接管。
-func (s *Service) tryAcquireInboundMigrationSlot(head s2sMigrateStartPacketHead) inboundMigrationSlotResult {
+func (s *Service) tryAcquireInboundMigrationSlot(head *s2sMigrateStartPacketHead) inboundMigrationSlotResult {
 	attempt := inboundMigrationAttempt{
 		sourceNodeID:  head.sourceNodeID,
 		sourceLeaseID: head.sourceLeaseID,
@@ -1104,25 +1104,28 @@ func (s *Service) releaseInboundMigrationSlot(uid ActorUID, sourceNodeID, source
 	}
 }
 
-func (s *Service) sendInboundMigrationResult(head s2sMigrateStartPacketHead, errCode ErrCode) error {
+func (s *Service) sendInboundMigrationResult(head *s2sMigrateStartPacketHead, errCode ErrCode) error {
 	resultHead := newS2SMigrateResultHead(s.genSeq(), head.uid, head.sourceLeaseID, head.seq, errCode)
-	return s.sendRemotePacket(head.sourceNodeID, &resultHead, nil)
+	defer resultHead.release()
+	return s.sendRemotePacket(head.sourceNodeID, resultHead, nil)
 }
 
 // startInboundMigration 在目标节点接收迁移开始包后拉起对应 Actor。
 // 若同一轮迁移已经接管完成，则直接回复成功，保持幂等。
-func (s *Service) startInboundMigration(head s2sMigrateStartPacketHead) error {
+func (s *Service) startInboundMigration(head *s2sMigrateStartPacketHead) error {
 	if actor, err := s.getActor(head.uid); err == nil && actor != nil {
 		if migration := actor.core().migrationRuntime(); migration != nil &&
 			migration.acceptedSourceNodeID == head.sourceNodeID &&
 			migration.acceptedSourceLeaseID == head.sourceLeaseID {
 			resultHead := newS2SMigrateResultHead(s.genSeq(), head.uid, head.sourceLeaseID, head.seq, ErrCodeOK)
-			return s.sendRemotePacket(head.sourceNodeID, &resultHead, nil)
+			defer resultHead.release()
+			return s.sendRemotePacket(head.sourceNodeID, resultHead, nil)
 		}
 		// 目标节点已经承载同一 UID 的另一轮迁移，旧租约不能覆盖当前实例。
 		// 立即通知源端失败，避免其被动等待迁移结果超时。
 		resultHead := newS2SMigrateResultHead(s.genSeq(), head.uid, head.sourceLeaseID, head.seq, ErrCodeMigrationInProgress)
-		return s.sendRemotePacket(head.sourceNodeID, &resultHead, nil)
+		defer resultHead.release()
+		return s.sendRemotePacket(head.sourceNodeID, resultHead, nil)
 	}
 
 	switch s.tryAcquireInboundMigrationSlot(head) {

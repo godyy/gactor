@@ -52,6 +52,7 @@ func (a *actorCore) startMigration(ai actorImpl) {
 		return
 	}
 	head := newS2SMigrateStartHead(a.service().genSeq(), ai.ActorUID(), a.service().nodeId(), a.leaseID, isCActorImpl(ai), session)
+	defer head.release()
 	// 先记录本轮序号，确保 OnMigrateOut 失败时 restoreMigration 也能释放槽位并安排重试。
 	migration := a.ensureMigrationRuntime()
 	migration.startSeq = head.seq
@@ -70,7 +71,7 @@ func (a *actorCore) startMigration(ai actorImpl) {
 			return
 		}
 	}
-	if err := a.service().sendRemotePacket(targetNodeID, &head, nil); err != nil {
+	if err := a.service().sendRemotePacket(targetNodeID, head, nil); err != nil {
 		a.getLogger().ErrorFields("send migrate start failed", lfdError(err))
 		a.restoreMigration(ai, err)
 		return
@@ -276,23 +277,25 @@ func forwardMigrationMessage(s *Service, uid ActorUID, msg message) error {
 		s.recordMigrationForwardResult(err)
 		return err
 	case *messageConnect:
-		innerHead := newConnectHead(s.genSeq(), uid.ID, m.sid)
-		innerPacket, err := s.encodeRawPacket(&innerHead, nil)
+		innerPacket, err := s.encodeRawPacket(newConnectHead(s.genSeq(), uid.ID, m.sid), nil)
 		if err != nil {
 			return err
 		}
-		outerHead := newS2SMigrateForwardHead(s.genSeq(), uid, st.sourceLeaseID, m.nodeId, PacketTypeConnect)
-		err = s.sendRemoteRawPacket(targetNodeID, &outerHead, innerPacket)
+		head := newS2SMigrateForwardHead(s.genSeq(), uid, st.sourceLeaseID, m.nodeId, PacketTypeConnect)
+		defer head.release()
+		err = s.sendRemoteRawPacket(targetNodeID, head, innerPacket)
 		s.recordMigrationForwardResult(err)
 		return err
 	case *messageDisconnect:
-		innerHead := newDisconnectHead(s.genSeq(), uid.ID, m.sid)
-		innerPacket, err := s.encodeRawPacket(&innerHead, nil)
+		head := newDisconnectHead(s.genSeq(), uid.ID, m.sid)
+		defer head.release()
+		innerPacket, err := s.encodeRawPacket(head, nil)
 		if err != nil {
 			return err
 		}
-		outerHead := newS2SMigrateForwardHead(s.genSeq(), uid, st.sourceLeaseID, m.nodeId, PacketTypeDisconnect)
-		err = s.sendRemoteRawPacket(targetNodeID, &outerHead, innerPacket)
+		forwardHead := newS2SMigrateForwardHead(s.genSeq(), uid, st.sourceLeaseID, m.nodeId, PacketTypeDisconnect)
+		defer forwardHead.release()
+		err = s.sendRemoteRawPacket(targetNodeID, forwardHead, innerPacket)
 		s.recordMigrationForwardResult(err)
 		return err
 	default:
