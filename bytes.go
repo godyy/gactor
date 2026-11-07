@@ -50,6 +50,35 @@ func (b *Buffer) CloneAndClear() *Buffer {
 	return cp
 }
 
+// CloneUnread 克隆未读数据.
+func (b *Buffer) CloneUnread() *Buffer {
+	if unread := b.UnreadData(); len(unread) > 0 {
+		cpUnread := make([]byte, len(unread))
+		copy(cpUnread, unread)
+		return NewBuffer(cpUnread)
+	} else {
+		return NewBuffer(nil)
+	}
+}
+
+// CloneUnreadBytes 克隆未读数据字节切片.
+func (b *Buffer) CloneUnreadBytes() []byte {
+	if unread := b.UnreadData(); len(unread) > 0 {
+		cp := make([]byte, len(unread))
+		copy(cp, unread)
+		return cp
+	}
+	return nil
+}
+
+// CopyUnread 复制未读数据到 dst缓冲区.
+func (b *Buffer) CopyUnread(dst *Buffer) (int, error) {
+	if dst == nil {
+		return 0, nil
+	}
+	return dst.Write(b.UnreadData())
+}
+
 // ReadPacketType 读取数据包类型.
 func (b *Buffer) ReadPacketType() (pt PacketType, err error) {
 	pt, err = b.ReadInt8()
