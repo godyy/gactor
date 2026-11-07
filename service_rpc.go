@@ -2,6 +2,7 @@ package gactor
 
 import (
 	"context"
+	"sync"
 	"time"
 )
 
@@ -124,6 +125,19 @@ type rpcDoneFunc struct {
 	err     error         // 错误信息.
 }
 
+var poolOfRPCDoneFunc = &sync.Pool{
+	New: func() any {
+		return &rpcDoneFunc{}
+	},
+}
+
+func newRPCDoneFunc(svc *Service) *rpcDoneFunc {
+	cb := poolOfRPCDoneFunc.Get().(*rpcDoneFunc)
+	cb.done = make(chan struct{})
+	cb.svc = svc
+	return cb
+}
+
 func (cb *rpcDoneFunc) invoke(resp RPCResp) {
 	defer close(cb.done)
 	if err := resp.Err(); err != nil {
@@ -149,13 +163,17 @@ func (cb *rpcDoneFunc) release() {
 		cb.svc.freeBuffer(cb.payload)
 		cb.payload = nil
 	}
+	cb.svc = nil
+	cb.err = nil
+	cb.done = nil
+	poolOfRPCDoneFunc.Put(cb)
 }
 
 // rpcWithDeadline 向 to 指向的 Actor 发起 RPC 调用.
 // deadline 指定具体超时时刻.
 func (s *Service) rpcWithDeadline(from, to ActorUID, params any, reply any, deadline time.Time) error {
 	// 执行同步RPC 调用.
-	doneFunc := rpcDoneFunc{done: make(chan struct{}), svc: s}
+	doneFunc := newRPCDoneFunc(s)
 	defer doneFunc.release()
 	if _, err := s.doRPC(from, to, params, doneFunc.invoke, deadline); err != nil {
 		return err
@@ -192,7 +210,7 @@ func (s *Service) rpcWithContext(ctx context.Context, from, to ActorUID, params 
 	}
 
 	// 执行同步RPC 调用.
-	doneFunc := rpcDoneFunc{done: make(chan struct{}), svc: s}
+	doneFunc := newRPCDoneFunc(s)
 	defer doneFunc.release()
 	reqId, err := s.doRPC(from, to, params, doneFunc.invoke, deadline)
 	if err != nil {

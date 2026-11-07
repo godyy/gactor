@@ -52,7 +52,7 @@ type rpcCall struct {
 	cb          RPCFunc  // 回调函数.
 }
 
-var poolOfRPCCall = &sync.Pool{New: func() interface{} {
+var poolOfRPCCall = &sync.Pool{New: func() any {
 	return &rpcCall{heapIndex: -1}
 }}
 
@@ -372,7 +372,7 @@ type rpcCmdAdd struct {
 }
 
 var poolOfRPCCmdAdd = &sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return &rpcCmdAdd{}
 	},
 }
@@ -433,7 +433,7 @@ type rpcCmdResp struct {
 }
 
 var poolOfRPCCmdResp = &sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return &rpcCmdResp{}
 	},
 }

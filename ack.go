@@ -70,7 +70,7 @@ type packet2Ack struct {
 }
 
 var poolOfPacket2Ack = &sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return &packet2Ack{}
 	},
 }
@@ -331,7 +331,7 @@ type ackCmdAdd struct {
 }
 
 var poolOfAckCmdAdd = &sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return &ackCmdAdd{}
 	},
 }
@@ -357,7 +357,7 @@ type ackCmdAck struct {
 }
 
 var poolOfAckCmdAck = &sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return &ackCmdAck{}
 	},
 }

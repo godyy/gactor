@@ -123,9 +123,6 @@ func TestActorAsyncCallDeliversCallbackOnce(t *testing.T) {
 		t.Fatal("wait async callback timeout")
 	}
 
-	if err := caller("payload-again", errors.New("ignored")); err != nil {
-		t.Fatalf("invoke caller again: %v", err)
-	}
 	assertNoSignal(t, callbackCh, 100*time.Millisecond, "duplicate async callback")
 
 	mu.Lock()

@@ -1,6 +1,7 @@
 package gactor
 
 import (
+	"sync"
 	"time"
 )
 
@@ -51,22 +52,41 @@ type actorTimerArgs struct {
 	args any            // 参数.
 }
 
+var poolOfActorTimerArgs = &sync.Pool{
+	New: func() any {
+		return &actorTimerArgs{}
+	},
+}
+
+func newActorTimerArgs(uid ActorUID, cb ActorTimerFunc, args any) *actorTimerArgs {
+	aArgs := poolOfActorTimerArgs.Get().(*actorTimerArgs)
+	aArgs.uid = uid
+	aArgs.cb = cb
+	aArgs.args = args
+	return aArgs
+}
+
+func (a *actorTimerArgs) release() {
+	a.args = nil
+	a.cb = nil
+	poolOfActorTimerArgs.Put(a)
+}
+
 // startActorTimer 启动 Actor 定时器.
 func (s *Service) startActorTimer(uid ActorUID, d time.Duration, periodic bool, args any, cb ActorTimerFunc, notStopped bool) TimerId {
 	if cb == nil {
 		panic("gactor: cb is nil")
 	}
 
-	return s.startTimer(d, periodic, &actorTimerArgs{
-		uid:  uid,
-		cb:   cb,
-		args: args,
-	}, s.execActorTimer, notStopped)
+	return s.startTimer(d, periodic, newActorTimerArgs(uid, cb, args), s.execActorTimer, notStopped)
 }
 
 // execActorTimer 执行 Actor 定时器.
 func (s *Service) execActorTimer(args TimerArgs) {
 	aargs := args.Args.(*actorTimerArgs)
+	if !args.Periodic {
+		defer aargs.release()
+	}
 
 	actor, err := s.refActor(aargs.uid)
 	if err != nil || actor == nil {

@@ -125,7 +125,7 @@ type rawRequest struct {
 	deadlineMs int64  // 超时时刻, 毫秒级
 }
 
-var poolOfRawRequest = &sync.Pool{New: func() interface{} {
+var poolOfRawRequest = &sync.Pool{New: func() any {
 	return &rawRequest{}
 }}
 
@@ -258,7 +258,7 @@ type rpcRequest struct {
 	deadlineMs int64    // 超时时刻, 毫秒级.
 }
 
-var poolOfRpcRequest = &sync.Pool{New: func() interface{} {
+var poolOfRpcRequest = &sync.Pool{New: func() any {
 	return &rpcRequest{}
 }}
 
@@ -369,7 +369,7 @@ type castRequest struct {
 	fromId ActorUID
 }
 
-var poolOfCastRequest = &sync.Pool{New: func() interface{} {
+var poolOfCastRequest = &sync.Pool{New: func() any {
 	return &castRequest{}
 }}
 

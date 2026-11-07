@@ -125,7 +125,7 @@ type ackPacketHead struct {
 }
 
 var poolOfAckPacketHead = &sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return &ackPacketHead{}
 	},
 }
@@ -185,7 +185,7 @@ type connectPacketHead struct {
 }
 
 var poolOfConnectPacketHead = &sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return &connectPacketHead{}
 	},
 }
@@ -255,7 +255,7 @@ type disconnectPacketHead struct {
 }
 
 var poolOfDisconnectPacketHead = &sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return &disconnectPacketHead{}
 	},
 }
@@ -320,7 +320,7 @@ type rawReqPacketHead struct {
 }
 
 var poolOfRawReqPacketHead = &sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return &rawReqPacketHead{}
 	},
 }
@@ -393,7 +393,7 @@ type rawRespPacketHead struct {
 }
 
 var poolOfRawRespPacketHead = &sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return &rawRespPacketHead{}
 	},
 }
@@ -469,7 +469,7 @@ type rawPushPacketHead struct {
 }
 
 var poolOfRawPushPacketHead = &sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return &rawPushPacketHead{}
 	},
 }
@@ -535,7 +535,7 @@ type s2sRpcPacketHead struct {
 }
 
 var poolOfS2SRpcPacketHead = &sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return &s2sRpcPacketHead{}
 	},
 }
@@ -617,7 +617,7 @@ type s2sRpcRespPacketHead struct {
 }
 
 var poolOfS2SRpcRespPacketHead = &sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return &s2sRpcRespPacketHead{}
 	},
 }
@@ -707,7 +707,7 @@ type s2sCastPacketHead struct {
 }
 
 var poolOfS2SCastPacketHead = &sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return &s2sCastPacketHead{}
 	},
 }
@@ -771,7 +771,7 @@ type s2sForwardPacketHead struct {
 }
 
 var poolOfS2SForwardPacketHead = &sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return &s2sForwardPacketHead{}
 	},
 }
