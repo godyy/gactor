@@ -99,11 +99,10 @@ func (req *requestCom) decode(ctx *Context, pt PacketType, v any) error {
 
 func (req *requestCom) clone(ctx *Context) requestCom {
 	cp := *req
-	if unreadData := req.payload.UnreadData(); len(unreadData) > 0 {
-		b := ctx.service().getBytes(len(unreadData))
-		b = append(b, unreadData...)
-		cp.payload.SetBuf(b)
-	}
+	unreadData := req.payload.UnreadData()
+	buf := ctx.service().allocBuffer(len(unreadData))
+	buf.Write(unreadData)
+	cp.payload = buf
 	return cp
 }
 
