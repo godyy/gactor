@@ -40,9 +40,11 @@ type PacketCodec interface {
 	BytesManager
 
 	// Encode 编码数据包.
-	// allocator 提供了获取数据包类型和分配数据包切片的功能.
-	// 根据数据包类型编码 payload, 然后调用 allocator 分配
-	// 数据包切片, 将编码后的 payload 数据写入数据包切片中.
+	// allocator 提供分配已 ph 作为数据包包头并附带足以写入
+	// payload 数据的缓冲区.
+	// allocator 返回的缓冲区已经编码写入 ph 数据。用户自行
+	// 编码写入 payload即可.
+	//
 	// 数据包类型包括:
 	// 	PacketTypeRawResp, PacketTypeRawPush
 	//	PacketTypeS2SRpc, PacketTypeS2SRpcResp, PacketTypeS2SCast, PacketTypeS2SForward
