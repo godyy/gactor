@@ -197,7 +197,7 @@ func TestRPCManagerStopCompletesPendingCalls(t *testing.T) {
 
 	if _, err := rm.createCall(from, to, time.Now().Add(time.Second), func(resp RPCResp) {
 		callbackErr <- resp.Err()
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatalf("create call: %v", err)
 	}
 
@@ -283,7 +283,7 @@ func TestRPCManagerHandleResponseConcurrentWithStopCallbackOnce(t *testing.T) {
 	reqId, err := rm.createCall(from, to, time.Now().Add(time.Second), func(resp RPCResp) {
 		atomic.AddInt32(&callbackCount, 1)
 		callbackErr <- resp.Err()
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create call: %v", err)
 	}

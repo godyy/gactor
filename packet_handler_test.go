@@ -649,7 +649,7 @@ func TestServiceHandlePacketS2SRpcRespDispatchesCallback(t *testing.T) {
 			decodeErr: resp.DecodeReply(&reply),
 			reply:     reply,
 		}
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("create call: %v", err)
 	}

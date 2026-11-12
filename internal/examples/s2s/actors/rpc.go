@@ -37,5 +37,5 @@ func RPCWithContext(a gactor.Actor, ctx context.Context, to gactor.ActorUID, par
 func AsyncRPCWithContext(a gactor.Actor, ctx context.Context, to gactor.ActorUID, params any, callback gactor.ActorRPCFunc) error {
 	var msgParams message.Msg
 	msgParams = message.NewMsgWithPayload(params)
-	return a.AsyncRPCWithContext(ctx, to, &msgParams, callback)
+	return a.AsyncRPCWithContext(ctx, to, &msgParams, callback, nil)
 }

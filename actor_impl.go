@@ -948,13 +948,13 @@ func (f *actorAsyncRPCFunc) invoke(resp RPCResp) {
 
 // AsyncRPCWithDeadline 发起异步 RPC 调用.
 // deadline 为超时时间.
-func (a *actorCore) AsyncRPCWithDeadline(to ActorUID, params any, cb ActorRPCFunc, deadline time.Time) error {
+func (a *actorCore) AsyncRPCWithDeadline(to ActorUID, params any, cb ActorRPCFunc, cbCtx any, deadline time.Time) error {
 	if err := a.ref(); err != nil {
 		return err
 	}
 
 	asyncFunc := newActorAsyncRPCFunc(a.svc, a.ActorUID(), cb)
-	if err := a.svc.asyncRPCWithDeadline(a.ActorUID(), to, params, asyncFunc.invoke, deadline); err != nil {
+	if err := a.svc.asyncRPCWithDeadline(a.ActorUID(), to, params, asyncFunc.invoke, cbCtx, deadline); err != nil {
 		asyncFunc.release()
 		_ = a.deref()
 		return err
@@ -967,25 +967,25 @@ func (a *actorCore) AsyncRPCWithDeadline(to ActorUID, params any, cb ActorRPCFun
 
 // AsyncRPCWithTimeout 发起异步 RPC 调用.
 // timeout 为超时间隔.
-func (a *actorCore) AsyncRPCWithTimeout(to ActorUID, params any, cb ActorRPCFunc, timeout time.Duration) error {
-	return a.AsyncRPCWithDeadline(to, params, cb, time.Now().Add(timeout))
+func (a *actorCore) AsyncRPCWithTimeout(to ActorUID, params any, cb ActorRPCFunc, cbCtx any, timeout time.Duration) error {
+	return a.AsyncRPCWithDeadline(to, params, cb, cbCtx, time.Now().Add(timeout))
 }
 
 // AsyncRPC 发起异步 RPC 调用.
 // 使用配置的默认超时间隔.
-func (a *actorCore) AsyncRPC(to ActorUID, params any, cb ActorRPCFunc) error {
-	return a.AsyncRPCWithDeadline(to, params, cb, time.Now().Add(a.svc.cfg.DefRPCTimeout))
+func (a *actorCore) AsyncRPC(to ActorUID, params any, cb ActorRPCFunc, cbCtx any) error {
+	return a.AsyncRPCWithDeadline(to, params, cb, cbCtx, time.Now().Add(a.svc.cfg.DefRPCTimeout))
 }
 
 // AsyncRPCWithContext 发起异步 RPC 调用.
 // 超时 deadline 从 ctx 获取，若未设置, 使用默认超时时间.
-func (a *actorCore) AsyncRPCWithContext(ctx context.Context, to ActorUID, params any, cb ActorRPCFunc) error {
+func (a *actorCore) AsyncRPCWithContext(ctx context.Context, to ActorUID, params any, cb ActorRPCFunc, cbCtx any) error {
 	if err := a.ref(); err != nil {
 		return err
 	}
 
 	asyncFunc := newActorAsyncRPCFunc(a.svc, a.ActorUID(), cb)
-	if err := a.svc.asyncRPCWithContext(ctx, a.ActorUID(), to, params, asyncFunc.invoke); err != nil {
+	if err := a.svc.asyncRPCWithContext(ctx, a.ActorUID(), to, params, asyncFunc.invoke, cbCtx); err != nil {
 		asyncFunc.release()
 		_ = a.deref()
 		return err

@@ -154,19 +154,19 @@ type Actor interface {
 
 	// AsyncRPCWithDeadline 向 to 指向的 Actor 发起异步 RPC 调用.
 	// deadline 为超时时间.
-	AsyncRPCWithDeadline(to ActorUID, params any, cb ActorRPCFunc, deadline time.Time) error
+	AsyncRPCWithDeadline(to ActorUID, params any, cb ActorRPCFunc, cbCtx any, deadline time.Time) error
 
 	// AsyncRPCWithTimeout 向 to 指向的 Actor 发起异步 RPC 调用.
 	// timeout 为超时间隔.
-	AsyncRPCWithTimeout(to ActorUID, params any, cb ActorRPCFunc, timeout time.Duration) error
+	AsyncRPCWithTimeout(to ActorUID, params any, cb ActorRPCFunc, cbCtx any, timeout time.Duration) error
 
 	// AsyncRPC 向 to 指向的 Actor 发起异步 RPC 调用.
 	// 使用配置的默认超时间隔.
-	AsyncRPC(to ActorUID, params any, cb ActorRPCFunc) error
+	AsyncRPC(to ActorUID, params any, cb ActorRPCFunc, cbCtx any) error
 
 	// AsyncRPCWithContext 向 to 指向的 Actor 发起异步 RPC 调用.
 	// 超时 deadline 从 ctx 获取，若未设置, 使用默认超时时间.
-	AsyncRPCWithContext(ctx context.Context, to ActorUID, params any, cb ActorRPCFunc) error
+	AsyncRPCWithContext(ctx context.Context, to ActorUID, params any, cb ActorRPCFunc, cbCtx any) error
 
 	// Cast 向 to 指向的 Actor 投递消息.
 	// payload 为投递的负载消息.

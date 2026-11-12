@@ -185,13 +185,13 @@ func (f *contextAsyncRPCFunc) invoke(a Actor, resp RPCResp) {
 }
 
 // AsyncRPCWithDeadline 基于 Context 的异步 RPC 调用.
-func (c *Context) AsyncRPCWithDeadline(to ActorUID, params any, cb ContextRPCFunc, deadline time.Time) error {
+func (c *Context) AsyncRPCWithDeadline(to ActorUID, params any, cb ContextRPCFunc, cbCtx any, deadline time.Time) error {
 	c.suspend()
 	asyncFunc := &contextAsyncRPCFunc{
 		ctx: c,
 		cb:  cb,
 	}
-	if err := c.actor.AsyncRPCWithDeadline(to, params, asyncFunc.invoke, deadline); err != nil {
+	if err := c.actor.AsyncRPCWithDeadline(to, params, asyncFunc.invoke, cbCtx, deadline); err != nil {
 		c.resume()
 		return err
 	}
@@ -199,21 +199,21 @@ func (c *Context) AsyncRPCWithDeadline(to ActorUID, params any, cb ContextRPCFun
 }
 
 // AsyncRPCWithTimeout 基于 Context 的异步 RPC 调用.
-func (c *Context) AsyncRPCWithTimeout(to ActorUID, params any, cb ContextRPCFunc, timeout time.Duration) error {
-	return c.AsyncRPCWithDeadline(to, params, cb, time.Now().Add(timeout))
+func (c *Context) AsyncRPCWithTimeout(to ActorUID, params any, cb ContextRPCFunc, cbCtx any, timeout time.Duration) error {
+	return c.AsyncRPCWithDeadline(to, params, cb, cbCtx, time.Now().Add(timeout))
 }
 
 // AsyncRPC 基于 Context 的异步 RPC 调用.
-func (c *Context) AsyncRPC(to ActorUID, params any, cb ContextRPCFunc) error {
+func (c *Context) AsyncRPC(to ActorUID, params any, cb ContextRPCFunc, cbCtx any) error {
 	if deadline, ok := c.Deadline(); ok {
-		return c.AsyncRPCWithDeadline(to, params, cb, deadline)
+		return c.AsyncRPCWithDeadline(to, params, cb, cbCtx, deadline)
 	}
 	c.suspend()
 	asyncFunc := &contextAsyncRPCFunc{
 		ctx: c,
 		cb:  cb,
 	}
-	if err := c.actor.AsyncRPC(to, params, asyncFunc.invoke); err != nil {
+	if err := c.actor.AsyncRPC(to, params, asyncFunc.invoke, cbCtx); err != nil {
 		c.resume()
 		return err
 	}
@@ -221,13 +221,13 @@ func (c *Context) AsyncRPC(to ActorUID, params any, cb ContextRPCFunc) error {
 }
 
 // AsyncRPCWithContext 基于 Context 的异步 RPC 调用.
-func (c *Context) AsyncRPCWithContext(ctx context.Context, to ActorUID, params any, cb ContextRPCFunc) error {
+func (c *Context) AsyncRPCWithContext(ctx context.Context, to ActorUID, params any, cb ContextRPCFunc, cbCtx any) error {
 	c.suspend()
 	asyncFunc := &contextAsyncRPCFunc{
 		ctx: c,
 		cb:  cb,
 	}
-	if err := c.actor.AsyncRPCWithContext(ctx, to, params, asyncFunc.invoke); err != nil {
+	if err := c.actor.AsyncRPCWithContext(ctx, to, params, asyncFunc.invoke, cbCtx); err != nil {
 		c.resume()
 		return err
 	}

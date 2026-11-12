@@ -504,7 +504,7 @@ func (a *testActor) OnStart() error {
 				if err := resp.DecodeReply(&reply); err != nil {
 					logger.Errorf("actor %s decode rpc async payload, %v", a.ActorUID(), err)
 				}
-			}); err != nil {
+			}, nil); err != nil {
 				logger.Errorf("actor %s rpc async to %s, %v", a.ActorUID(), targetUID, err)
 			} else {
 				logger.Debugf("actor %s rpc async to %s success", a.ActorUID(), targetUID)
