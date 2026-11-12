@@ -81,7 +81,7 @@ func (a *actorCore) startMigration(ai actorImpl) {
 	a.updateFlag(actorFlagMigrationDraining, false)
 	a.updateFlag(actorFlagMigratingOut, true)
 	a.service().updateMigrationStart(ai.ActorUID(), a.leaseID, head.seq)
-	migration.resultTimerID = ai.StartTimer(migrationResultTimeout(), false, migrationResultTimerArgs{StartSeq: head.seq}, actorOnMigrationResultTimeout)
+	migration.resultTimerID = ai.StartTimer(migrationResultTimeout(), false, actorOnMigrationResultTimeout, migrationResultTimerArgs{StartSeq: head.seq})
 }
 
 // restoreMigration 在目标端失败或超时时回滚源 Actor 的迁移态，并自动安排下一次重试。
@@ -120,7 +120,7 @@ func (a *actorCore) scheduleMigrationRetry(ai actorImpl) {
 	// Service 侧则同步记录可观测的重试状态。
 	migration.retryAttempts++
 	delay := migrationRetryInterval(migration.retryAttempts)
-	migration.retryTimerID = ai.StartTimer(delay, false, migrationRetryTimerArgs{}, actorOnMigrationRetry)
+	migration.retryTimerID = ai.StartTimer(delay, false, actorOnMigrationRetry, migrationRetryTimerArgs{})
 	if migration.retryTimerID != TimerIdNone {
 		// 只有定时器创建成功时才暴露下一次重试时间，避免快照展示无效计划。
 		a.service().setMigrationNextRetry(ai.ActorUID(), delay)
@@ -136,7 +136,7 @@ func (a *actorCore) scheduleMigrationSlotWait(ai actorImpl) {
 	}
 	migration.waitingForSlot = true
 	a.service().markMigrationActorWaitingSlot(ai.ActorUID())
-	migration.retryTimerID = ai.StartTimer(25*time.Millisecond, false, migrationRetryTimerArgs{}, actorOnMigrationRetry)
+	migration.retryTimerID = ai.StartTimer(25*time.Millisecond, false, actorOnMigrationRetry, migrationRetryTimerArgs{})
 	if migration.retryTimerID != TimerIdNone {
 		a.service().setMigrationNextRetry(ai.ActorUID(), 25*time.Millisecond)
 	}
@@ -146,7 +146,7 @@ func (a *actorCore) scheduleMigrationSlotWait(ai actorImpl) {
 func actorOnMigrationResultTimeout(args ActorTimerArgs) {
 	ai := args.Actor.(actorImpl)
 	core := ai.core()
-	marker, ok := args.Args.(migrationResultTimerArgs)
+	marker, ok := args.Ctx.(migrationResultTimerArgs)
 	migration := core.migrationRuntime()
 	if !ok || !core.isMigratingOut() || migration == nil || migration.startSeq != marker.StartSeq {
 		return
@@ -158,7 +158,7 @@ func actorOnMigrationResultTimeout(args ActorTimerArgs) {
 func actorOnMigrationRetry(args ActorTimerArgs) {
 	ai := args.Actor.(actorImpl)
 	core := ai.core()
-	if _, ok := args.Args.(migrationRetryTimerArgs); !ok {
+	if _, ok := args.Ctx.(migrationRetryTimerArgs); !ok {
 		return
 	}
 

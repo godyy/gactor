@@ -558,7 +558,7 @@ func TestMigrationResultTimeoutTriggersRetry(t *testing.T) {
 	})
 
 	initialStartSeq := actor.core().migrationRuntime().startSeq
-	actor.core().receiveTriggerdTimer(TimerIdNone, migrationResultTimerArgs{StartSeq: initialStartSeq}, actorOnMigrationResultTimeout)
+	actor.core().receiveTriggerdTimer(TimerIdNone, actorOnMigrationResultTimeout, migrationResultTimerArgs{StartSeq: initialStartSeq})
 
 	waitForCondition(t, 3*time.Second, func() bool {
 		migration := actor.core().migrationRuntime()
@@ -902,7 +902,7 @@ func TestMigrationConvergedCallbackFiresOnceAfterRetryRecovered(t *testing.T) {
 	})
 
 	initialStartSeq := actor.core().migrationRuntime().startSeq
-	actor.core().receiveTriggerdTimer(TimerIdNone, migrationResultTimerArgs{StartSeq: initialStartSeq}, actorOnMigrationResultTimeout)
+	actor.core().receiveTriggerdTimer(TimerIdNone, actorOnMigrationResultTimeout, migrationResultTimerArgs{StartSeq: initialStartSeq})
 
 	waitForCondition(t, 3*time.Second, func() bool {
 		snapshot := svc.MigrationSnapshot()

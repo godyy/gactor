@@ -37,7 +37,7 @@ func (u *User) GetName() string {
 }
 
 func (u *User) StartNotifyTimer() {
-	u.notifyTimerId = u.StartTimer(5*time.Second, true, nil, onNotifyTimer)
+	u.notifyTimerId = u.StartTimer(5*time.Second, true, onNotifyTimer, nil)
 }
 
 func (u *User) StopNotifyTimer() {

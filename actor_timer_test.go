@@ -252,12 +252,12 @@ func TestServiceStartTimerAndStopTimer(t *testing.T) {
 	}()
 
 	firedCh := make(chan struct{}, 1)
-	tid := svc.StartTimer(100*time.Millisecond, false, nil, func(args TimerArgs) {
+	tid := svc.StartTimer(100*time.Millisecond, false, func(args TimerArgs) {
 		select {
 		case firedCh <- struct{}{}:
 		default:
 		}
-	})
+	}, nil)
 	if tid == TimerIdNone {
 		t.Fatal("expected valid timer id")
 	}
@@ -270,12 +270,12 @@ func TestServiceStartTimerAndStopTimer(t *testing.T) {
 	}
 
 	canceledCh := make(chan struct{}, 1)
-	tid = svc.StartTimer(100*time.Millisecond, false, nil, func(args TimerArgs) {
+	tid = svc.StartTimer(100*time.Millisecond, false, func(args TimerArgs) {
 		select {
 		case canceledCh <- struct{}{}:
 		default:
 		}
-	})
+	}, nil)
 	if tid == TimerIdNone {
 		t.Fatal("expected valid timer id for canceled timer")
 	}
@@ -291,7 +291,7 @@ func TestServiceStartTimerAfterStopReturnsNone(t *testing.T) {
 	if err := svc.Stop(); err != nil {
 		t.Fatalf("stop service: %v", err)
 	}
-	if tid := svc.StartTimer(100*time.Millisecond, false, nil, func(args TimerArgs) {}); tid != TimerIdNone {
+	if tid := svc.StartTimer(100*time.Millisecond, false, func(args TimerArgs) {}, nil); tid != TimerIdNone {
 		t.Fatalf("timer id = %d, want %d", tid, TimerIdNone)
 	}
 }

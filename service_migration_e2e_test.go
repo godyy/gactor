@@ -368,8 +368,8 @@ func TestMigrationEndToEndRecoversFromDroppedResult(t *testing.T) {
 	startSeq := actor.core().migrationRuntime().startSeq
 	actor.core().receiveTriggerdTimer(
 		TimerIdNone,
-		migrationResultTimerArgs{StartSeq: startSeq},
 		actorOnMigrationResultTimeout,
+		migrationResultTimerArgs{StartSeq: startSeq},
 	)
 	waitForCondition(t, 3*time.Second, func() bool {
 		return actor.core().isMigrated()

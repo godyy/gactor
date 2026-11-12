@@ -52,7 +52,7 @@ func actorBeforeLoop(a actorImpl) error {
 
 	// 启动存续定时器.
 	if core.needRecycle() {
-		core.keepAliveTimerId = a.StartTimer(svc.getCfg().KeepAliveInterval, true, nil, actorOnKeepAlive)
+		core.keepAliveTimerId = a.StartTimer(svc.getCfg().KeepAliveInterval, true, actorOnKeepAlive, nil)
 	}
 
 	// 启动行为.
@@ -775,18 +775,18 @@ func (a *actorCore) resetRecycleTimer(stop bool) {
 	}
 
 	if !stop {
-		a.recycleTimerId = a.StartTimer(a.recycleTime, false, nil, actorOnRecycle)
+		a.recycleTimerId = a.StartTimer(a.recycleTime, false, actorOnRecycle, nil)
 	}
 }
 
 // StartTimer 启动定时器.
-func (a *actorCore) StartTimer(d time.Duration, periodic bool, args any, cb ActorTimerFunc) TimerId {
-	return a.startTimer(d, periodic, args, cb, false)
+func (a *actorCore) StartTimer(d time.Duration, periodic bool, cb ActorTimerFunc, cbCtx any) TimerId {
+	return a.startTimer(d, periodic, cb, cbCtx, false)
 }
 
 // startTimer 启动定时器.
 // notStopped 是否在未停止时启动.
-func (a *actorCore) startTimer(d time.Duration, periodic bool, args any, cb ActorTimerFunc, notStopped bool) TimerId {
+func (a *actorCore) startTimer(d time.Duration, periodic bool, cb ActorTimerFunc, cbCtx any, notStopped bool) TimerId {
 	if notStopped {
 		if err := a.checkNotStopped(); err != nil {
 			return TimerIdNone
@@ -796,7 +796,7 @@ func (a *actorCore) startTimer(d time.Duration, periodic bool, args any, cb Acto
 			return TimerIdNone
 		}
 	}
-	return a.svc.startActorTimer(a.ActorUID(), d, periodic, args, cb, notStopped)
+	return a.svc.startActorTimer(a.ActorUID(), d, periodic, cb, cbCtx, notStopped)
 }
 
 // StopTimer 停止定时器.
@@ -805,16 +805,16 @@ func (a *actorCore) StopTimer(tid TimerId) {
 }
 
 // receiveTriggerdTimer 接收已触发的定时器.
-func (a *actorCore) receiveTriggerdTimer(tid TimerId, args any, cb ActorTimerFunc) {
+func (a *actorCore) receiveTriggerdTimer(tid TimerId, cb ActorTimerFunc, cbCtx any) {
 	if a.checkStarted() != nil {
 		return
 	}
-	allowMigrationTimer := isMigrationTimerArgs(args)
+	allowMigrationTimer := isMigrationTimerArgs(cbCtx)
 	if !allowMigrationTimer && (a.isMigrationDraining() || a.isMigratingOut() || a.isMigrated()) {
 		return
 	}
 
-	msg := newMessageTriggeredTimer(tid, cb, args)
+	msg := newMessageTriggeredTimer(tid, cb, cbCtx)
 	begin := time.Now()
 	select {
 	case a.priMessageBox <- msg:
@@ -1053,7 +1053,7 @@ func (a *actorCore) asyncCall(ai actorImpl, f ActorFunc, timeout time.Duration) 
 	}
 
 	callId := a.nextAsyncCallId()
-	timeoutTid := a.startTimer(timeout, false, callId, ai.onAsyncCallTimeout, true)
+	timeoutTid := a.startTimer(timeout, false, ai.onAsyncCallTimeout, callId, true)
 	if timeoutTid == TimerIdNone {
 		return nil, errActorStopped
 	}
@@ -1102,7 +1102,7 @@ func (a *actor) AsyncCall(f ActorFunc, timeout time.Duration) (ActorAsyncCaller,
 }
 
 func (a *actor) onAsyncCallTimeout(args ActorTimerArgs) {
-	a.invokeAsyncCall(args.Args.(uint32), nil, ErrTimeout)
+	a.invokeAsyncCall(args.Ctx.(uint32), nil, ErrTimeout)
 }
 
 func (a *actor) invokeAsyncCall(id uint32, value any, err error) {
@@ -1144,7 +1144,7 @@ func (a *cactor) AsyncCall(f ActorFunc, timeout time.Duration) (ActorAsyncCaller
 }
 
 func (a *cactor) onAsyncCallTimeout(args ActorTimerArgs) {
-	a.invokeAsyncCall(args.Args.(uint32), nil, ErrTimeout)
+	a.invokeAsyncCall(args.Ctx.(uint32), nil, ErrTimeout)
 }
 
 func (a *cactor) invokeAsyncCall(id uint32, value any, err error) {

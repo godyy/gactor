@@ -189,16 +189,16 @@ func (m *messageCompletedAsyncRPC) discard(s *Service) {
 
 // messageTriggeredTimer 封装已触发定时器消息.
 type messageTriggeredTimer struct {
-	tid  TimerId        // 定时器ID.
-	f    ActorTimerFunc // 定时器方法.
-	args any            // 参数.
+	tid   TimerId        // 定时器ID.
+	cb    ActorTimerFunc // 定时器回调.
+	cbCtx any            // 回调上下文.
 }
 
-func newMessageTriggeredTimer(tid TimerId, f ActorTimerFunc, args any) *messageTriggeredTimer {
+func newMessageTriggeredTimer(tid TimerId, cb ActorTimerFunc, cbCtx any) *messageTriggeredTimer {
 	return &messageTriggeredTimer{
-		tid:  tid,
-		f:    f,
-		args: args,
+		tid:   tid,
+		cb:    cb,
+		cbCtx: cbCtx,
 	}
 }
 
@@ -208,10 +208,10 @@ func (m *messageTriggeredTimer) handle(a actorImpl) {
 	if !core.isRunning() || !core.service().isRunning() {
 		return
 	}
-	m.f(ActorTimerArgs{
+	m.cb(ActorTimerArgs{
 		Actor: a,
 		TID:   m.tid,
-		Args:  m.args,
+		Ctx:  m.cbCtx,
 	})
 }
 

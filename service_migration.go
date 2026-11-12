@@ -915,7 +915,7 @@ func (s *Service) deliverMigrationStart(uid ActorUID) {
 
 // onMigrationStartRetry 重试尚未成功投递的迁移启动消息。
 func (s *Service) onMigrationStartRetry(args TimerArgs) {
-	retry, ok := args.Args.(migrationStartRetryTimerArgs)
+	retry, ok := args.Ctx.(migrationStartRetryTimerArgs)
 	if !ok {
 		return
 	}
@@ -955,10 +955,10 @@ func (s *Service) scheduleMigrationStartRetry(uid ActorUID, cause error) {
 	s.mtxMigration.Unlock()
 	s.monitorMigrationAction(MonitorMigrationRetry)
 
-	if tid := s.StartTimer(delay, false, migrationStartRetryTimerArgs{
+	if tid := s.StartTimer(delay, false, s.onMigrationStartRetry, migrationStartRetryTimerArgs{
 		UID:     uid,
 		Attempt: attempt,
-	}, s.onMigrationStartRetry); tid == TimerIdNone {
+	}); tid == TimerIdNone {
 		s.clearMigrationStartRetry(uid, attempt)
 	}
 }

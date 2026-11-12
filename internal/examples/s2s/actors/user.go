@@ -61,7 +61,7 @@ func (u *User) OnDisconnected() {
 
 func randomGetServerName(u *User) {
 	d := time.Duration(100+rand.Intn(400)) * time.Millisecond
-	u.StartTimer(d, false, nil, onRandomGetServerName)
+	u.StartTimer(d, false, onRandomGetServerName, nil)
 }
 
 func onRandomGetServerName(args gactor.ActorTimerArgs) {

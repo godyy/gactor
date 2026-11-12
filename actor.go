@@ -96,7 +96,7 @@ type ActorMigrationBehavior interface {
 type ActorTimerArgs struct {
 	Actor Actor   // Actor.
 	TID   TimerId // 定时器ID
-	Args  any     // 参数.
+	Ctx   any     // 上下文.
 }
 
 // ActorTimerFunc Actor 定时器回调函数.
@@ -131,7 +131,7 @@ type Actor interface {
 	Behavior() ActorBehavior
 
 	// StartTimer 启动定时器.
-	StartTimer(d time.Duration, periodic bool, args any, cb ActorTimerFunc) TimerId
+	StartTimer(d time.Duration, periodic bool, cb ActorTimerFunc, cbCtx any) TimerId
 
 	// StopTimer 停止定时器.
 	StopTimer(TimerId)

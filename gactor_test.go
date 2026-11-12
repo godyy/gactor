@@ -475,7 +475,7 @@ func (a *testActor) GetActor() Actor {
 
 func (a *testActor) OnStart() error {
 	a.name = "test:" + a.ActorUID().String()
-	a.StartTimer(100*time.Millisecond, true, nil, func(args ActorTimerArgs) {
+	a.StartTimer(100*time.Millisecond, true, func(args ActorTimerArgs) {
 		ta := args.Actor.Behavior().(*testActor)
 		ta.tCount++
 		logger.Debugf("actor %s tick", a.ActorUID())
@@ -511,7 +511,7 @@ func (a *testActor) OnStart() error {
 			}
 		}
 
-	})
+	}, nil)
 	return nil
 }
 

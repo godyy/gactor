@@ -105,7 +105,7 @@ func (a *contextRequestTestActor) Category() ActorCategory {
 func (a *contextRequestTestActor) ActorUID() ActorUID {
 	return a.uid
 }
-func (a *contextRequestTestActor) StartTimer(d time.Duration, periodic bool, args any, cb ActorTimerFunc) TimerId {
+func (a *contextRequestTestActor) StartTimer(d time.Duration, periodic bool, cb ActorTimerFunc, cbCtx any) TimerId {
 	return TimerIdNone
 }
 func (a *contextRequestTestActor) StopTimer(TimerId) {}

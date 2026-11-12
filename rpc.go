@@ -271,7 +271,7 @@ func (m *rpcManager) resetTimer(expiredAt int64) {
 	if d <= 0 {
 		d = time.Millisecond * 1
 	}
-	m.timerId = m.svc.startTimer(d, false, nil, m.onTimer, true)
+	m.timerId = m.svc.startTimer(d, false, m.onTimer, nil, true)
 }
 
 // stopTimer 停止定时器
