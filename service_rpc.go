@@ -2,7 +2,6 @@ package gactor
 
 import (
 	"context"
-	"sync"
 	"time"
 )
 
@@ -35,7 +34,7 @@ func (s *Service) startRpcManager() {
 // doRPC 代理 from, 向 to 请求的目标 Actor 发起 RPC 调用.
 // deadline 指定超时时间, 若未设置, 采用默认超时时间.
 // 若为远程 RPC 调用, deadline 会投递到远端节点作为超时协同参数.
-func (s *Service) doRPC(from ActorUID, to ActorUID, params any, cb RPCFunc, cbCtx any, deadline time.Time) (reqId uint32, err error) {
+func (s *Service) doRPC(from ActorUID, to ActorUID, params any, cb RPCFunc, cbctx any, deadline time.Time) (reqId uint32, err error) {
 	var (
 		toNodeId string
 		leaseId  string
@@ -65,7 +64,7 @@ func (s *Service) doRPC(from ActorUID, to ActorUID, params any, cb RPCFunc, cbCt
 
 	// 创建 RPC 调用实例.
 	// 若后续出现任意错误, 移除RPC调用.
-	reqId, err = s.rpcManager.createCall(from, to, deadline, cb, cbCtx)
+	reqId, err = s.rpcManager.createCall(from, to, deadline, cb, cbctx)
 	if err != nil {
 		return 0, err
 	}
@@ -117,69 +116,45 @@ func (s *Service) doRPC(from ActorUID, to ActorUID, params any, cb RPCFunc, cbCt
 	return
 }
 
-// rpcDoneFunc 同步 RPC 回调封装.
-type rpcDoneFunc struct {
-	done    chan struct{} // 完成信号.
-	svc     *Service      // 提供解码辅助.
-	payload *Buffer       // payload.
-	err     error         // 错误信息.
+// cbctxRPC 构造同步RPC回调上下文
+func (s *Service) cbctxRPC(done chan struct{}) CbCtx {
+	return NewCbCtx(cbctxKeyDone, done)
 }
 
-var poolOfRPCDoneFunc = &sync.Pool{
-	New: func() any {
-		return &rpcDoneFunc{}
-	},
+// rpcCallback 同步RPC统一回调.
+func (s *Service) rpcCallback(resp RPCResp) {
+	cbctx := resp.ctx.(CbCtx)
+	done, _ := CbCtxGet[chan struct{}](cbctx, cbctxKeyDone)
+	defer close(done)
+	cbctx[cbctxKeyPayload] = resp.payload
+	cbctx[cbctxKeyErr] = resp.err
 }
 
-func newRPCDoneFunc(svc *Service) *rpcDoneFunc {
-	cb := poolOfRPCDoneFunc.Get().(*rpcDoneFunc)
-	cb.done = make(chan struct{})
-	cb.svc = svc
-	return cb
-}
-
-func (cb *rpcDoneFunc) invoke(resp RPCResp) {
-	defer close(cb.done)
-	if err := resp.Err(); err != nil {
-		cb.err = err
-		return
-	}
-	cb.payload = resp.payload
-}
-
-func (cb *rpcDoneFunc) decode(reply any) error {
-	if cb.err != nil {
-		return cb.err
-	}
-	if err := cb.svc.decodePayload(PacketTypeS2SRpcResp, cb.payload, reply); err == nil {
-		return nil
-	} else {
+// decodeRPCReply 解码 RPC 回复.
+// 若解码失败, 则返回错误.
+func (s *Service) decodeRPCReply(cbctx CbCtx, reply any) error {
+	err, _ := CbCtxGet[error](cbctx, cbctxKeyErr)
+	if err != nil {
 		return err
 	}
-}
-
-func (cb *rpcDoneFunc) release() {
-	if cb.payload != nil {
-		cb.svc.freeBuffer(cb.payload)
-		cb.payload = nil
-	}
-	cb.svc = nil
-	cb.err = nil
-	cb.done = nil
-	poolOfRPCDoneFunc.Put(cb)
+	payload, _ := CbCtxGet[*Buffer](cbctx, cbctxKeyPayload)
+	defer s.freeBuffer(payload)
+	return s.decodePayload(PacketTypeS2SRpcResp, payload, reply)
 }
 
 // rpcWithDeadline 向 to 指向的 Actor 发起 RPC 调用.
 // deadline 指定具体超时时刻.
 func (s *Service) rpcWithDeadline(from, to ActorUID, params any, reply any, deadline time.Time) error {
+	done := make(chan struct{})
+	cbctx := s.cbctxRPC(done)
+	defer cbctx.Release()
+
 	// 执行同步RPC 调用.
-	doneFunc := newRPCDoneFunc(s)
-	defer doneFunc.release()
-	if _, err := s.doRPC(from, to, params, doneFunc.invoke, nil, deadline); err != nil {
+	if _, err := s.doRPC(from, to, params, s.rpcCallback, cbctx, deadline); err != nil {
 		return err
 	}
-	<-doneFunc.done
-	return doneFunc.decode(reply)
+	<-done
+	return s.decodeRPCReply(cbctx, reply)
 }
 
 // rpcWithTimeout 向 to 指向的 Actor 发起 RPC 调用.
@@ -210,17 +185,18 @@ func (s *Service) rpcWithContext(ctx context.Context, from, to ActorUID, params 
 	}
 
 	// 执行同步RPC 调用.
-	doneFunc := newRPCDoneFunc(s)
-	defer doneFunc.release()
-	reqId, err := s.doRPC(from, to, params, doneFunc.invoke, nil, deadline)
+	done := make(chan struct{})
+	cbctx := s.cbctxRPC(done)
+	defer cbctx.Release()
+	reqId, err := s.doRPC(from, to, params, s.rpcCallback, cbctx, deadline)
 	if err != nil {
 		return err
 	}
 
 	// 等待调用完成, 同时监听上下文.
 	select {
-	case <-doneFunc.done:
-		return doneFunc.decode(reply)
+	case <-done:
+		return s.decodeRPCReply(cbctx, reply)
 	case <-ctx.Done():
 		s.rpcManager.removeCall(reqId, from, to)
 		return ctx.Err()
@@ -254,8 +230,8 @@ func (s *Service) RPCWithContext(ctx context.Context, to ActorUID, params any, r
 
 // asyncRPCWithDeadline 向 to 指向的 Actor 发起异步 RPC 调用.
 // deadline 指定具体超时时刻.
-func (s *Service) asyncRPCWithDeadline(from, to ActorUID, params any, cb RPCFunc, cbCtx any, deadline time.Time) error {
-	if _, err := s.doRPC(from, to, params, cb, cbCtx, deadline); err != nil {
+func (s *Service) asyncRPCWithDeadline(from, to ActorUID, params any, cb RPCFunc, cbctx any, deadline time.Time) error {
+	if _, err := s.doRPC(from, to, params, cb, cbctx, deadline); err != nil {
 		return err
 	}
 	return nil
@@ -263,13 +239,13 @@ func (s *Service) asyncRPCWithDeadline(from, to ActorUID, params any, cb RPCFunc
 
 // asyncRPCWithTimeout 向 to 指向的 Actor 发起异步 RPC 调用.
 // timeout 指定超时间隔.
-func (s *Service) asyncRPCWithTimeout(from, to ActorUID, params any, cb RPCFunc, cbCtx any, timeout time.Duration) error {
-	return s.asyncRPCWithDeadline(from, to, params, cb, cbCtx, time.Now().Add(timeout))
+func (s *Service) asyncRPCWithTimeout(from, to ActorUID, params any, cb RPCFunc, cbctx any, timeout time.Duration) error {
+	return s.asyncRPCWithDeadline(from, to, params, cb, cbctx, time.Now().Add(timeout))
 }
 
 // asyncRPCWithContext 向 to 指向的 Actor 发起异步 RPC 调用.
 // 超时 deadline 从 ctx 获取，若未设置, 使用默认超时时间.
-func (s *Service) asyncRPCWithContext(ctx context.Context, from, to ActorUID, params any, cb RPCFunc, cbCtx any) error {
+func (s *Service) asyncRPCWithContext(ctx context.Context, from, to ActorUID, params any, cb RPCFunc, cbctx any) error {
 	// 检查上下文是否已取消.
 	if err := ctx.Err(); err != nil {
 		return err
@@ -281,29 +257,29 @@ func (s *Service) asyncRPCWithContext(ctx context.Context, from, to ActorUID, pa
 		deadline = time.Now().Add(s.cfg.DefRPCTimeout)
 	}
 
-	return s.asyncRPCWithDeadline(from, to, params, cb, cbCtx, deadline)
+	return s.asyncRPCWithDeadline(from, to, params, cb, cbctx, deadline)
 }
 
 // AsyncRPCWithDeadline 向 to 指向的 Actor 发起异步 RPC 调用.
 // deadline 指定具体超时时刻.
-func (s *Service) AsyncRPCWithDeadline(to ActorUID, params any, cb RPCFunc, cbCtx any, deadline time.Time) error {
-	return s.asyncRPCWithDeadline(ActorUID{}, to, params, cb, cbCtx, deadline)
+func (s *Service) AsyncRPCWithDeadline(to ActorUID, params any, cb RPCFunc, cbctx any, deadline time.Time) error {
+	return s.asyncRPCWithDeadline(ActorUID{}, to, params, cb, cbctx, deadline)
 }
 
 // AsyncRPCWithTimeout 向 to 指向的 Actor 发起异步 RPC 调用.
 // timeout 指定超时间隔.
-func (s *Service) AsyncRPCWithTimeout(to ActorUID, params any, cb RPCFunc, cbCtx any, timeout time.Duration) error {
-	return s.asyncRPCWithTimeout(ActorUID{}, to, params, cb, cbCtx, timeout)
+func (s *Service) AsyncRPCWithTimeout(to ActorUID, params any, cb RPCFunc, cbctx any, timeout time.Duration) error {
+	return s.asyncRPCWithTimeout(ActorUID{}, to, params, cb, cbctx, timeout)
 }
 
 // AsyncRPC 向 to 指向的 Actor 发起异步 RPC 调用.
 // 超时间隔使用配置的默认值.
-func (s *Service) AsyncRPC(to ActorUID, params any, cb RPCFunc, cbCtx any) error {
-	return s.asyncRPCWithDeadline(ActorUID{}, to, params, cb, cbCtx, time.Now().Add(s.cfg.DefRPCTimeout))
+func (s *Service) AsyncRPC(to ActorUID, params any, cb RPCFunc, cbctx any) error {
+	return s.asyncRPCWithDeadline(ActorUID{}, to, params, cb, cbctx, time.Now().Add(s.cfg.DefRPCTimeout))
 }
 
 // AsyncRPCWithContext 向 to 指向的 Actor 发起异步 RPC 调用.
 // 超时 deadline 从 ctx 获取，若未设置, 使用默认超时时间.
-func (s *Service) AsyncRPCWithContext(ctx context.Context, to ActorUID, params any, cb RPCFunc, cbCtx any) error {
-	return s.asyncRPCWithContext(ctx, ActorUID{}, to, params, cb, cbCtx)
+func (s *Service) AsyncRPCWithContext(ctx context.Context, to ActorUID, params any, cb RPCFunc, cbctx any) error {
+	return s.asyncRPCWithContext(ctx, ActorUID{}, to, params, cb, cbctx)
 }

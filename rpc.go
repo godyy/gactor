@@ -54,7 +54,7 @@ type rpcCall struct {
 	from, to    ActorUID // 来源, 目标 ActorUID.
 	expiredAt   int64    // 过期时间.
 	cb          RPCFunc  // 回调函数.
-	cbCtx       any      // 回调上下文.
+	cbctx       any      // 回调上下文.
 	respPayload *Buffer  // RPC 响应负载数据.
 	err         error    // 错误信息.
 }
@@ -83,7 +83,7 @@ func (call *rpcCall) onResponse(payload *Buffer, err error) {
 func (call *rpcCall) callback(rm *rpcManager) {
 	call.cb(RPCResp{
 		svc:     rm.getSvc(),
-		ctx:     call.cbCtx,
+		ctx:     call.cbctx,
 		payload: call.respPayload,
 		err:     call.err,
 	})
@@ -95,7 +95,7 @@ func (call *rpcCall) release(rm *rpcManager) {
 		rm.getSvc().freeBuffer(call.respPayload)
 		call.respPayload = nil
 	}
-	call.cbCtx = nil
+	call.cbctx = nil
 	call.cb = nil
 	call.err = nil
 	poolOfRPCCall.Put(call)
@@ -308,14 +308,14 @@ func (m *rpcManager) tick() {
 }
 
 // createCall 创建 Call.
-func (m *rpcManager) createCall(from, to ActorUID, expiredAt time.Time, cb RPCFunc, cbCtx any) (uint32, error) {
+func (m *rpcManager) createCall(from, to ActorUID, expiredAt time.Time, cb RPCFunc, cbctx any) (uint32, error) {
 	call := poolOfRPCCall.Get().(*rpcCall)
 	call.heapIndex = -1
 	call.reqId = m.genReqId()
 	call.from = from
 	call.to = to
 	call.expiredAt = expiredAt.UnixNano()
-	call.cbCtx = cbCtx
+	call.cbctx = cbctx
 	call.cb = cb
 	if err := m.enqueueCmd(newRPCCmdAdd(call), false); err != nil {
 		return 0, err

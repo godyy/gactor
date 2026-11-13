@@ -191,14 +191,14 @@ func (m *messageCompletedAsyncRPC) discard(s *Service) {
 type messageTriggeredTimer struct {
 	tid   TimerId        // 定时器ID.
 	cb    ActorTimerFunc // 定时器回调.
-	cbCtx any            // 回调上下文.
+	cbctx any            // 回调上下文.
 }
 
-func newMessageTriggeredTimer(tid TimerId, cb ActorTimerFunc, cbCtx any) *messageTriggeredTimer {
+func newMessageTriggeredTimer(tid TimerId, cb ActorTimerFunc, cbctx any) *messageTriggeredTimer {
 	return &messageTriggeredTimer{
 		tid:   tid,
 		cb:    cb,
-		cbCtx: cbCtx,
+		cbctx: cbctx,
 	}
 }
 
@@ -211,7 +211,7 @@ func (m *messageTriggeredTimer) handle(a actorImpl) {
 	m.cb(ActorTimerArgs{
 		Actor: a,
 		TID:   m.tid,
-		Ctx:  m.cbCtx,
+		Ctx:  m.cbctx,
 	})
 }
 

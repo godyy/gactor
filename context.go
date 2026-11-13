@@ -168,30 +168,40 @@ func (c *Context) RPCWithContext(ctx context.Context, to ActorUID, params any, r
 // ContextRPCFunc 基于 Context 的 RPC 回调.
 type ContextRPCFunc func(ctx *Context, resp RPCResp)
 
-// contextAsyncRPCFunc 基于 Context 的异步 RPC 回调.
-type contextAsyncRPCFunc struct {
-	ctx *Context
-	cb  ContextRPCFunc
+// cbctxAsyncRPC 构造异步 RPC 回调上下文.
+func (c *Context) cbctxAsyncRPC(cb ContextRPCFunc, cbctx any) CbCtx {
+	return NewCbCtx(cbctxKeyCallback, cb, cbctxKeyCbCtx, cbctx)
 }
 
-func (f *contextAsyncRPCFunc) invoke(a Actor, resp RPCResp) {
+// asyncRPCCallback 异步 RPC 回调.
+func (c *Context) asyncRPCCallback(a Actor, resp RPCResp) {
 	// 保险起见, 更新下Actor.
-	f.ctx.actor = a.(actorImpl)
+	c.actor = a.(actorImpl)
+
+	// 取上下文
+	cbctx := resp.ctx.(CbCtx)
+	defer cbctx.Release()
+	cb, _ := CbCtxGet[ContextRPCFunc](cbctx, cbctxKeyCallback)
+	innerCbCtx, _ := CbCtxGet[any](cbctx, cbctxKeyCbCtx)
+
 	// 优先执行回调.
-	f.cb(f.ctx, resp)
+	cb(c, RPCResp{
+		svc:     c.svc,
+		ctx:     innerCbCtx,
+		payload: resp.payload,
+		err:     resp.err,
+	})
 
 	// 恢复并继续执行.
-	f.ctx.resumeAndNext()
+	c.resumeAndNext()
 }
 
 // AsyncRPCWithDeadline 基于 Context 的异步 RPC 调用.
-func (c *Context) AsyncRPCWithDeadline(to ActorUID, params any, cb ContextRPCFunc, cbCtx any, deadline time.Time) error {
+func (c *Context) AsyncRPCWithDeadline(to ActorUID, params any, cb ContextRPCFunc, cbctx any, deadline time.Time) error {
 	c.suspend()
-	asyncFunc := &contextAsyncRPCFunc{
-		ctx: c,
-		cb:  cb,
-	}
-	if err := c.actor.AsyncRPCWithDeadline(to, params, asyncFunc.invoke, cbCtx, deadline); err != nil {
+	cbctx = c.cbctxAsyncRPC(cb, cbctx)
+	if err := c.actor.AsyncRPCWithDeadline(to, params, c.asyncRPCCallback, cbctx, deadline); err != nil {
+		cbctx.(CbCtx).Release()
 		c.resume()
 		return err
 	}
@@ -199,21 +209,19 @@ func (c *Context) AsyncRPCWithDeadline(to ActorUID, params any, cb ContextRPCFun
 }
 
 // AsyncRPCWithTimeout 基于 Context 的异步 RPC 调用.
-func (c *Context) AsyncRPCWithTimeout(to ActorUID, params any, cb ContextRPCFunc, cbCtx any, timeout time.Duration) error {
-	return c.AsyncRPCWithDeadline(to, params, cb, cbCtx, time.Now().Add(timeout))
+func (c *Context) AsyncRPCWithTimeout(to ActorUID, params any, cb ContextRPCFunc, cbctx any, timeout time.Duration) error {
+	return c.AsyncRPCWithDeadline(to, params, cb, cbctx, time.Now().Add(timeout))
 }
 
 // AsyncRPC 基于 Context 的异步 RPC 调用.
-func (c *Context) AsyncRPC(to ActorUID, params any, cb ContextRPCFunc, cbCtx any) error {
+func (c *Context) AsyncRPC(to ActorUID, params any, cb ContextRPCFunc, cbctx any) error {
 	if deadline, ok := c.Deadline(); ok {
-		return c.AsyncRPCWithDeadline(to, params, cb, cbCtx, deadline)
+		return c.AsyncRPCWithDeadline(to, params, cb, cbctx, deadline)
 	}
 	c.suspend()
-	asyncFunc := &contextAsyncRPCFunc{
-		ctx: c,
-		cb:  cb,
-	}
-	if err := c.actor.AsyncRPC(to, params, asyncFunc.invoke, cbCtx); err != nil {
+	cbctx = c.cbctxAsyncRPC(cb, cbctx)
+	if err := c.actor.AsyncRPC(to, params, c.asyncRPCCallback, cbctx); err != nil {
+		cbctx.(CbCtx).Release()
 		c.resume()
 		return err
 	}
@@ -221,13 +229,11 @@ func (c *Context) AsyncRPC(to ActorUID, params any, cb ContextRPCFunc, cbCtx any
 }
 
 // AsyncRPCWithContext 基于 Context 的异步 RPC 调用.
-func (c *Context) AsyncRPCWithContext(ctx context.Context, to ActorUID, params any, cb ContextRPCFunc, cbCtx any) error {
+func (c *Context) AsyncRPCWithContext(ctx context.Context, to ActorUID, params any, cb ContextRPCFunc, cbctx any) error {
 	c.suspend()
-	asyncFunc := &contextAsyncRPCFunc{
-		ctx: c,
-		cb:  cb,
-	}
-	if err := c.actor.AsyncRPCWithContext(ctx, to, params, asyncFunc.invoke, cbCtx); err != nil {
+	cbctx = c.cbctxAsyncRPC(cb, cbctx)
+	if err := c.actor.AsyncRPCWithContext(ctx, to, params, c.asyncRPCCallback, cbctx); err != nil {
+		cbctx.(CbCtx).Release()
 		c.resume()
 		return err
 	}

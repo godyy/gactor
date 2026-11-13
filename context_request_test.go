@@ -105,7 +105,7 @@ func (a *contextRequestTestActor) Category() ActorCategory {
 func (a *contextRequestTestActor) ActorUID() ActorUID {
 	return a.uid
 }
-func (a *contextRequestTestActor) StartTimer(d time.Duration, periodic bool, cb ActorTimerFunc, cbCtx any) TimerId {
+func (a *contextRequestTestActor) StartTimer(d time.Duration, periodic bool, cb ActorTimerFunc, cbctx any) TimerId {
 	return TimerIdNone
 }
 func (a *contextRequestTestActor) StopTimer(TimerId) {}
@@ -124,21 +124,21 @@ func (a *contextRequestTestActor) RPC(to ActorUID, params, reply any) error {
 func (a *contextRequestTestActor) RPCWithContext(ctx context.Context, to ActorUID, params, reply any) error {
 	return nil
 }
-func (a *contextRequestTestActor) AsyncRPCWithDeadline(to ActorUID, params any, cb ActorRPCFunc, cbCtx any, deadline time.Time) error {
+func (a *contextRequestTestActor) AsyncRPCWithDeadline(to ActorUID, params any, cb ActorRPCFunc, cbctx any, deadline time.Time) error {
 	a.asyncDeadlineCalled = true
 	a.asyncDeadline = deadline
 	a.lastAsyncCallback = cb
 	return a.asyncDeadlineErr
 }
-func (a *contextRequestTestActor) AsyncRPCWithTimeout(to ActorUID, params any, cb ActorRPCFunc, cbCtx any, timeout time.Duration) error {
+func (a *contextRequestTestActor) AsyncRPCWithTimeout(to ActorUID, params any, cb ActorRPCFunc, cbctx any, timeout time.Duration) error {
 	return nil
 }
-func (a *contextRequestTestActor) AsyncRPC(to ActorUID, params any, cb ActorRPCFunc, cbCtx any) error {
+func (a *contextRequestTestActor) AsyncRPC(to ActorUID, params any, cb ActorRPCFunc, cbctx any) error {
 	a.asyncCalled = true
 	a.lastAsyncCallback = cb
 	return a.asyncErr
 }
-func (a *contextRequestTestActor) AsyncRPCWithContext(ctx context.Context, to ActorUID, params any, cb ActorRPCFunc, cbCtx any) error {
+func (a *contextRequestTestActor) AsyncRPCWithContext(ctx context.Context, to ActorUID, params any, cb ActorRPCFunc, cbctx any) error {
 	return nil
 }
 func (a *contextRequestTestActor) Cast(to ActorUID, payload any) error {

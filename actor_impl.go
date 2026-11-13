@@ -780,13 +780,13 @@ func (a *actorCore) resetRecycleTimer(stop bool) {
 }
 
 // StartTimer 启动定时器.
-func (a *actorCore) StartTimer(d time.Duration, periodic bool, cb ActorTimerFunc, cbCtx any) TimerId {
-	return a.startTimer(d, periodic, cb, cbCtx, false)
+func (a *actorCore) StartTimer(d time.Duration, periodic bool, cb ActorTimerFunc, cbctx any) TimerId {
+	return a.startTimer(d, periodic, cb, cbctx, false)
 }
 
 // startTimer 启动定时器.
 // notStopped 是否在未停止时启动.
-func (a *actorCore) startTimer(d time.Duration, periodic bool, cb ActorTimerFunc, cbCtx any, notStopped bool) TimerId {
+func (a *actorCore) startTimer(d time.Duration, periodic bool, cb ActorTimerFunc, cbctx any, notStopped bool) TimerId {
 	if notStopped {
 		if err := a.checkNotStopped(); err != nil {
 			return TimerIdNone
@@ -796,7 +796,7 @@ func (a *actorCore) startTimer(d time.Duration, periodic bool, cb ActorTimerFunc
 			return TimerIdNone
 		}
 	}
-	return a.svc.startActorTimer(a.ActorUID(), d, periodic, cb, cbCtx, notStopped)
+	return a.svc.startActorTimer(a.ActorUID(), d, periodic, cb, cbctx, notStopped)
 }
 
 // StopTimer 停止定时器.
@@ -805,16 +805,16 @@ func (a *actorCore) StopTimer(tid TimerId) {
 }
 
 // receiveTriggerdTimer 接收已触发的定时器.
-func (a *actorCore) receiveTriggerdTimer(tid TimerId, cb ActorTimerFunc, cbCtx any) {
+func (a *actorCore) receiveTriggerdTimer(tid TimerId, cb ActorTimerFunc, cbctx any) {
 	if a.checkStarted() != nil {
 		return
 	}
-	allowMigrationTimer := isMigrationTimerArgs(cbCtx)
+	allowMigrationTimer := isMigrationTimerArgs(cbctx)
 	if !allowMigrationTimer && (a.isMigrationDraining() || a.isMigratingOut() || a.isMigrated()) {
 		return
 	}
 
-	msg := newMessageTriggeredTimer(tid, cb, cbCtx)
+	msg := newMessageTriggeredTimer(tid, cb, cbctx)
 	begin := time.Now()
 	select {
 	case a.priMessageBox <- msg:
@@ -900,47 +900,36 @@ func (a *actorCore) RPCWithContext(ctx context.Context, to ActorUID, params, rep
 	return a.svc.rpcWithContext(ctx, a.ActorUID(), to, params, reply)
 }
 
-// actorAsyncRPCFunc Actor 异步 RPC 回调封装.
-type actorAsyncRPCFunc struct {
-	svc *Service
-	uid ActorUID
-	cb  ActorRPCFunc
+// cbctxAsyncRPC 构造异步 RPC 回调上下文.
+func (a *actorCore) cbctxAsyncRPC(cb ActorRPCFunc, cbctx any) CbCtx {
+	return NewCbCtx(cbctxKeyUID, a.ActorUID(), cbctxKeySvc, a.svc, cbctxKeyCallback, cb, cbctxKeyCbCtx, cbctx)
 }
 
-var poolOfActorAsyncRPCFunc = &sync.Pool{
-	New: func() any {
-		return &actorAsyncRPCFunc{}
-	},
-}
+// actorAsyncRPCCallback Actor 异步 RPC 回调.
+func actorAsyncRPCCallback(resp RPCResp) {
+	cbctx := resp.ctx.(CbCtx)
+	defer cbctx.Release()
+	svc, _ := CbCtxGet[*Service](cbctx, cbctxKeySvc)
+	uid, _ := CbCtxGet[ActorUID](cbctx, cbctxKeyUID)
+	cb, _ := CbCtxGet[ActorRPCFunc](cbctx, cbctxKeyCallback)
+	innerCbCtx, _ := CbCtxGet[any](cbctx, cbctxKeyCbCtx)
 
-func newActorAsyncRPCFunc(svc *Service, uid ActorUID, cb ActorRPCFunc) *actorAsyncRPCFunc {
-	f := poolOfActorAsyncRPCFunc.Get().(*actorAsyncRPCFunc)
-	f.svc = svc
-	f.uid = uid
-	f.cb = cb
-	return f
-}
-
-func (f *actorAsyncRPCFunc) release() {
-	f.svc = nil
-	f.cb = nil
-	poolOfActorAsyncRPCFunc.Put(f)
-}
-
-func (f *actorAsyncRPCFunc) invoke(resp RPCResp) {
-	defer f.release()
-
-	if actor, err := f.svc.getActor(f.uid); err != nil {
-		f.svc.freeBuffer(resp.payload)
-		f.svc.getLogger().ErrorFields("get actor failed inside actorAsyncRPCFunc", f.svc.lfdActorUID("uid", f.uid), lfdError(err))
+	if actor, err := svc.getActor(uid); err != nil {
+		svc.freeBuffer(resp.payload)
+		svc.getLogger().ErrorFields("get actor failed inside actorAsyncRPCFunc", svc.lfdActorUID("uid", uid), lfdError(err))
 		return
 	} else if actor == nil {
-		f.svc.freeBuffer(resp.payload)
-		f.svc.getLogger().WarnFields("actor not found inside actorAsyncRPCFunc", f.svc.lfdActorUID("uid", f.uid))
+		svc.freeBuffer(resp.payload)
+		svc.getLogger().WarnFields("actor not found inside actorAsyncRPCFunc", svc.lfdActorUID("uid", uid))
 	} else {
 		defer actor.core().deref()
-		if err := actor.core().receiveCompletedAsyncRPC(resp, f.cb); err != nil {
-			f.svc.freeBuffer(resp.payload)
+		if err := actor.core().receiveCompletedAsyncRPC(RPCResp{
+			svc:     resp.svc,
+			ctx:     innerCbCtx,
+			payload: resp.payload,
+			err:     resp.err,
+		}, cb); err != nil {
+			svc.freeBuffer(resp.payload)
 			actor.core().getLogger().ErrorFields("receive async rpc call failed", lfdError(err))
 		}
 	}
@@ -948,14 +937,14 @@ func (f *actorAsyncRPCFunc) invoke(resp RPCResp) {
 
 // AsyncRPCWithDeadline 发起异步 RPC 调用.
 // deadline 为超时时间.
-func (a *actorCore) AsyncRPCWithDeadline(to ActorUID, params any, cb ActorRPCFunc, cbCtx any, deadline time.Time) error {
+func (a *actorCore) AsyncRPCWithDeadline(to ActorUID, params any, cb ActorRPCFunc, cbctx any, deadline time.Time) error {
 	if err := a.ref(); err != nil {
 		return err
 	}
 
-	asyncFunc := newActorAsyncRPCFunc(a.svc, a.ActorUID(), cb)
-	if err := a.svc.asyncRPCWithDeadline(a.ActorUID(), to, params, asyncFunc.invoke, cbCtx, deadline); err != nil {
-		asyncFunc.release()
+	cbctx = a.cbctxAsyncRPC(cb, cbctx)
+	if err := a.svc.asyncRPCWithDeadline(a.ActorUID(), to, params, actorAsyncRPCCallback, cbctx, deadline); err != nil {
+		cbctx.(CbCtx).Release()
 		_ = a.deref()
 		return err
 	}
@@ -967,26 +956,26 @@ func (a *actorCore) AsyncRPCWithDeadline(to ActorUID, params any, cb ActorRPCFun
 
 // AsyncRPCWithTimeout 发起异步 RPC 调用.
 // timeout 为超时间隔.
-func (a *actorCore) AsyncRPCWithTimeout(to ActorUID, params any, cb ActorRPCFunc, cbCtx any, timeout time.Duration) error {
-	return a.AsyncRPCWithDeadline(to, params, cb, cbCtx, time.Now().Add(timeout))
+func (a *actorCore) AsyncRPCWithTimeout(to ActorUID, params any, cb ActorRPCFunc, cbctx any, timeout time.Duration) error {
+	return a.AsyncRPCWithDeadline(to, params, cb, cbctx, time.Now().Add(timeout))
 }
 
 // AsyncRPC 发起异步 RPC 调用.
 // 使用配置的默认超时间隔.
-func (a *actorCore) AsyncRPC(to ActorUID, params any, cb ActorRPCFunc, cbCtx any) error {
-	return a.AsyncRPCWithDeadline(to, params, cb, cbCtx, time.Now().Add(a.svc.cfg.DefRPCTimeout))
+func (a *actorCore) AsyncRPC(to ActorUID, params any, cb ActorRPCFunc, cbctx any) error {
+	return a.AsyncRPCWithDeadline(to, params, cb, cbctx, time.Now().Add(a.svc.cfg.DefRPCTimeout))
 }
 
 // AsyncRPCWithContext 发起异步 RPC 调用.
 // 超时 deadline 从 ctx 获取，若未设置, 使用默认超时时间.
-func (a *actorCore) AsyncRPCWithContext(ctx context.Context, to ActorUID, params any, cb ActorRPCFunc, cbCtx any) error {
+func (a *actorCore) AsyncRPCWithContext(ctx context.Context, to ActorUID, params any, cb ActorRPCFunc, cbctx any) error {
 	if err := a.ref(); err != nil {
 		return err
 	}
 
-	asyncFunc := newActorAsyncRPCFunc(a.svc, a.ActorUID(), cb)
-	if err := a.svc.asyncRPCWithContext(ctx, a.ActorUID(), to, params, asyncFunc.invoke, cbCtx); err != nil {
-		asyncFunc.release()
+	cbctx = a.cbctxAsyncRPC(cb, cbctx)
+	if err := a.svc.asyncRPCWithContext(ctx, a.ActorUID(), to, params, actorAsyncRPCCallback, cbctx); err != nil {
+		cbctx.(CbCtx).Release()
 		_ = a.deref()
 		return err
 	}
