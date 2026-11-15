@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/godyy/gutils/deepcopy"
+	"github.com/godyy/gutils/container/kv"
 	"go.uber.org/zap"
 )
 
@@ -15,7 +15,7 @@ type Context struct {
 	svc   *Service  // Service.
 	req   request   // request.
 	actor actorImpl // actor.
-	kv    contextKV // kv mapping.
+	*kv.M           // kv mapping.
 
 	handlers    []HandlerFunc // handlers.
 	handlerIdx  int8          // handler index.
@@ -35,7 +35,7 @@ func newContext(svc *Service, req request) *Context {
 	cp := poolOfContext.Get().(*Context)
 	cp.svc = svc
 	cp.req = req
-	cp.kv = make(contextKV)
+	cp.M = kv.NewM()
 	return cp
 }
 
@@ -47,17 +47,6 @@ func (c *Context) service() *Service {
 // Actor 返回 Actor.
 func (c *Context) Actor() Actor {
 	return c.actor
-}
-
-// Set 设置 k->v.
-func (c *Context) Set(k any, v any) {
-	c.kv[k] = v
-}
-
-// Get 获取 k->v.
-func (c *Context) Get(k any) (v any, exists bool) {
-	v, exists = c.kv[k]
-	return
 }
 
 // RequestType 返回请求类型.
@@ -169,7 +158,7 @@ func (c *Context) RPCWithContext(ctx context.Context, to ActorUID, params any, r
 type ContextRPCFunc func(ctx *Context, resp RPCResp)
 
 // cbctxAsyncRPC 构造异步 RPC 回调上下文.
-func (c *Context) cbctxAsyncRPC(cb ContextRPCFunc, cbctx any) CbCtx {
+func (c *Context) cbctxAsyncRPC(cb ContextRPCFunc, cbctx any) *CbCtx {
 	return NewCbCtx(cbctxKeyCallback, cb, cbctxKeyCbCtx, cbctx)
 }
 
@@ -179,13 +168,13 @@ func (c *Context) asyncRPCCallback(a Actor, resp RPCResp) {
 	c.actor = a.(actorImpl)
 
 	// 取上下文
-	cbctx := resp.ctx.(CbCtx)
-	defer cbctx.Release()
-	cb, _ := CbCtxGet[ContextRPCFunc](cbctx, cbctxKeyCallback)
-	innerCbCtx, _ := CbCtxGet[any](cbctx, cbctxKeyCbCtx)
+	cbctx := resp.ctx.(*CbCtx)
+	defer CbCtxRelease(cbctx)
+	cb := cbctxKeyCallback.Must(cbctx)
+	innerCbCtx := cbctxKeyCbCtx.Must(cbctx)
 
 	// 优先执行回调.
-	cb(c, RPCResp{
+	cb.(ContextRPCFunc)(c, RPCResp{
 		svc:     c.svc,
 		ctx:     innerCbCtx,
 		payload: resp.payload,
@@ -201,7 +190,7 @@ func (c *Context) AsyncRPCWithDeadline(to ActorUID, params any, cb ContextRPCFun
 	c.suspend()
 	cbctx = c.cbctxAsyncRPC(cb, cbctx)
 	if err := c.actor.AsyncRPCWithDeadline(to, params, c.asyncRPCCallback, cbctx, deadline); err != nil {
-		cbctx.(CbCtx).Release()
+		CbCtxRelease(cbctx.(*CbCtx))
 		c.resume()
 		return err
 	}
@@ -221,7 +210,7 @@ func (c *Context) AsyncRPC(to ActorUID, params any, cb ContextRPCFunc, cbctx any
 	c.suspend()
 	cbctx = c.cbctxAsyncRPC(cb, cbctx)
 	if err := c.actor.AsyncRPC(to, params, c.asyncRPCCallback, cbctx); err != nil {
-		cbctx.(CbCtx).Release()
+		CbCtxRelease(cbctx.(*CbCtx))
 		c.resume()
 		return err
 	}
@@ -233,7 +222,7 @@ func (c *Context) AsyncRPCWithContext(ctx context.Context, to ActorUID, params a
 	c.suspend()
 	cbctx = c.cbctxAsyncRPC(cb, cbctx)
 	if err := c.actor.AsyncRPCWithContext(ctx, to, params, c.asyncRPCCallback, cbctx); err != nil {
-		cbctx.(CbCtx).Release()
+		CbCtxRelease(cbctx.(*CbCtx))
 		c.resume()
 		return err
 	}
@@ -280,7 +269,7 @@ func (c *Context) Clone() *Context {
 	cp.svc = c.svc
 	cp.actor = c.actor
 	cp.req = c.req.clone(c)
-	cp.kv = c.kv.clone()
+	cp.M = c.M.Clone()
 	cp.handlers = c.handlers
 	cp.handlerIdx = c.handlerIdx
 	cp.suspendFlag = 0
@@ -304,7 +293,7 @@ func (c *Context) doRelease() {
 	c.svc = nil
 	c.req = nil
 	c.actor = nil
-	c.kv = nil
+	c.M = nil
 	c.handlers = nil
 	c.handlerIdx = -1
 	c.released = false
@@ -373,17 +362,6 @@ func (c *Context) Err() error {
 
 func (c *Context) Value(key any) any {
 	return nil
-}
-
-// contextKV 上下文键值对.
-type contextKV map[any]any
-
-func (kv contextKV) clone() contextKV {
-	cp := make(contextKV, len(kv))
-	for k, v := range kv {
-		cp[k] = deepcopy.Copy(v)
-	}
-	return cp
 }
 
 // ContextSuspender Context 挂起工具.

@@ -901,18 +901,18 @@ func (a *actorCore) RPCWithContext(ctx context.Context, to ActorUID, params, rep
 }
 
 // cbctxAsyncRPC 构造异步 RPC 回调上下文.
-func (a *actorCore) cbctxAsyncRPC(cb ActorRPCFunc, cbctx any) CbCtx {
+func (a *actorCore) cbctxAsyncRPC(cb ActorRPCFunc, cbctx any) *CbCtx {
 	return NewCbCtx(cbctxKeyUID, a.ActorUID(), cbctxKeySvc, a.svc, cbctxKeyCallback, cb, cbctxKeyCbCtx, cbctx)
 }
 
 // actorAsyncRPCCallback Actor 异步 RPC 回调.
 func actorAsyncRPCCallback(resp RPCResp) {
-	cbctx := resp.ctx.(CbCtx)
-	defer cbctx.Release()
-	svc, _ := CbCtxGet[*Service](cbctx, cbctxKeySvc)
-	uid, _ := CbCtxGet[ActorUID](cbctx, cbctxKeyUID)
-	cb, _ := CbCtxGet[ActorRPCFunc](cbctx, cbctxKeyCallback)
-	innerCbCtx, _ := CbCtxGet[any](cbctx, cbctxKeyCbCtx)
+	cbctx := resp.ctx.(*CbCtx)
+	defer CbCtxRelease(cbctx)
+	svc := cbctxKeySvc.Must(cbctx)
+	uid := cbctxKeyUID.Must(cbctx)
+	cb := cbctxKeyCallback.Must(cbctx)
+	innerCbCtx := cbctxKeyCbCtx.Must(cbctx)
 
 	if actor, err := svc.getActor(uid); err != nil {
 		svc.freeBuffer(resp.payload)
@@ -928,7 +928,7 @@ func actorAsyncRPCCallback(resp RPCResp) {
 			ctx:     innerCbCtx,
 			payload: resp.payload,
 			err:     resp.err,
-		}, cb); err != nil {
+		}, cb.(ActorRPCFunc)); err != nil {
 			svc.freeBuffer(resp.payload)
 			actor.core().getLogger().ErrorFields("receive async rpc call failed", lfdError(err))
 		}
@@ -944,7 +944,7 @@ func (a *actorCore) AsyncRPCWithDeadline(to ActorUID, params any, cb ActorRPCFun
 
 	cbctx = a.cbctxAsyncRPC(cb, cbctx)
 	if err := a.svc.asyncRPCWithDeadline(a.ActorUID(), to, params, actorAsyncRPCCallback, cbctx, deadline); err != nil {
-		cbctx.(CbCtx).Release()
+		CbCtxRelease(cbctx.(*CbCtx))
 		_ = a.deref()
 		return err
 	}
@@ -975,7 +975,7 @@ func (a *actorCore) AsyncRPCWithContext(ctx context.Context, to ActorUID, params
 
 	cbctx = a.cbctxAsyncRPC(cb, cbctx)
 	if err := a.svc.asyncRPCWithContext(ctx, a.ActorUID(), to, params, actorAsyncRPCCallback, cbctx); err != nil {
-		cbctx.(CbCtx).Release()
+		CbCtxRelease(cbctx.(*CbCtx))
 		_ = a.deref()
 		return err
 	}

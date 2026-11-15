@@ -45,7 +45,7 @@ func (s *Service) StopTimer(tid TimerId) {
 }
 
 // cbctxActorTimer 构造 Actor 定时器回调上下文.
-func (s *Service) cbctxActorTimer(uid ActorUID, cb ActorTimerFunc, cbctx any) CbCtx {
+func (s *Service) cbctxActorTimer(uid ActorUID, cb ActorTimerFunc, cbctx any) *CbCtx {
 	return NewCbCtx(cbctxKeyUID, uid, cbctxKeyCallback, cb, cbctxKeyCbCtx, cbctx)
 }
 
@@ -60,14 +60,14 @@ func (s *Service) startActorTimer(uid ActorUID, d time.Duration, periodic bool, 
 
 // execActorTimer 执行 Actor 定时器.
 func (s *Service) execActorTimer(args TimerArgs) {
-	cbctx := args.Ctx.(CbCtx)
+	cbctx := args.Ctx.(*CbCtx)
 	if !args.Periodic {
-		defer cbctx.Release()
+		defer CbCtxRelease(cbctx)
 	}
 
-	uid, _ := CbCtxGet[ActorUID](cbctx, cbctxKeyUID)
-	cb, _ := CbCtxGet[ActorTimerFunc](cbctx, cbctxKeyCallback)
-	innerCbCtx, _ := CbCtxGet[any](cbctx, cbctxKeyCbCtx)
+	uid := cbctxKeyUID.Must(cbctx)
+	cb := cbctxKeyCallback.Must(cbctx)
+	innerCbCtx := cbctxKeyCbCtx.Must(cbctx)
 
 	actor, err := s.refActor(uid)
 	if err != nil || actor == nil {
@@ -76,7 +76,7 @@ func (s *Service) execActorTimer(args TimerArgs) {
 
 	defer actor.core().deref()
 
-	actor.core().receiveTriggerdTimer(args.TID, cb, innerCbCtx)
+	actor.core().receiveTriggerdTimer(args.TID, cb.(ActorTimerFunc), innerCbCtx)
 }
 
 // tickTimeWheel 推进时间轮.

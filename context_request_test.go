@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/godyy/gutils/container/kv"
 	"go.uber.org/zap/zapcore"
 )
 
@@ -287,7 +288,7 @@ func TestContextCloneCopiesKVAndRequest(t *testing.T) {
 		svc:        &Service{},
 		req:        req,
 		actor:      actor,
-		kv:         contextKV{"name": "alice"},
+		M:          kv.NewM("name", "alice"),
 		handlerIdx: 3,
 	}
 	clone := ctx.Clone()

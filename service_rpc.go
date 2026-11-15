@@ -117,27 +117,29 @@ func (s *Service) doRPC(from ActorUID, to ActorUID, params any, cb RPCFunc, cbct
 }
 
 // cbctxRPC 构造同步RPC回调上下文
-func (s *Service) cbctxRPC(done chan struct{}) CbCtx {
+func (s *Service) cbctxRPC(done chan struct{}) *CbCtx {
 	return NewCbCtx(cbctxKeyDone, done)
 }
 
 // rpcCallback 同步RPC统一回调.
 func (s *Service) rpcCallback(resp RPCResp) {
-	cbctx := resp.ctx.(CbCtx)
-	done, _ := CbCtxGet[chan struct{}](cbctx, cbctxKeyDone)
+	cbctx := resp.ctx.(*CbCtx)
+	done := cbctxKeyDone.Must(cbctx)
 	defer close(done)
-	cbctx[cbctxKeyPayload] = resp.payload
-	cbctx[cbctxKeyErr] = resp.err
+	cbctx.SetPairs(
+		cbctxKeyPayload, resp.payload,
+		cbctxKeyErr, resp.err,
+	)
 }
 
 // decodeRPCReply 解码 RPC 回复.
 // 若解码失败, 则返回错误.
-func (s *Service) decodeRPCReply(cbctx CbCtx, reply any) error {
-	err, _ := CbCtxGet[error](cbctx, cbctxKeyErr)
+func (s *Service) decodeRPCReply(cbctx *CbCtx, reply any) error {
+	err := cbctxKeyErr.Must(cbctx)
 	if err != nil {
 		return err
 	}
-	payload, _ := CbCtxGet[*Buffer](cbctx, cbctxKeyPayload)
+	payload := cbctxKeyPayload.Must(cbctx)
 	defer s.freeBuffer(payload)
 	return s.decodePayload(PacketTypeS2SRpcResp, payload, reply)
 }
@@ -147,7 +149,7 @@ func (s *Service) decodeRPCReply(cbctx CbCtx, reply any) error {
 func (s *Service) rpcWithDeadline(from, to ActorUID, params any, reply any, deadline time.Time) error {
 	done := make(chan struct{})
 	cbctx := s.cbctxRPC(done)
-	defer cbctx.Release()
+	defer CbCtxRelease(cbctx)
 
 	// 执行同步RPC 调用.
 	if _, err := s.doRPC(from, to, params, s.rpcCallback, cbctx, deadline); err != nil {
@@ -187,7 +189,7 @@ func (s *Service) rpcWithContext(ctx context.Context, from, to ActorUID, params 
 	// 执行同步RPC 调用.
 	done := make(chan struct{})
 	cbctx := s.cbctxRPC(done)
-	defer cbctx.Release()
+	defer CbCtxRelease(cbctx)
 	reqId, err := s.doRPC(from, to, params, s.rpcCallback, cbctx, deadline)
 	if err != nil {
 		return err
