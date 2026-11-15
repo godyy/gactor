@@ -158,7 +158,7 @@ func (c *Context) RPCWithContext(ctx context.Context, to ActorUID, params any, r
 type ContextRPCFunc func(ctx *Context, resp RPCResp)
 
 // cbctxAsyncRPC 构造异步 RPC 回调上下文.
-func (c *Context) cbctxAsyncRPC(cb ContextRPCFunc, cbctx any) *CbCtx {
+func (c *Context) cbctxAsyncRPC(cb ContextRPCFunc, cbctx any) *kv.M {
 	return NewCbCtx(cbctxKeyCallback, cb, cbctxKeyCbCtx, cbctx)
 }
 
@@ -168,7 +168,7 @@ func (c *Context) asyncRPCCallback(a Actor, resp RPCResp) {
 	c.actor = a.(actorImpl)
 
 	// 取上下文
-	cbctx := resp.ctx.(*CbCtx)
+	cbctx := resp.ctx.(*kv.M)
 	defer CbCtxRelease(cbctx)
 	cb := cbctxKeyCallback.Must(cbctx)
 	innerCbCtx := cbctxKeyCbCtx.Must(cbctx)
@@ -190,7 +190,7 @@ func (c *Context) AsyncRPCWithDeadline(to ActorUID, params any, cb ContextRPCFun
 	c.suspend()
 	cbctx = c.cbctxAsyncRPC(cb, cbctx)
 	if err := c.actor.AsyncRPCWithDeadline(to, params, c.asyncRPCCallback, cbctx, deadline); err != nil {
-		CbCtxRelease(cbctx.(*CbCtx))
+		CbCtxRelease(cbctx.(*kv.M))
 		c.resume()
 		return err
 	}
@@ -210,7 +210,7 @@ func (c *Context) AsyncRPC(to ActorUID, params any, cb ContextRPCFunc, cbctx any
 	c.suspend()
 	cbctx = c.cbctxAsyncRPC(cb, cbctx)
 	if err := c.actor.AsyncRPC(to, params, c.asyncRPCCallback, cbctx); err != nil {
-		CbCtxRelease(cbctx.(*CbCtx))
+		CbCtxRelease(cbctx.(*kv.M))
 		c.resume()
 		return err
 	}
@@ -222,7 +222,7 @@ func (c *Context) AsyncRPCWithContext(ctx context.Context, to ActorUID, params a
 	c.suspend()
 	cbctx = c.cbctxAsyncRPC(cb, cbctx)
 	if err := c.actor.AsyncRPCWithContext(ctx, to, params, c.asyncRPCCallback, cbctx); err != nil {
-		CbCtxRelease(cbctx.(*CbCtx))
+		CbCtxRelease(cbctx.(*kv.M))
 		c.resume()
 		return err
 	}

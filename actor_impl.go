@@ -11,6 +11,7 @@ import (
 
 	"github.com/godyy/glog"
 	"github.com/godyy/gmpsc"
+	"github.com/godyy/gutils/container/kv"
 )
 
 // actorImpl Actor 内部实现接口封装.
@@ -901,13 +902,13 @@ func (a *actorCore) RPCWithContext(ctx context.Context, to ActorUID, params, rep
 }
 
 // cbctxAsyncRPC 构造异步 RPC 回调上下文.
-func (a *actorCore) cbctxAsyncRPC(cb ActorRPCFunc, cbctx any) *CbCtx {
+func (a *actorCore) cbctxAsyncRPC(cb ActorRPCFunc, cbctx any) *kv.M {
 	return NewCbCtx(cbctxKeyUID, a.ActorUID(), cbctxKeySvc, a.svc, cbctxKeyCallback, cb, cbctxKeyCbCtx, cbctx)
 }
 
 // actorAsyncRPCCallback Actor 异步 RPC 回调.
 func actorAsyncRPCCallback(resp RPCResp) {
-	cbctx := resp.ctx.(*CbCtx)
+	cbctx := resp.ctx.(*kv.M)
 	defer CbCtxRelease(cbctx)
 	svc := cbctxKeySvc.Must(cbctx)
 	uid := cbctxKeyUID.Must(cbctx)
@@ -944,7 +945,7 @@ func (a *actorCore) AsyncRPCWithDeadline(to ActorUID, params any, cb ActorRPCFun
 
 	cbctx = a.cbctxAsyncRPC(cb, cbctx)
 	if err := a.svc.asyncRPCWithDeadline(a.ActorUID(), to, params, actorAsyncRPCCallback, cbctx, deadline); err != nil {
-		CbCtxRelease(cbctx.(*CbCtx))
+		CbCtxRelease(cbctx.(*kv.M))
 		_ = a.deref()
 		return err
 	}
@@ -975,7 +976,7 @@ func (a *actorCore) AsyncRPCWithContext(ctx context.Context, to ActorUID, params
 
 	cbctx = a.cbctxAsyncRPC(cb, cbctx)
 	if err := a.svc.asyncRPCWithContext(ctx, a.ActorUID(), to, params, actorAsyncRPCCallback, cbctx); err != nil {
-		CbCtxRelease(cbctx.(*CbCtx))
+		CbCtxRelease(cbctx.(*kv.M))
 		_ = a.deref()
 		return err
 	}

@@ -2,6 +2,8 @@ package gactor
 
 import (
 	"time"
+
+	"github.com/godyy/gutils/container/kv"
 )
 
 // startTimerManager 启动定时器管理器.
@@ -45,7 +47,7 @@ func (s *Service) StopTimer(tid TimerId) {
 }
 
 // cbctxActorTimer 构造 Actor 定时器回调上下文.
-func (s *Service) cbctxActorTimer(uid ActorUID, cb ActorTimerFunc, cbctx any) *CbCtx {
+func (s *Service) cbctxActorTimer(uid ActorUID, cb ActorTimerFunc, cbctx any) *kv.M {
 	return NewCbCtx(cbctxKeyUID, uid, cbctxKeyCallback, cb, cbctxKeyCbCtx, cbctx)
 }
 
@@ -60,7 +62,7 @@ func (s *Service) startActorTimer(uid ActorUID, d time.Duration, periodic bool, 
 
 // execActorTimer 执行 Actor 定时器.
 func (s *Service) execActorTimer(args TimerArgs) {
-	cbctx := args.Ctx.(*CbCtx)
+	cbctx := args.Ctx.(*kv.M)
 	if !args.Periodic {
 		defer CbCtxRelease(cbctx)
 	}

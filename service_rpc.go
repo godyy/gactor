@@ -3,6 +3,8 @@ package gactor
 import (
 	"context"
 	"time"
+
+	"github.com/godyy/gutils/container/kv"
 )
 
 // RPCConfig RPC配置.
@@ -117,13 +119,13 @@ func (s *Service) doRPC(from ActorUID, to ActorUID, params any, cb RPCFunc, cbct
 }
 
 // cbctxRPC 构造同步RPC回调上下文
-func (s *Service) cbctxRPC(done chan struct{}) *CbCtx {
+func (s *Service) cbctxRPC(done chan struct{}) *kv.M {
 	return NewCbCtx(cbctxKeyDone, done)
 }
 
 // rpcCallback 同步RPC统一回调.
 func (s *Service) rpcCallback(resp RPCResp) {
-	cbctx := resp.ctx.(*CbCtx)
+	cbctx := resp.ctx.(*kv.M)
 	done := cbctxKeyDone.Must(cbctx)
 	defer close(done)
 	cbctx.SetPairs(
@@ -134,7 +136,7 @@ func (s *Service) rpcCallback(resp RPCResp) {
 
 // decodeRPCReply 解码 RPC 回复.
 // 若解码失败, 则返回错误.
-func (s *Service) decodeRPCReply(cbctx *CbCtx, reply any) error {
+func (s *Service) decodeRPCReply(cbctx *kv.M, reply any) error {
 	err := cbctxKeyErr.Must(cbctx)
 	if err != nil {
 		return err

@@ -16,9 +16,6 @@ var (
 	cbctxKeySvc      = kv.NewK[*Service]("svc")       // Service.
 )
 
-// CbCtx 回调上下文.
-type CbCtx = kv.M
-
 // poolOfCbCtx 回调上下文池.
 var poolOfCbCtx = &sync.Pool{
 	New: func() any {
@@ -29,14 +26,14 @@ var poolOfCbCtx = &sync.Pool{
 // NewCbCtx 创建新的回调上下文.
 // pairs 为键值对, 用于初始化上下文.
 // 若 pairs 为 nil, 则不初始化上下文.
-func NewCbCtx(pairs ...any) *CbCtx {
-	cc := poolOfCbCtx.Get().(*CbCtx)
+func NewCbCtx(pairs ...any) *kv.M {
+	cc := poolOfCbCtx.Get().(*kv.M)
 	cc.SetPairs(pairs...)
 	return cc
 }
 
 // CbCtxRelease 释放回调上下文.
-func CbCtxRelease(cc *CbCtx) {
-	cc.Clear()
-	poolOfCbCtx.Put(cc)
+func CbCtxRelease(km *kv.M) {
+	km.Clear()
+	poolOfCbCtx.Put(km)
 }
