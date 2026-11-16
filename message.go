@@ -150,13 +150,15 @@ type messageCompletedAsyncRPC struct {
 	payload *Buffer      // 响应负载数据.
 	err     error        // 错误信息.
 	cb      ActorRPCFunc // 回调函数.
+	cbctx   any          // 回调上下文.
 }
 
-func newMessageCompletedAsyncRPC(payload *Buffer, err error, cb ActorRPCFunc) *messageCompletedAsyncRPC {
+func newMessageCompletedAsyncRPC(payload *Buffer, err error, cb ActorRPCFunc, cbctx any) *messageCompletedAsyncRPC {
 	return &messageCompletedAsyncRPC{
 		payload: payload,
 		err:     err,
 		cb:      cb,
+		cbctx:   cbctx,
 	}
 }
 
@@ -164,6 +166,7 @@ func newMessageCompletedAsyncRPC(payload *Buffer, err error, cb ActorRPCFunc) *m
 func (m *messageCompletedAsyncRPC) handle(a actorImpl) {
 	resp := RPCResp{
 		svc:     a.core().service(),
+		ctx:     m.cbctx,
 		payload: m.payload,
 		err:     m.err,
 	}
@@ -211,7 +214,7 @@ func (m *messageTriggeredTimer) handle(a actorImpl) {
 	m.cb(ActorTimerArgs{
 		Actor: a,
 		TID:   m.tid,
-		Ctx:  m.cbctx,
+		Ctx:   m.cbctx,
 	})
 }
 

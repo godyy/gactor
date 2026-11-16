@@ -755,7 +755,7 @@ func (a *actorCore) receiveCompletedAsyncRPC(resp RPCResp, cb ActorRPCFunc) erro
 		return err
 	}
 
-	msg := newMessageCompletedAsyncRPC(resp.payload, resp.err, cb)
+	msg := newMessageCompletedAsyncRPC(resp.payload, resp.err, cb, resp.ctx)
 	begin := time.Now()
 	a.priMessageBox <- msg
 	if d := time.Since(begin); d > a.svc.getCfg().QueueWriteTimeAlarmThreshold {
