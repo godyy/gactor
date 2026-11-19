@@ -36,6 +36,9 @@ type request interface {
 	// requestType 请求类型.
 	requestType() RequestType
 
+	// createTime 请求的创建时间.
+	createTime() time.Time
+
 	// fromActorUID 请求来源Actor ID.
 	fromActorUID() ActorUID
 
@@ -76,9 +79,14 @@ type request interface {
 }
 
 type requestCom struct {
-	fromNodeId string  // 请求发起节点ID
-	replied    bool    // 是否已回复
-	payload    *Buffer // 负载数据
+	createAt   time.Time // 请求的创建时间
+	fromNodeId string    // 请求发起节点ID
+	replied    bool      // 是否已回复
+	payload    *Buffer   // 负载数据
+}
+
+func (req *requestCom) createTime() time.Time {
+	return req.createAt
 }
 
 func (req *requestCom) deadline() (time.Time, bool) {
@@ -119,22 +127,23 @@ func (req *requestCom) beforeHandle(ctx *Context) error {
 // rawRequest 对应 PacketTypeRawReq.
 type rawRequest struct {
 	requestCom
-	seq        uint32 // 包序
-	sid        uint32 // 会话ID
-	deadlineMs int64  // 超时时刻, 毫秒级
+	seq     uint32        // 包序
+	sid     uint32        // 会话ID
+	timeout time.Duration // 超时时间
 }
 
 var poolOfRawRequest = &sync.Pool{New: func() any {
 	return &rawRequest{}
 }}
 
-func newRawRequest(fromNodeId string, seq, sid uint32, payload *Buffer, deadlineMs int64) *rawRequest {
+func newRawRequest(fromNodeId string, seq, sid uint32, payload *Buffer, now time.Time, timeout time.Duration) *rawRequest {
 	req := poolOfRawRequest.Get().(*rawRequest)
+	req.createAt = now
 	req.fromNodeId = fromNodeId
 	req.payload = payload
 	req.seq = seq
 	req.sid = sid
-	req.deadlineMs = deadlineMs
+	req.timeout = timeout
 	return req
 }
 
@@ -147,11 +156,11 @@ func (req *rawRequest) fromActorUID() ActorUID {
 }
 
 func (req *rawRequest) deadline() (time.Time, bool) {
-	return time.UnixMilli(req.deadlineMs), true
+	return req.createAt.Add(req.timeout), true
 }
 
 func (req *rawRequest) isTimeout(now time.Time) bool {
-	return now.UnixMilli() >= req.deadlineMs
+	return !now.Before(req.createAt.Add(req.timeout))
 }
 
 func (req *rawRequest) decode(ctx *Context, v any) error {
@@ -190,7 +199,7 @@ func (req *rawRequest) clone(ctx *Context) request {
 	cp.requestCom = req.requestCom.clone(ctx)
 	cp.seq = req.seq
 	cp.sid = req.sid
-	cp.deadlineMs = req.deadlineMs
+	cp.timeout = req.timeout
 	return cp
 }
 
@@ -227,14 +236,14 @@ func (req *rawRequest) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 	enc.AddString("fromNode", req.fromNodeId)
 	enc.AddUint32("seq", req.seq)
 	enc.AddUint32("sid", req.sid)
-	enc.AddInt64("deadlineMs", req.deadlineMs)
+	enc.AddInt64("deadlineMs", req.createAt.Add(req.timeout).UnixMilli())
 	return nil
 }
 
 // buildMigrationForwardRawPacket 构造 RawReq 的迁移转发包。
 // 这里会把剩余超时时间重新编码进内层请求头，避免目标节点拿到已过期的请求。
 func (req *rawRequest) buildMigrationForwardRawPacket(s *Service, uid ActorUID, sourceLeaseID string) (PacketHead, []byte, error) {
-	remaining := time.Until(time.UnixMilli(req.deadlineMs)) + time.Duration(s.getCfg().MaxRTT)*time.Millisecond
+	remaining := time.Until(req.createAt.Add(req.timeout)) + time.Duration(s.getCfg().MaxRTT)*time.Millisecond
 	if remaining <= 0 {
 		return nil, nil, ErrTimeout
 	}
@@ -251,24 +260,25 @@ func (req *rawRequest) buildMigrationForwardRawPacket(s *Service, uid ActorUID, 
 // rpcRequest 对应 PacketTypeS2SRpc.
 type rpcRequest struct {
 	requestCom
-	seq        uint32   // 包序
-	reqId      uint32   // 请求ID
-	fromId     ActorUID // 来源 Actor ID.
-	deadlineMs int64    // 超时时刻, 毫秒级.
+	seq     uint32        // 包序
+	reqId   uint32        // 请求ID
+	fromId  ActorUID      // 来源 Actor ID.
+	timeout time.Duration // 超时时间
 }
 
 var poolOfRpcRequest = &sync.Pool{New: func() any {
 	return &rpcRequest{}
 }}
 
-func newRPCRequest(remoteNodeId string, seq, reqId uint32, fromId ActorUID, payload *Buffer, deadlineMs int64) *rpcRequest {
+func newRPCRequest(remoteNodeId string, seq, reqId uint32, fromId ActorUID, payload *Buffer, now time.Time, timeout time.Duration) *rpcRequest {
 	req := poolOfRpcRequest.Get().(*rpcRequest)
+	req.createAt = now
 	req.fromNodeId = remoteNodeId
 	req.payload = payload
 	req.seq = seq
 	req.reqId = reqId
 	req.fromId = fromId
-	req.deadlineMs = deadlineMs
+	req.timeout = timeout
 	return req
 }
 
@@ -281,11 +291,11 @@ func (req *rpcRequest) fromActorUID() ActorUID {
 }
 
 func (req *rpcRequest) deadline() (time.Time, bool) {
-	return time.UnixMilli(req.deadlineMs), true
+	return req.createAt.Add(req.timeout), true
 }
 
 func (req *rpcRequest) isTimeout(now time.Time) bool {
-	return now.UnixMilli() >= req.deadlineMs
+	return !now.Before(req.createAt.Add(req.timeout))
 }
 
 func (req *rpcRequest) decode(ctx *Context, v any) error {
@@ -325,7 +335,7 @@ func (req *rpcRequest) clone(ctx *Context) request {
 	cp.seq = req.seq
 	cp.reqId = req.reqId
 	cp.fromId = req.fromId
-	cp.deadlineMs = req.deadlineMs
+	cp.timeout = req.timeout
 	return cp
 }
 
@@ -340,14 +350,14 @@ func (req *rpcRequest) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 	enc.AddUint32("seq", req.seq)
 	enc.AddUint32("reqId", req.reqId)
 	enc.AddObject("fromId", &req.fromId)
-	enc.AddInt64("deadlineMs", req.deadlineMs)
+	enc.AddInt64("deadlineMs", req.createAt.Add(req.timeout).UnixMilli())
 	return nil
 }
 
 // buildMigrationForwardRawPacket 构造 RPC 请求的迁移转发包。
 // 迁移时需要保留原始来源 Actor 和剩余超时，确保回复链路与超时语义不变。
 func (req *rpcRequest) buildMigrationForwardRawPacket(s *Service, uid ActorUID, sourceLeaseID string) (PacketHead, []byte, error) {
-	remaining := time.Until(time.UnixMilli(req.deadlineMs)) + time.Duration(s.getCfg().MaxRTT)*time.Millisecond
+	remaining := time.Until(req.createAt.Add(req.timeout)) + time.Duration(s.getCfg().MaxRTT)*time.Millisecond
 	if remaining <= 0 {
 		return nil, nil, ErrTimeout
 	}
@@ -372,8 +382,9 @@ var poolOfCastRequest = &sync.Pool{New: func() any {
 	return &castRequest{}
 }}
 
-func newCastRequest(fromNodeId string, seq uint32, fromId ActorUID, payload *Buffer) *castRequest {
+func newCastRequest(fromNodeId string, seq uint32, fromId ActorUID, payload *Buffer, now time.Time) *castRequest {
 	req := poolOfCastRequest.Get().(*castRequest)
+	req.createAt = now
 	req.fromNodeId = fromNodeId
 	req.payload = payload
 	req.seq = seq

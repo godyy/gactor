@@ -54,6 +54,12 @@ func (c *Context) RequestType() RequestType {
 	return c.req.requestType()
 }
 
+// RequestTime 返回请求的创建时间.
+// * 对于跨节点请求, 该时间为本节点收到并物化请求的时间, 而非发送方的发起时刻.
+func (c *Context) RequestTime() time.Time {
+	return c.req.createTime()
+}
+
 // FromActorUID 返回请求来源 Actor ID.
 func (c *Context) FromActorUID() ActorUID {
 	return c.req.fromActorUID()

@@ -13,8 +13,8 @@ import (
 type contextRequestTestRequest struct {
 	rt               RequestType
 	from             ActorUID
-	deadlineValue    time.Time
-	hasDeadline      bool
+	createAt         time.Time
+	timeout          time.Duration
 	replyCount       int
 	replyDecodeCount int
 	cloneSource      *contextRequestTestRequest
@@ -22,6 +22,10 @@ type contextRequestTestRequest struct {
 
 func (r *contextRequestTestRequest) requestType() RequestType {
 	return r.rt
+}
+
+func (r *contextRequestTestRequest) createTime() time.Time {
+	return r.createAt
 }
 
 func (r *contextRequestTestRequest) fromActorUID() ActorUID {
@@ -33,11 +37,14 @@ func (r *contextRequestTestRequest) buildMigrationForwardRawPacket(s *Service, u
 }
 
 func (r *contextRequestTestRequest) deadline() (time.Time, bool) {
-	return r.deadlineValue, r.hasDeadline
+	if r.timeout <= 0 {
+		return time.Time{}, false
+	}
+	return r.createAt.Add(r.timeout), true
 }
 
 func (r *contextRequestTestRequest) isTimeout(now time.Time) bool {
-	return false
+	return !now.Before(r.createAt.Add(r.timeout))
 }
 
 func (r *contextRequestTestRequest) decode(ctx *Context, v any) error {
@@ -198,11 +205,12 @@ func newContextRequestTestCActor(t *testing.T) (*Service, *cactor) {
 }
 
 func TestContextRPCUsesRequestDeadline(t *testing.T) {
-	deadline := time.Now().Add(time.Minute)
+	createAt := time.Now()
+	deadline := createAt.Add(time.Minute)
 	req := &contextRequestTestRequest{
-		rt:            RequestTypeRPC,
-		hasDeadline:   true,
-		deadlineValue: deadline,
+		rt:       RequestTypeRPC,
+		createAt: createAt,
+		timeout:  time.Minute,
 	}
 	actor := &contextRequestTestActor{uid: ActorUID{Category: 1, ID: 1}}
 	ctx := &Context{
@@ -226,8 +234,9 @@ func TestContextRPCUsesRequestDeadline(t *testing.T) {
 
 func TestContextRPCWithoutDeadlineFallsBackToRPC(t *testing.T) {
 	req := &contextRequestTestRequest{
-		rt:          RequestTypeRPC,
-		hasDeadline: false,
+		rt:       RequestTypeRPC,
+		createAt: time.Now(),
+		timeout:  0,
 	}
 	actor := &contextRequestTestActor{uid: ActorUID{Category: 1, ID: 1}}
 	ctx := &Context{
@@ -247,11 +256,12 @@ func TestContextRPCWithoutDeadlineFallsBackToRPC(t *testing.T) {
 }
 
 func TestContextAsyncRPCUsesRequestDeadline(t *testing.T) {
-	deadline := time.Now().Add(time.Minute)
+	createAt := time.Now()
+	deadline := createAt.Add(time.Minute)
 	req := &contextRequestTestRequest{
-		rt:            RequestTypeRPC,
-		hasDeadline:   true,
-		deadlineValue: deadline,
+		rt:       RequestTypeRPC,
+		createAt: createAt,
+		timeout:  time.Minute,
 	}
 	actor := &contextRequestTestActor{uid: ActorUID{Category: 1, ID: 1}}
 	ctx := &Context{
@@ -278,10 +288,10 @@ func TestContextAsyncRPCUsesRequestDeadline(t *testing.T) {
 
 func TestContextCloneCopiesKVAndRequest(t *testing.T) {
 	req := &contextRequestTestRequest{
-		rt:            RequestTypeRPC,
-		from:          ActorUID{Category: 1, ID: 9},
-		hasDeadline:   true,
-		deadlineValue: time.Now().Add(time.Minute),
+		rt:       RequestTypeRPC,
+		from:     ActorUID{Category: 1, ID: 9},
+		createAt: time.Now(),
+		timeout:  time.Minute,
 	}
 	actor := &contextRequestTestActor{uid: ActorUID{Category: 1, ID: 1}}
 	ctx := &Context{
@@ -445,7 +455,7 @@ func TestRawRequestBeforeHandleGuardsSession(t *testing.T) {
 	svc, cActor := newContextRequestTestCActor(t)
 
 	t.Run("not cactor", func(t *testing.T) {
-		req := newRawRequest("node-a", 1, 10, &Buffer{}, time.Now().Add(time.Second).UnixMilli())
+		req := newRawRequest("node-a", 1, 10, &Buffer{}, time.Now(), time.Second)
 		ctx := &Context{
 			svc: svc,
 			req: req,
@@ -461,7 +471,7 @@ func TestRawRequestBeforeHandleGuardsSession(t *testing.T) {
 	})
 
 	t.Run("not connected", func(t *testing.T) {
-		req := newRawRequest("node-a", 1, 10, &Buffer{}, time.Now().Add(time.Second).UnixMilli())
+		req := newRawRequest("node-a", 1, 10, &Buffer{}, time.Now(), time.Second)
 		ctx := &Context{
 			svc:   svc,
 			req:   req,
@@ -475,7 +485,7 @@ func TestRawRequestBeforeHandleGuardsSession(t *testing.T) {
 	})
 
 	t.Run("connected by another", func(t *testing.T) {
-		req := newRawRequest("node-a", 1, 10, &Buffer{}, time.Now().Add(time.Second).UnixMilli())
+		req := newRawRequest("node-a", 1, 10, &Buffer{}, time.Now(), time.Second)
 		cActor.session = ActorSession{NodeId: "node-b", SID: 11}
 		ctx := &Context{
 			svc:   svc,
@@ -490,7 +500,7 @@ func TestRawRequestBeforeHandleGuardsSession(t *testing.T) {
 	})
 
 	t.Run("matched session", func(t *testing.T) {
-		req := newRawRequest("node-a", 1, 10, &Buffer{}, time.Now().Add(time.Second).UnixMilli())
+		req := newRawRequest("node-a", 1, 10, &Buffer{}, time.Now(), time.Second)
 		cActor.session = ActorSession{NodeId: "node-a", SID: 10}
 		ctx := &Context{
 			svc:   svc,

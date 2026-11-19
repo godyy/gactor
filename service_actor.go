@@ -556,7 +556,7 @@ func (s *Service) cast(from, to ActorUID, payload any) error {
 
 	// 创建 castRequest 并发送给 Actor.
 	// actor 成功接收 cast 请求，就一定会处理.
-	request := newContext(s, newCastRequest(s.nodeId(), seq, from, payloadBuf))
+	request := newContext(s, newCastRequest(s.nodeId(), seq, from, payloadBuf, time.Now()))
 	if err := s.send2LocalActor(to, request, leaseId); err != nil {
 		request.discard(s)
 		s.monitorCastActionSend2LocalErr(err)

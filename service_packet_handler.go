@@ -144,7 +144,7 @@ func svcHandlePacketRawReq(s *Service, params packetHandlerParams) error {
 
 	// 创建并发送请求.
 	buf := params.buf.CloneAndClear()
-	request := newContext(s, newRawRequest(params.nodeId, head.getSeq(), head.sid, buf, time.Now().Add(timeout).UnixMilli()))
+	request := newContext(s, newRawRequest(params.nodeId, head.getSeq(), head.sid, buf, time.Now(), timeout))
 	if err := s.send2LocalActor(uid, request, ""); err != nil {
 		request.discard(s)
 		s.getLogger().ErrorFields("[HandlePacketRawReq] send request to actor failed",
@@ -198,7 +198,7 @@ func svcHandlePacketS2SRpc(s *Service, params packetHandlerParams) error {
 
 	// 创建并发送请求.
 	buf := params.buf.CloneAndClear()
-	request := newContext(s, newRPCRequest(params.nodeId, head.getSeq(), head.reqId, head.fromId, buf, time.Now().Add(timeout).UnixMilli()))
+	request := newContext(s, newRPCRequest(params.nodeId, head.getSeq(), head.reqId, head.fromId, buf, time.Now(), timeout))
 	if err := s.send2LocalActor(head.toId, request, ""); err != nil {
 		request.discard(s)
 		s.getLogger().ErrorFields("[HandlePacketS2SRpc] send request to actor failed",
@@ -267,7 +267,7 @@ func svcHandlePacketS2SCast(s *Service, params packetHandlerParams) error {
 
 	// 创建并发送请求.
 	buf := params.buf.CloneAndClear()
-	request := newContext(s, newCastRequest(params.nodeId, head.getSeq(), head.fromId, buf))
+	request := newContext(s, newCastRequest(params.nodeId, head.getSeq(), head.fromId, buf, time.Now()))
 	if err := s.send2LocalActor(head.toId, request, ""); err != nil {
 		request.discard(s)
 		s.getLogger().ErrorFields("[HandlePacketS2SCast] send request to actor failed",
@@ -418,7 +418,7 @@ func (s *Service) buildMigrateForwardMessage(head *s2sMigrateForwardPacketHead, 
 		if timeout <= 0 {
 			return nil, nil
 		}
-		req := newContext(s, newRawRequest(head.originNodeID, innerHead.seq, innerHead.sid, b.CloneAndClear(), time.Now().Add(timeout).UnixMilli()))
+		req := newContext(s, newRawRequest(head.originNodeID, innerHead.seq, innerHead.sid, b.CloneAndClear(), time.Now(), timeout))
 		return req, nil
 	case PacketTypeS2SRpc:
 		var innerHead s2sRpcPacketHead
@@ -429,14 +429,14 @@ func (s *Service) buildMigrateForwardMessage(head *s2sMigrateForwardPacketHead, 
 		if timeout <= 0 {
 			return nil, nil
 		}
-		req := newContext(s, newRPCRequest(head.originNodeID, innerHead.seq, innerHead.reqId, innerHead.fromId, b.CloneAndClear(), time.Now().Add(timeout).UnixMilli()))
+		req := newContext(s, newRPCRequest(head.originNodeID, innerHead.seq, innerHead.reqId, innerHead.fromId, b.CloneAndClear(), time.Now(), timeout))
 		return req, nil
 	case PacketTypeS2SCast:
 		var innerHead s2sCastPacketHead
 		if err := innerHead.decode(b); err != nil {
 			return nil, err
 		}
-		req := newContext(s, newCastRequest(head.originNodeID, innerHead.seq, innerHead.fromId, b.CloneAndClear()))
+		req := newContext(s, newCastRequest(head.originNodeID, innerHead.seq, innerHead.fromId, b.CloneAndClear(), time.Now()))
 		return req, nil
 	case PacketTypeConnect:
 		var innerHead connectPacketHead

@@ -199,6 +199,7 @@ handler := gactor.NewHandlersChain(middleware, businessHandler).Handle
 | 方法 | 说明 |
 | --- | --- |
 | `Actor()` / `RequestType()` / `FromActorUID()` | 读取当前请求信息 |
+| `RequestTime()` | 请求的创建时间；跨节点请求为本节点收到并物化请求的时间，可用于统计处理延迟 |
 | `Set()` / `Get()` | 经内嵌 `kv.M` 在链路中传递元数据 |
 | `Decode(v)` | 解码请求负载；**同一 Context 中不可重复调用** |
 | `Reply(v)` / `ReplyDecodeError()` | 回复请求 |

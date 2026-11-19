@@ -79,14 +79,16 @@ func (s *Service) doRPC(from ActorUID, to ActorUID, params any, cb RPCFunc, cbct
 	// 生成数据包序号.
 	seq := s.genSeq()
 
+	// 计算剩余时间.
+	now := time.Now()
+	remaining := deadline.Sub(now)
+	if remaining <= 0 {
+		err = ErrTimeout
+		return
+	}
+
 	if toNodeId != s.nodeId() {
 		if err = s.checkNotStopped(); err != nil {
-			return
-		}
-
-		remaining := time.Until(deadline)
-		if remaining <= 0 {
-			err = ErrTimeout
 			return
 		}
 
@@ -107,7 +109,7 @@ func (s *Service) doRPC(from ActorUID, to ActorUID, params any, cb RPCFunc, cbct
 		} else {
 			// 根据是否异步，创建请求上下文.
 			// 并发送给目标actor.
-			req := newContext(s, newRPCRequest(toNodeId, seq, reqId, from, payloadBuf, deadline.UnixMilli()))
+			req := newContext(s, newRPCRequest(toNodeId, seq, reqId, from, payloadBuf, now, remaining))
 			if err = s.send2LocalActor(to, req, leaseId); err != nil {
 				req.discard(s)
 				s.monitorRPCActionSend2LocalErr(err)
