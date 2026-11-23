@@ -20,7 +20,7 @@ type actorRPCTestStub struct {
 	behavior ActorBehavior
 }
 
-func (a *actorRPCTestStub) AsyncCall(f ActorFunc, timeout time.Duration) (ActorAsyncCaller, error) {
+func (a *actorRPCTestStub) AsyncCall(f ActorFunc, cbctx any, timeout time.Duration) (ActorAsyncCaller, error) {
 	return nil, nil
 }
 

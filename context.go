@@ -243,6 +243,7 @@ func (c *Context) Cast(to ActorUID, payload any) error {
 // ContextFuncArgs Context 回调函数参数.
 type ContextFuncArgs struct {
 	Ctx   *Context // Context.
+	CbCtx any      // 回调上下文.
 	Value any      // 返回值.
 	Err   error    // 错误.
 }
@@ -250,19 +251,37 @@ type ContextFuncArgs struct {
 // ContextFunc 基于 Context 的回调函数.
 type ContextFunc func(ContextFuncArgs)
 
-// AsyncCall 基于 Context 的异步调用.
-func (c *Context) AsyncCall(f ContextFunc, timeout time.Duration) (ActorAsyncCaller, error) {
-	c.suspend()
-	af := func(args ActorFuncArgs) {
-		// 调用回调.
-		c.actor = args.Actor.(actorImpl)
-		f(ContextFuncArgs{Ctx: c, Value: args.Value, Err: args.Err})
+// cbctxAsyncCall 构造异步调用回调上下文.
+func (c *Context) cbctxAsyncCall(cb ContextFunc, cbctx any) *kv.M {
+	return NewCbCtx(cbctxKeyCallback, cb, cbctxKeyCbCtx, cbctx)
+}
 
-		// 恢复并继续执行.
-		c.resumeAndNext()
-	}
-	caller, err := c.actor.AsyncCall(af, timeout)
+// asyncCallCallback 异步调用回调.
+func (c *Context) asyncCallCallback(args ActorFuncArgs) {
+	// 保险起见, 更新下 Actor.
+	c.actor = args.Actor.(actorImpl)
+
+	// 取上下文.
+	cbctx := args.CbCtx.(*kv.M)
+	defer CbCtxRelease(cbctx)
+	cb := cbctxKeyCallback.Must(cbctx)
+	innerCbCtx := cbctxKeyCbCtx.Must(cbctx)
+
+	// 优先执行回调.
+	cb.(ContextFunc)(ContextFuncArgs{Ctx: c, CbCtx: innerCbCtx, Value: args.Value, Err: args.Err})
+
+	// 恢复并继续执行.
+	c.resumeAndNext()
+}
+
+// AsyncCall 基于 Context 的异步调用.
+// cbctx 为回调上下文, 会随回调参数原样返回.
+func (c *Context) AsyncCall(f ContextFunc, cbctx any, timeout time.Duration) (ActorAsyncCaller, error) {
+	c.suspend()
+	cbctx = c.cbctxAsyncCall(f, cbctx)
+	caller, err := c.actor.AsyncCall(c.asyncCallCallback, cbctx, timeout)
 	if err != nil {
+		CbCtxRelease(cbctx.(*kv.M))
 		c.resume()
 		return nil, err
 	}

@@ -405,6 +405,7 @@ const (
 // actorAsyncCall Actor 异步调用.
 type actorAsyncCall struct {
 	f          ActorFunc // 异步调用方法.
+	cbctx      any       // 回调上下文.
 	timeoutTid TimerId   // 超时定时器ID.
 }
 
@@ -874,7 +875,7 @@ func (a *actorCore) invokeAsyncCall(ai actorImpl, id uint32, value any, err erro
 	if !errors.Is(err, ErrTimeout) {
 		a.StopTimer(asyncCall.timeoutTid)
 	}
-	asyncCall.f(ActorFuncArgs{Actor: ai, Value: value, Err: err})
+	asyncCall.f(ActorFuncArgs{Actor: ai, CbCtx: asyncCall.cbctx, Value: value, Err: err})
 }
 
 // RPCWithDeadline 发起同步 RPC 调用.
@@ -1034,7 +1035,7 @@ func (a *actorCore) nextAsyncCallId() uint32 {
 }
 
 // asyncCall 发起异步调用.
-func (a *actorCore) asyncCall(ai actorImpl, f ActorFunc, timeout time.Duration) (ActorAsyncCaller, error) {
+func (a *actorCore) asyncCall(ai actorImpl, f ActorFunc, cbctx any, timeout time.Duration) (ActorAsyncCaller, error) {
 	if err := a.checkNotStopped(); err != nil {
 		return nil, err
 	}
@@ -1053,6 +1054,7 @@ func (a *actorCore) asyncCall(ai actorImpl, f ActorFunc, timeout time.Duration) 
 	}
 	a.asyncCalls[callId] = actorAsyncCall{
 		f:          f,
+		cbctx:      cbctx,
 		timeoutTid: timeoutTid,
 	}
 	return newActorFuncCaller(a.svc, a.ActorUID(), callId).invoke, nil
@@ -1087,8 +1089,8 @@ func (a *actor) Behavior() ActorBehavior {
 	return a.behavior
 }
 
-func (a *actor) AsyncCall(f ActorFunc, timeout time.Duration) (ActorAsyncCaller, error) {
-	return a.actorCore.asyncCall(a, f, timeout)
+func (a *actor) AsyncCall(f ActorFunc, cbctx any, timeout time.Duration) (ActorAsyncCaller, error) {
+	return a.actorCore.asyncCall(a, f, cbctx, timeout)
 }
 
 func (a *actor) onAsyncCallTimeout(args ActorTimerArgs) {
@@ -1129,8 +1131,8 @@ func (a *cactor) Behavior() ActorBehavior {
 	return a.behavior
 }
 
-func (a *cactor) AsyncCall(f ActorFunc, timeout time.Duration) (ActorAsyncCaller, error) {
-	return a.actorCore.asyncCall(a, f, timeout)
+func (a *cactor) AsyncCall(f ActorFunc, cbctx any, timeout time.Duration) (ActorAsyncCaller, error) {
+	return a.actorCore.asyncCall(a, f, cbctx, timeout)
 }
 
 func (a *cactor) onAsyncCallTimeout(args ActorTimerArgs) {

@@ -91,6 +91,7 @@ type contextRequestTestActor struct {
 	asyncDeadlineErr    error
 	asyncCallCalled     bool
 	asyncCallTimeout    time.Duration
+	asyncCallCbCtx      any
 	lastAsyncCall       ActorFunc
 	asyncCallErr        error
 }
@@ -159,15 +160,16 @@ func (a *contextRequestTestActor) Forward(to ActorUID, payload any) error {
 
 func (a *contextRequestTestActor) receiveAsyncCall(id uint32, args any, err error) error { return nil }
 
-func (a *contextRequestTestActor) AsyncCall(f ActorFunc, timeout time.Duration) (ActorAsyncCaller, error) {
+func (a *contextRequestTestActor) AsyncCall(f ActorFunc, cbctx any, timeout time.Duration) (ActorAsyncCaller, error) {
 	a.asyncCallCalled = true
 	a.asyncCallTimeout = timeout
+	a.asyncCallCbCtx = cbctx
 	a.lastAsyncCall = f
 	if a.asyncCallErr != nil {
 		return nil, a.asyncCallErr
 	}
 	return func(value any, err error) error {
-		f(ActorFuncArgs{Actor: a, Value: value, Err: err})
+		f(ActorFuncArgs{Actor: a, CbCtx: cbctx, Value: value, Err: err})
 		return nil
 	}, nil
 }
@@ -379,15 +381,18 @@ func TestContextAsyncCallSuspendsAndResumes(t *testing.T) {
 	}
 
 	wantErr := errors.New("async call done")
+	wantCbCtx := "cb-ctx"
 	var gotActorUID ActorUID
+	var gotCbCtx any
 	var gotArgs any
 	var gotErr error
 
 	caller, err := ctx.AsyncCall(func(args ContextFuncArgs) {
 		gotActorUID = ctx.Actor().ActorUID()
+		gotCbCtx = args.CbCtx
 		gotArgs = args.Value
 		gotErr = args.Err
-	}, time.Second)
+	}, wantCbCtx, time.Second)
 	if err != nil {
 		t.Fatalf("context async call: %v", err)
 	}
@@ -417,6 +422,9 @@ func TestContextAsyncCallSuspendsAndResumes(t *testing.T) {
 	if gotActorUID != actor.uid {
 		t.Fatalf("callback actor uid = %v, want %v", gotActorUID, actor.uid)
 	}
+	if gotCbCtx != wantCbCtx {
+		t.Fatalf("callback cbctx = %v, want %v", gotCbCtx, wantCbCtx)
+	}
 	if gotArgs != "payload" {
 		t.Fatalf("callback args = %v, want payload", gotArgs)
 	}
@@ -439,7 +447,7 @@ func TestContextAsyncCallErrorResetsSuspend(t *testing.T) {
 	}
 	ctx := &Context{req: req, actor: actor}
 
-	_, err := ctx.AsyncCall(func(args ContextFuncArgs) {}, time.Second)
+	_, err := ctx.AsyncCall(func(args ContextFuncArgs) {}, nil, time.Second)
 	if err == nil || err.Error() != "async call failed" {
 		t.Fatalf("context async call err = %v, want async call failed", err)
 	}

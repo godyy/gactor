@@ -108,6 +108,7 @@ type ActorRPCFunc func(a Actor, resp RPCResp)
 // ActorFuncArgs Actor 回调函数参数.
 type ActorFuncArgs struct {
 	Actor Actor // Actor.
+	CbCtx any   // 回调上下文.
 	Value any   // 返回值.
 	Err   error // 错误.
 }
@@ -176,10 +177,11 @@ type Actor interface {
 	Forward(to ActorUID, payload any) error
 
 	// AsyncCall 异步调用.
+	// cbctx 为回调上下文, 会随回调参数原样返回.
 	// timeout 为超时间隔.
 	// 返回 ActorFuncCaller, 用于调用该回调函数.
 	// 如果返回的调用函数在 timeout 内未被调用, 则系统自动使用 ErrTimeout 错误调用回调函数.
-	AsyncCall(f ActorFunc, timeout time.Duration) (ActorAsyncCaller, error)
+	AsyncCall(f ActorFunc, cbctx any, timeout time.Duration) (ActorAsyncCaller, error)
 }
 
 // CActorBehavior CActor 行为.

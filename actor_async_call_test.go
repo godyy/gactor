@@ -97,18 +97,21 @@ func TestActorAsyncCallDeliversCallbackOnce(t *testing.T) {
 	var mu sync.Mutex
 	var callCount int
 	var gotUID ActorUID
+	var gotCbCtx any
 	var gotArgs any
 	var gotErr error
+	wantCbCtx := "cb-ctx"
 
 	caller, err := actor.AsyncCall(func(args ActorFuncArgs) {
 		mu.Lock()
 		callCount++
 		gotUID = args.Actor.ActorUID()
+		gotCbCtx = args.CbCtx
 		gotArgs = args.Value
 		gotErr = args.Err
 		mu.Unlock()
 		callbackCh <- struct{}{}
-	}, time.Second)
+	}, wantCbCtx, time.Second)
 	if err != nil {
 		t.Fatalf("async call: %v", err)
 	}
@@ -132,6 +135,9 @@ func TestActorAsyncCallDeliversCallbackOnce(t *testing.T) {
 	}
 	if gotUID != uid {
 		t.Fatalf("callback actor uid = %v, want %v", gotUID, uid)
+	}
+	if gotCbCtx != wantCbCtx {
+		t.Fatalf("callback cbctx = %v, want %v", gotCbCtx, wantCbCtx)
 	}
 	if gotArgs != "payload" {
 		t.Fatalf("callback args = %v, want payload", gotArgs)
@@ -159,15 +165,18 @@ func TestActorAsyncCallTimeoutOnlyInvokesOnce(t *testing.T) {
 	callbackCh := make(chan struct{}, 2)
 	var mu sync.Mutex
 	var callCount int
+	var gotCbCtx any
 	var gotErr error
+	wantCbCtx := "timeout-cb-ctx"
 
 	caller, err := actor.AsyncCall(func(args ActorFuncArgs) {
 		mu.Lock()
 		callCount++
+		gotCbCtx = args.CbCtx
 		gotErr = args.Err
 		mu.Unlock()
 		callbackCh <- struct{}{}
-	}, 50*time.Millisecond)
+	}, wantCbCtx, 50*time.Millisecond)
 	if err != nil {
 		t.Fatalf("async call: %v", err)
 	}
@@ -182,6 +191,10 @@ func TestActorAsyncCallTimeoutOnlyInvokesOnce(t *testing.T) {
 	if callCount != 1 {
 		mu.Unlock()
 		t.Fatalf("callback count = %d, want 1", callCount)
+	}
+	if gotCbCtx != wantCbCtx {
+		mu.Unlock()
+		t.Fatalf("callback cbctx = %v, want %v", gotCbCtx, wantCbCtx)
 	}
 	if !errors.Is(gotErr, ErrTimeout) {
 		mu.Unlock()

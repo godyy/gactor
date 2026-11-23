@@ -90,7 +90,7 @@ uid.String() // "1-1001"
 | `RPCWithContext` / `AsyncRPCWithContext` | 适配外部 `context.Context` |
 | `Cast(to, payload)` | 单向投递 |
 | `Forward(to, payload)` | 透传当前请求来源 |
-| `AsyncCall(f, timeout)` | 把外部异步结果安全带回 Actor 邮箱，返回 `ActorAsyncCaller` |
+| `AsyncCall(f, cbctx, timeout)` | 把外部异步结果安全带回 Actor 邮箱，返回 `ActorAsyncCaller`；`cbctx` 原样回传给回调 |
 
 `CActor` 在 `Actor` 之上增加会话能力：
 
@@ -206,7 +206,7 @@ handler := gactor.NewHandlersChain(middleware, businessHandler).Handle
 | `Next()` / `Abort()` | 推进 / 终止处理链 |
 | `Clone()` | 复制 Context 供异步场景使用 |
 | `RPC()` / `AsyncRPC()` / `Cast()` | 以当前 Actor 发起通信 |
-| `AsyncCall(f, timeout)` | 异步调用并挂起处理链 |
+| `AsyncCall(f, cbctx, timeout)` | 异步调用并挂起处理链，回调经 `ContextFuncArgs.CbCtx` 取回 `cbctx` |
 
 要点：
 
@@ -242,7 +242,7 @@ _ = client.Disconnect(id, sid)
 ### 3.9 其它设施
 
 - **Ack 可靠投递**：`AckConfig{MaxPacketAmount, Timeout, MaxRetry, TickInterval, QueueWriteTimeAlarmThreshold}`，通过 `WithServiceAckManager` / `WithClientAckManager` 启用；未启用时不做确认。
-- **CbCtx**：`NewCbCtx(pairs...)` / `CbCtxRelease(km)`，随异步 RPC、定时器携带键值，回调中通过 `RPCResp.Ctx()` / `ActorTimerArgs.Ctx` 取回。
+- **CbCtx**：`NewCbCtx(pairs...)` / `CbCtxRelease(km)`，随异步 RPC、定时器、异步调用携带键值，回调中通过 `RPCResp.Ctx()` / `ActorTimerArgs.Ctx` / `ActorFuncArgs.CbCtx` / `ContextFuncArgs.CbCtx` 取回。
 - **Buffer / BytesManager**：`Buffer` 来自缓冲池，使用完必须 `Release()` 归还；`Service` / `Client` 内部通过 `PacketCodec` 或 `BytesManager` 的 `GetBytes`/`PutBytes` 复用底层字节。
 - **错误码**：`ErrCode` 覆盖编解码、服务状态、Actor 状态与迁移状态；`Err2ErrCode(err)` 将 error 归一为错误码。
 
@@ -312,7 +312,7 @@ snapshot := svc.MigrationSnapshot()               // 观测迁移进度
 - **Handler 中优先用 `Context.RPC()` / `Context.AsyncRPC()`**：可继承当前请求 deadline 并支持挂起处理链。不要在业务代码中把 `Context` 当作普通 `context.Context` 传给 `actor.RPC ctx` 形式（旧风格已废弃，见 §6 末）。
 - **`Context.Decode` 不可重入**：异步复用 Payload 前先 `Clone()`。
 - **Buffer 回收**：`ClientResponse.Payload` / `ClientPush.Payload` / `RPCResp` 内部缓冲由框架回收；业务侧从 `PacketCodec` / `BytesManager` 取用的 `Buffer` 必须 `Release()`。
-- **CbCtx 归还**：使用 `NewCbCtx` 后应在回调结束处 `CbCtxRelease`（框架对内部的 `Context.AsyncRPC` 已自动处理）。
+- **CbCtx 归还**：使用 `NewCbCtx` 后应在回调结束处 `CbCtxRelease`（框架对内部的 `Context.AsyncRPC` 已自动处理）；`AsyncCall` 的 `cbctx` 由调用方持有，框架不代管。
 - **迁移幂等**：`OnMigrateOut` / `OnMigrateIn` 必须可重复调用而不产生重复副作用。
 - **构造 error**：需要嵌套上下文错误时使用 `pkgerrors`（`github.com/pkg/errors`）的 `WithMessage` / `WithMessagef` / `Wrap` 系列，而不是直接 `fmt.Errorf`（示例见 `packet.go`、`service.go`）。
 - **注释**：新增/修改代码应补充简洁明了的中文注释，说明意图与关键约束，而非逐行翻译。

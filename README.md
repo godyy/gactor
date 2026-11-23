@@ -564,12 +564,14 @@ actor.StopTimer(tid)
 `Actor.AsyncCall` 可将任意外部异步操作的结果安全地带回 Actor：
 
 ```go
+// cbctx 为回调上下文，会随回调原样返回，常用于携带请求级数据。
 caller, err := actor.AsyncCall(func(args gactor.ActorFuncArgs) {
+	_ = args.CbCtx // 取回 AsyncCall 传入的 cbctx。
 	if args.Err != nil {
 		return
 	}
 	// args.Value 为外部异步操作的结果。
-}, 3*time.Second)
+}, "cb-ctx", 3*time.Second)
 if err != nil {
 	return
 }
@@ -588,11 +590,12 @@ go func() {
 ```go
 func Handler(ctx *gactor.Context) {
 	caller, err := ctx.AsyncCall(func(args gactor.ContextFuncArgs) {
+		_ = args.CbCtx // 取回 AsyncCall 传入的 cbctx。
 		if args.Err != nil {
 			return
 		}
 		_ = args.Value
-	}, 3*time.Second)
+	}, "cb-ctx", 3*time.Second)
 	if err != nil {
 		return
 	}
