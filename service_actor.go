@@ -534,6 +534,7 @@ func (s *Service) cast(from, to ActorUID, payload any) error {
 
 	// 如果 Actor 位于其它节点.
 	// 编码数据并发送到远端.
+	// 远端投递成功后即结束, 本地不再重复投递(否则会在当前节点错误地启动目标 Actor).
 	if toNodeId != s.nodeId() {
 		if err = s.checkNotStopped(); err != nil {
 			return err
@@ -545,9 +546,13 @@ func (s *Service) cast(from, to ActorUID, payload any) error {
 			s.monitorCastActionSend2RemoteErr(err)
 			return err
 		}
+
+		s.monitorCastAction(MonitorCACast)
+		return nil
 	}
 
-	// 编码 payload
+	// 目标节点为本地.
+	// 编码 payload.
 	payloadBuf, err := s.encodePayload(PacketTypeS2SCast, payload)
 	if err != nil {
 		s.monitorCastAction(MonitorCASend2LocalErr)
@@ -561,10 +566,10 @@ func (s *Service) cast(from, to ActorUID, payload any) error {
 		request.discard(s)
 		s.monitorCastActionSend2LocalErr(err)
 		return err
-	} else {
-		s.monitorCastAction(MonitorCACast)
-		return nil
 	}
+
+	s.monitorCastAction(MonitorCACast)
+	return nil
 }
 
 // Cast 向 to 指向的 Actor 投递消息. 若 Service 未启动或停机, 返回错误.
