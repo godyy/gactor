@@ -453,7 +453,7 @@ func newActorCore(ad *actorDefineBase, id ActorID, leaseId string, svc *Service)
 		id:              id,
 		leaseID:         leaseId,
 		svc:             svc,
-		priMessageBox:   make(chan message, 100),
+		priMessageBox:   make(chan message, ad.priMessageBoxSize),
 		messageBox:      gmpsc.NewQueue[message](256, ad.messageBoxSize),
 		messageNotify:   make(chan struct{}, 1),
 		sigStop:         make(chan struct{}),
